@@ -1,0 +1,33 @@
+server:
+  port: 8080
+  host: "127.0.0.1"       # override to "0.0.0.0" for Cloud Run
+  frontend_dir: "./web/dist"
+
+database:
+  driver: "postgres"       # "postgres" | "sqlite"
+  postgres_url: ""         # from env: DATABASE_URL
+  sqlite_path: "./clawvisor.db"
+
+vault:
+  backend: "local"         # "local" | "gcp"
+  local_key_file: "./vault.key"
+  gcp_project: ""          # from env: GCP_PROJECT
+
+auth:
+  jwt_secret: ""           # from env: JWT_SECRET  (REQUIRED)
+  access_token_ttl: "15m"
+  refresh_token_ttl: "720h"
+
+approval:
+  timeout: 300             # seconds before approval request expires
+  on_timeout: "fail"       # "fail" | "skip"
+
+safety:
+  enabled: false           # LLM safety check; enable when LLM endpoint is configured
+  endpoint: ""             # LLM API endpoint
+  model: ""                # model name
+  api_key: ""              # from env: SAFETY_LLM_API_KEY
+  skip_readonly: true      # skip check for read-only actions (list, get)
+
+mcp:
+  approval_timeout: 240    # MCP tool calls block this many seconds waiting for approval

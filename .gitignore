@@ -1,0 +1,26 @@
+# Go
+bin/
+dist/
+*.test
+*.out
+coverage.html
+
+# Config / secrets
+config.yaml
+vault.key
+*.pem
+*.key
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,41 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: clawvisor
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"   # keep warm — approval callbacks need a live process
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cloudsql-instances: "PROJECT_ID:REGION:INSTANCE_NAME"
+    spec:
+      timeoutSeconds: 360     # buffer above approval timeout (300s) and MCP approval timeout (240s)
+      serviceAccountName: clawvisor-sa
+      containers:
+        - image: gcr.io/PROJECT_ID/clawvisor:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          env:
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: DATABASE_DRIVER
+              value: "postgres"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: clawvisor-db-url
+                  key: latest
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: clawvisor-jwt-secret
+                  key: latest
+            - name: GCP_PROJECT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['run.googleapis.com/project-id']

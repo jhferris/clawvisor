@@ -157,7 +157,7 @@ make deploy                           # triggers Cloud Build
 
 Read the full spec for the current phase before writing any code. Each phase doc is in `docs/PHASE-N-*.md`.
 
-- [ ] **Phase 1** — Foundation & Infrastructure ← START HERE
+- [x] **Phase 1** — Foundation & Infrastructure
 - [ ] **Phase 2** — Policy Engine
 - [ ] **Phase 3** — Core Gateway & First Adapter (Gmail)
 - [ ] **Phase 4** — Dashboard (Frontend)
