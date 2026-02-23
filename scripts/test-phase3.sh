@@ -25,7 +25,7 @@ section() { echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
 
 FAILURES=0
 
-# jq_field <json> <filter>  — returns the value or empty string on error
+# jq_field <json> <filter>  — returns the value, or empty string on error
 jqf() { echo "$1" | jq -r "$2" 2>/dev/null || true; }
 
 # ── Dependency check ────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ READY=$(curl -sf "$BASE/ready" || echo '{"status":"error"}')
 section "Auth"
 
 EMAIL="testuser-$$@example.com"
-PASSWORD="Test1234!"
+PASSWORD="TestPass1234!"
 
 # register → {"user":{...}, "access_token":"...", "refresh_token":"..."}
 REG=$(curl -sf -X POST "$BASE/api/auth/register" \
@@ -85,7 +85,6 @@ ME=$(curl -sf "$BASE/api/me" -H "Authorization: Bearer $TOKEN")
   && pass "GET /api/me → correct email" \
   || fail "me: $ME"
 
-# Refresh token
 REFRESHED=$(curl -sf -X POST "$BASE/api/auth/refresh" \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}")
@@ -95,7 +94,6 @@ NEW_TOKEN=$(jqf "$REFRESHED" .access_token)
   || fail "refresh: $REFRESHED"
 TOKEN="$NEW_TOKEN"
 
-# Request with no token should 401
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/me")
 [[ "$STATUS" == "401" ]] \
   && pass "GET /api/me without token → 401" \
@@ -114,7 +112,7 @@ ROLE_ID=$(jqf "$ROLE" .id)
   && pass "POST /api/roles → id=$ROLE_ID" \
   || fail "create role: $ROLE"
 
-# GET /api/roles → bare array
+# GET /api/roles → bare array (not wrapped in an object)
 ROLES=$(curl -sf "$BASE/api/roles" -H "Authorization: Bearer $TOKEN")
 ROLE_COUNT=$(jqf "$ROLES" 'length')
 [[ "$ROLE_COUNT" -ge 1 ]] \
@@ -124,41 +122,55 @@ ROLE_COUNT=$(jqf "$ROLES" 'length')
 # ── Policies ─────────────────────────────────────────────────────────────────
 section "Policies (block)"
 
+# Policies are created via YAML, not JSON rules.
+# role: references the role by NAME, not ID.
+POLICY_YAML="id: block-gmail-send
+name: Block outbound email
+role: automation
+rules:
+  - service: google.gmail
+    actions: [send_message]
+    allow: false
+    reason: Sending email requires human sign-off"
+
 POLICY=$(curl -sf -X POST "$BASE/api/policies" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"name\": \"block-gmail-send\",
-    \"description\": \"Block outbound email\",
-    \"rules\": [{
-      \"id\": \"r1\",
-      \"role_id\": \"$ROLE_ID\",
-      \"service\": \"google.gmail\",
-      \"actions\": [\"send\"],
-      \"decision\": \"block\",
-      \"reason\": \"Sending email requires human sign-off\"
-    }]
-  }")
+  -d "{\"yaml\":$(echo "$POLICY_YAML" | jq -Rs .)}")
 POLICY_ID=$(jqf "$POLICY" .id)
 [[ -n "$POLICY_ID" && "$POLICY_ID" != "null" ]] \
   && pass "POST /api/policies → id=$POLICY_ID" \
   || fail "create policy: $POLICY"
 
-GOT_POLICY=$(curl -sf "$BASE/api/policies/$POLICY_ID" -H "Authorization: Bearer $TOKEN")
-[[ "$(jqf "$GOT_POLICY" .id)" == "$POLICY_ID" ]] \
-  && pass "GET /api/policies/{id}" \
-  || fail "get policy: $GOT_POLICY"
+if [[ -n "$POLICY_ID" && "$POLICY_ID" != "null" ]]; then
+  GOT_POLICY=$(curl -sf "$BASE/api/policies/$POLICY_ID" -H "Authorization: Bearer $TOKEN")
+  [[ "$(jqf "$GOT_POLICY" .id)" == "$POLICY_ID" ]] \
+    && pass "GET /api/policies/{id}" \
+    || fail "get policy: $GOT_POLICY"
+else
+  fail "GET /api/policies/{id} — skipped (no policy_id)"
+fi
 
+# GET /api/policies → bare array
 POLICIES=$(curl -sf "$BASE/api/policies" -H "Authorization: Bearer $TOKEN")
-[[ "$(jqf "$POLICIES" '.policies | length')" -ge 1 ]] \
-  && pass "GET /api/policies → list" \
+POLICY_COUNT=$(jqf "$POLICIES" 'length')
+[[ "$POLICY_COUNT" -ge 1 ]] \
+  && pass "GET /api/policies → $POLICY_COUNT policy/policies" \
   || fail "list policies: $POLICIES"
 
-# Validate endpoint
+# Validate a policy YAML (always returns 200; errors are in the body)
+VALIDATE_YAML="id: vp1
+name: Validate test
+role: automation
+rules:
+  - service: google.gmail
+    actions: [send_message]
+    allow: false"
+
 VALIDATE=$(curl -sf -X POST "$BASE/api/policies/validate" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"rules":[{"id":"v1","role_id":"anyone","service":"google.gmail","actions":["send"],"decision":"block"}]}')
+  -d "{\"yaml\":$(echo "$VALIDATE_YAML" | jq -Rs .)}")
 [[ "$(jqf "$VALIDATE" .valid)" == "true" ]] \
   && pass "POST /api/policies/validate → valid=true" \
   || fail "validate: $VALIDATE"
@@ -166,7 +178,7 @@ VALIDATE=$(curl -sf -X POST "$BASE/api/policies/validate" \
 # ── Agents ───────────────────────────────────────────────────────────────────
 section "Agents"
 
-# POST /api/agents → {"id":..., "token":..., ...}
+# POST /api/agents → {"id":..., "token":..., ...}  (token shown once only)
 AGENT=$(curl -sf -X POST "$BASE/api/agents" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -191,7 +203,7 @@ GW_BLOCK=$(curl -sf -X POST "$BASE/api/gateway/request" \
   -H "Content-Type: application/json" \
   -d "{
     \"service\": \"google.gmail\",
-    \"action\": \"send\",
+    \"action\": \"send_message\",
     \"params\": {\"to\":\"bob@example.com\",\"subject\":\"Hi\",\"body\":\"Hello\"},
     \"reason\": \"Notifying user of build completion\",
     \"request_id\": \"req-block-$$\"
@@ -199,14 +211,13 @@ GW_BLOCK=$(curl -sf -X POST "$BASE/api/gateway/request" \
 [[ "$(jqf "$GW_BLOCK" .status)" == "blocked" ]] \
   && pass "Gateway → status=blocked" \
   || fail "expected blocked: $GW_BLOCK"
-[[ "$(jqf "$GW_BLOCK" .reason)" != "null" ]] \
+[[ "$(jqf "$GW_BLOCK" .reason)" != "null" && "$(jqf "$GW_BLOCK" .reason)" != "" ]] \
   && pass "Gateway block → reason present" \
   || fail "missing reason: $GW_BLOCK"
 
-# Gateway with no token should 401
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/gateway/request" \
   -H "Content-Type: application/json" \
-  -d '{"service":"google.gmail","action":"send","params":{}}')
+  -d '{"service":"google.gmail","action":"send_message","params":{}}')
 [[ "$STATUS" == "401" ]] \
   && pass "Gateway without agent token → 401" \
   || fail "expected 401 without token, got $STATUS"
@@ -233,24 +244,26 @@ fi
 # ── Policy: update to require approval ───────────────────────────────────────
 section "Policies (approve)"
 
-UPDATED=$(curl -sf -X PUT "$BASE/api/policies/$POLICY_ID" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"name\": \"approve-gmail-send\",
-    \"description\": \"Require approval for outbound email\",
-    \"rules\": [{
-      \"id\": \"r1\",
-      \"role_id\": \"$ROLE_ID\",
-      \"service\": \"google.gmail\",
-      \"actions\": [\"send\"],
-      \"decision\": \"approve\",
-      \"reason\": \"Human must review outbound emails\"
-    }]
-  }")
-[[ "$(jqf "$UPDATED" .name)" == "approve-gmail-send" ]] \
-  && pass "PUT /api/policies/{id} → decision updated to approve" \
-  || fail "update policy: $UPDATED"
+if [[ -n "$POLICY_ID" && "$POLICY_ID" != "null" ]]; then
+  APPROVE_YAML="id: approve-gmail-send
+name: Require approval for outbound email
+role: automation
+rules:
+  - service: google.gmail
+    actions: [send_message]
+    require_approval: true
+    reason: Human must review outbound emails"
+
+  UPDATED=$(curl -sf -X PUT "$BASE/api/policies/$POLICY_ID" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"yaml\":$(echo "$APPROVE_YAML" | jq -Rs .)}")
+  [[ "$(jqf "$UPDATED" .name)" == "Require approval for outbound email" ]] \
+    && pass "PUT /api/policies/{id} → updated to require_approval" \
+    || fail "update policy: $UPDATED"
+else
+  skip "PUT /api/policies/{id} — skipped (no policy_id)"
+fi
 
 # ── Gateway: approve (queues for human review) ────────────────────────────────
 section "Gateway — approve"
@@ -261,7 +274,7 @@ GW_PEND=$(curl -sf -X POST "$BASE/api/gateway/request" \
   -H "Content-Type: application/json" \
   -d "{
     \"service\": \"google.gmail\",
-    \"action\": \"send\",
+    \"action\": \"send_message\",
     \"params\": {\"to\":\"bob@example.com\",\"subject\":\"Build passed\",\"body\":\"All green!\"},
     \"reason\": \"Notifying stakeholder of successful build\",
     \"request_id\": \"$REQ_ID\"
@@ -289,7 +302,6 @@ DENY=$(curl -sf -X POST "$BASE/api/approvals/$REQ_ID/deny" \
   && pass "POST /approvals/{id}/deny → status=denied" \
   || fail "deny: $DENY"
 
-# Denied entry should no longer appear in pending list
 APPROVALS_AFTER=$(curl -sf "$BASE/api/approvals" -H "Authorization: Bearer $TOKEN")
 STILL_THERE=$(jqf "$APPROVALS_AFTER" ".entries // [] | map(select(.request_id == \"$REQ_ID\")) | length")
 [[ "$STILL_THERE" == "0" ]] \
@@ -305,7 +317,7 @@ curl -sf -X POST "$BASE/api/gateway/request" \
   -H "Content-Type: application/json" \
   -d "{
     \"service\": \"google.gmail\",
-    \"action\": \"send\",
+    \"action\": \"send_message\",
     \"params\": {\"to\":\"carol@example.com\",\"subject\":\"Deploy done\",\"body\":\"Deployed!\"},
     \"reason\": \"Deployment notification\",
     \"request_id\": \"$REQ_ID2\"
@@ -318,7 +330,9 @@ case "$APPROVE_STATUS" in
   executed)
     pass "POST /approvals/{id}/approve → executed (Gmail credentials active)" ;;
   error)
-    pass "POST /approvals/{id}/approve → error (expected: no Gmail credentials configured)" ;;
+    pass "POST /approvals/{id}/approve → error (expected: no Gmail credentials activated)" ;;
+  pending_activation)
+    pass "POST /approvals/{id}/approve → pending_activation (Gmail not yet connected)" ;;
   *)
     fail "unexpected approve outcome '$APPROVE_STATUS': $APPROVE" ;;
 esac
@@ -328,7 +342,7 @@ section "Audit log — full picture"
 
 ALL_AUDIT=$(curl -sf "$BASE/api/audit" -H "Authorization: Bearer $TOKEN")
 TOTAL=$(jqf "$ALL_AUDIT" .total)
-[[ "$TOTAL" -ge 3 ]] \
+[[ "${TOTAL%.*}" -ge 3 ]] \
   && pass "GET /api/audit → $TOTAL total entries" \
   || fail "expected ≥3 audit entries, got $TOTAL"
 
@@ -354,16 +368,23 @@ fi
 # ── Logout ────────────────────────────────────────────────────────────────────
 section "Auth — logout"
 
-LOGOUT=$(curl -sf -X POST "$BASE/api/auth/logout" -H "Authorization: Bearer $TOKEN")
-[[ "$(jqf "$LOGOUT" .message)" != "" ]] \
-  && pass "POST /api/auth/logout" \
-  || fail "logout: $LOGOUT"
+# Logout returns 204 No Content — send the refresh token so the session is deleted.
+# The short-lived access JWT remains valid until its TTL (stateless — no blacklist).
+LOGOUT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/logout" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}")
+[[ "$LOGOUT_STATUS" == "204" ]] \
+  && pass "POST /api/auth/logout → 204 No Content" \
+  || fail "logout: expected 204, got $LOGOUT_STATUS"
 
-# Token should be invalid after logout
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/me" -H "Authorization: Bearer $TOKEN")
-[[ "$STATUS" == "401" ]] \
-  && pass "Token invalidated after logout → 401" \
-  || fail "expected 401 after logout, got $STATUS"
+# Verify the refresh token is now invalidated
+REFRESH_AFTER=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/refresh" \
+  -H "Content-Type: application/json" \
+  -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}")
+[[ "$REFRESH_AFTER" == "401" ]] \
+  && pass "Refresh token invalidated after logout → 401" \
+  || fail "expected 401 on refresh after logout, got $REFRESH_AFTER"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
