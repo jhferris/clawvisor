@@ -555,6 +555,220 @@ func (s *Store) GetNotificationConfig(ctx context.Context, userID, channel strin
 	return nc, nil
 }
 
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+
+func (s *Store) LogAudit(ctx context.Context, e *store.AuditEntry) error {
+	if e.ID == "" {
+		e.ID = uuid.New().String()
+	}
+	paramsSafe := "{}"
+	if len(e.ParamsSafe) > 0 {
+		paramsSafe = string(e.ParamsSafe)
+	}
+	var filtersApplied *string
+	if len(e.FiltersApplied) > 0 {
+		s := string(e.FiltersApplied)
+		filtersApplied = &s
+	}
+	safetyFlagged := 0
+	if e.SafetyFlagged {
+		safetyFlagged = 1
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO audit_log (
+			id, user_id, agent_id, request_id, timestamp, service, action,
+			params_safe, decision, outcome, policy_id, rule_id,
+			safety_flagged, safety_reason, reason, data_origin, context_src,
+			duration_ms, filters_applied, error_msg
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, e.ID, e.UserID, e.AgentID, e.RequestID, e.Timestamp.UTC().Format(time.RFC3339),
+		e.Service, e.Action, paramsSafe, e.Decision, e.Outcome,
+		e.PolicyID, e.RuleID, safetyFlagged, e.SafetyReason, e.Reason,
+		e.DataOrigin, e.ContextSrc, e.DurationMS, filtersApplied, e.ErrorMsg)
+	return err
+}
+
+func (s *Store) UpdateAuditOutcome(ctx context.Context, id, outcome, errMsg string, durationMS int) error {
+	var errMsgPtr *string
+	if errMsg != "" {
+		errMsgPtr = &errMsg
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE audit_log SET outcome = ?, error_msg = ?, duration_ms = ? WHERE id = ?`,
+		outcome, errMsgPtr, durationMS, id)
+	return err
+}
+
+func (s *Store) GetAuditEntry(ctx context.Context, id, userID string) (*store.AuditEntry, error) {
+	e := &store.AuditEntry{}
+	var timestamp, paramsSafe string
+	var safetyFlagged int
+	var filtersApplied *string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, agent_id, request_id, timestamp, service, action,
+		       params_safe, decision, outcome, policy_id, rule_id,
+		       safety_flagged, safety_reason, reason, data_origin, context_src,
+		       duration_ms, filters_applied, error_msg
+		FROM audit_log WHERE id = ? AND user_id = ?
+	`, id, userID).Scan(
+		&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &timestamp,
+		&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
+		&e.PolicyID, &e.RuleID, &safetyFlagged, &e.SafetyReason, &e.Reason,
+		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseTime(timestamp)
+	e.SafetyFlagged = safetyFlagged != 0
+	e.ParamsSafe = json.RawMessage(paramsSafe)
+	if filtersApplied != nil {
+		e.FiltersApplied = json.RawMessage(*filtersApplied)
+	}
+	return e, nil
+}
+
+func (s *Store) ListAuditEntries(ctx context.Context, userID string, filter store.AuditFilter) ([]*store.AuditEntry, int, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	where := "WHERE user_id = ?"
+	args := []any{userID}
+
+	if filter.Service != "" {
+		where += " AND service = ?"
+		args = append(args, filter.Service)
+	}
+	if filter.Outcome != "" {
+		where += " AND outcome = ?"
+		args = append(args, filter.Outcome)
+	}
+	if filter.DataOrigin != "" {
+		where += " AND data_origin = ?"
+		args = append(args, filter.DataOrigin)
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_log "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	dataArgs := append(args, limit, filter.Offset)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, agent_id, request_id, timestamp, service, action,
+		       params_safe, decision, outcome, policy_id, rule_id,
+		       safety_flagged, safety_reason, reason, data_origin, context_src,
+		       duration_ms, filters_applied, error_msg
+		FROM audit_log `+where+` ORDER BY timestamp DESC LIMIT ? OFFSET ?`, dataArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var entries []*store.AuditEntry
+	for rows.Next() {
+		e := &store.AuditEntry{}
+		var timestamp, paramsSafe string
+		var safetyFlagged int
+		var filtersApplied *string
+		if err := rows.Scan(
+			&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &timestamp,
+			&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
+			&e.PolicyID, &e.RuleID, &safetyFlagged, &e.SafetyReason, &e.Reason,
+			&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg,
+		); err != nil {
+			return nil, 0, err
+		}
+		e.Timestamp = parseTime(timestamp)
+		e.SafetyFlagged = safetyFlagged != 0
+		e.ParamsSafe = json.RawMessage(paramsSafe)
+		if filtersApplied != nil {
+			e.FiltersApplied = json.RawMessage(*filtersApplied)
+		}
+		entries = append(entries, e)
+	}
+	return entries, total, rows.Err()
+}
+
+// ── Pending Approvals ─────────────────────────────────────────────────────────
+
+func (s *Store) SavePendingApproval(ctx context.Context, pa *store.PendingApproval) error {
+	if pa.ID == "" {
+		pa.ID = uuid.New().String()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO pending_approvals (id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at)
+		VALUES (?,?,?,?,?,?,?,?)
+	`, pa.ID, pa.UserID, pa.RequestID, pa.AuditID, string(pa.RequestBlob),
+		pa.CallbackURL, pa.TelegramMsgID, pa.ExpiresAt.UTC().Format(time.RFC3339))
+	return err
+}
+
+func (s *Store) GetPendingApproval(ctx context.Context, requestID string) (*store.PendingApproval, error) {
+	pa := &store.PendingApproval{}
+	var requestBlob, expiresAt, createdAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		FROM pending_approvals WHERE request_id = ?
+	`, requestID).Scan(
+		&pa.ID, &pa.UserID, &pa.RequestID, &pa.AuditID, &requestBlob,
+		&pa.CallbackURL, &pa.TelegramMsgID, &expiresAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	pa.RequestBlob = json.RawMessage(requestBlob)
+	pa.ExpiresAt = parseTime(expiresAt)
+	pa.CreatedAt = parseTime(createdAt)
+	return pa, nil
+}
+
+func (s *Store) UpdatePendingTelegramMsgID(ctx context.Context, requestID, msgID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE pending_approvals SET telegram_msg_id = ? WHERE request_id = ?`,
+		msgID, requestID)
+	return err
+}
+
+func (s *Store) DeletePendingApproval(ctx context.Context, requestID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM pending_approvals WHERE request_id = ?`, requestID)
+	return err
+}
+
+func (s *Store) ListExpiredPendingApprovals(ctx context.Context) ([]*store.PendingApproval, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		FROM pending_approvals WHERE expires_at < datetime('now')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pas []*store.PendingApproval
+	for rows.Next() {
+		pa := &store.PendingApproval{}
+		var requestBlob, expiresAt, createdAt string
+		if err := rows.Scan(
+			&pa.ID, &pa.UserID, &pa.RequestID, &pa.AuditID, &requestBlob,
+			&pa.CallbackURL, &pa.TelegramMsgID, &expiresAt, &createdAt,
+		); err != nil {
+			return nil, err
+		}
+		pa.RequestBlob = json.RawMessage(requestBlob)
+		pa.ExpiresAt = parseTime(expiresAt)
+		pa.CreatedAt = parseTime(createdAt)
+		pas = append(pas, pa)
+	}
+	return pas, rows.Err()
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func isDuplicate(err error) bool {

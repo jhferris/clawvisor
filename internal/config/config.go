@@ -17,6 +17,8 @@ type Config struct {
 	Approval ApprovalConfig `yaml:"approval"`
 	Safety   SafetyConfig   `yaml:"safety"`
 	MCP      MCPConfig      `yaml:"mcp"`
+	Telegram TelegramConfig `yaml:"telegram"`
+	Google   GoogleConfig   `yaml:"google"`
 }
 
 type ServerConfig struct {
@@ -58,6 +60,19 @@ type SafetyConfig struct {
 
 type MCPConfig struct {
 	ApprovalTimeout int `yaml:"approval_timeout"`
+}
+
+// TelegramConfig holds the Telegram bot token used for approval notifications.
+// The per-user chat ID is stored in notification_configs (channel="telegram").
+type TelegramConfig struct {
+	BotToken string `yaml:"bot_token"`
+}
+
+// GoogleConfig holds OAuth2 credentials for all Google adapters.
+type GoogleConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURL  string `yaml:"redirect_url"`
 }
 
 func Default() *Config {
@@ -132,6 +147,18 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SERVER_HOST"); v != "" {
 		cfg.Server.Host = v
+	}
+	if v := os.Getenv("TELEGRAM_BOT_TOKEN"); v != "" {
+		cfg.Telegram.BotToken = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
+		cfg.Google.ClientID = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
+		cfg.Google.ClientSecret = v
+	}
+	if v := os.Getenv("GOOGLE_REDIRECT_URL"); v != "" {
+		cfg.Google.RedirectURL = v
 	}
 
 	return cfg, nil

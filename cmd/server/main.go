@@ -11,10 +11,15 @@ import (
 
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/ericlevine/clawvisor/internal/adapters"
+	gmailadapter "github.com/ericlevine/clawvisor/internal/adapters/google/gmail"
 	"github.com/ericlevine/clawvisor/internal/api"
 	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/config"
+	"github.com/ericlevine/clawvisor/internal/notify"
+	telegramnotify "github.com/ericlevine/clawvisor/internal/notify/telegram"
 	"github.com/ericlevine/clawvisor/internal/policy"
+	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	pgstore "github.com/ericlevine/clawvisor/internal/store/postgres"
 	sqlitestore "github.com/ericlevine/clawvisor/internal/store/sqlite"
@@ -96,20 +101,50 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("loading policies: %w", err)
 	}
 
+	// ── Adapter Registry ─────────────────────────────────────────────────────
+	adapterReg := adapters.NewRegistry()
+	if cfg.Google.ClientID != "" {
+		redirectURL := cfg.Google.RedirectURL
+		if redirectURL == "" {
+			redirectURL = fmt.Sprintf("http://%s/api/oauth/callback", cfg.Server.Addr())
+		}
+		adapterReg.Register(gmailadapter.New(
+			cfg.Google.ClientID,
+			cfg.Google.ClientSecret,
+			redirectURL,
+		))
+		logger.Info("gmail adapter registered")
+	} else {
+		logger.Info("gmail adapter not registered (GOOGLE_CLIENT_ID not set)")
+	}
+
+	// ── Notifier ─────────────────────────────────────────────────────────────
+	var notifier notify.Notifier
+	if cfg.Telegram.BotToken != "" {
+		notifier = telegramnotify.New(cfg.Telegram.BotToken, st)
+		logger.Info("telegram notifier enabled")
+	} else {
+		logger.Info("telegram notifier disabled (TELEGRAM_BOT_TOKEN not set)")
+	}
+
+	// ── Safety Checker ───────────────────────────────────────────────────────
+	var safetyChecker safety.SafetyChecker = safety.NoopChecker{}
+	if cfg.Safety.Enabled {
+		// TODO Phase 9: wire up a real LLM safety checker.
+		logger.Warn("safety checker enabled in config but LLM implementation not yet available; using noop")
+	}
+
 	// ── HTTP Server ─────────────────────────────────────────────────────────
-	srv, err := api.New(cfg, st, v, jwtSvc, reg)
+	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, notifier, safetyChecker)
 	if err != nil {
 		return err
 	}
 	return srv.Run(ctx)
 }
 
-// loadPoliciesIntoRegistry fetches all users' policies from the DB and compiles
-// them into the registry. This runs once at startup.
+// loadPoliciesIntoRegistry compiles all users' policies into the registry at startup.
+// For now the registry starts empty and is updated incrementally on every policy write.
 func loadPoliciesIntoRegistry(ctx context.Context, st store.Store, reg *policy.Registry, logger *slog.Logger) error {
-	// We don't have a ListAllUsers method yet; we'll leave the registry empty at startup
-	// for now. The registry is updated incrementally via API handlers on every policy write.
-	// TODO Phase 4: add a batch preload when user list is available.
 	logger.Info("policy registry initialized (policies loaded on first access)")
 	return nil
 }

@@ -59,6 +59,19 @@ type Store interface {
 	UpsertNotificationConfig(ctx context.Context, userID, channel string, config json.RawMessage) error
 	GetNotificationConfig(ctx context.Context, userID, channel string) (*NotificationConfig, error)
 
+	// Audit log
+	LogAudit(ctx context.Context, entry *AuditEntry) error
+	UpdateAuditOutcome(ctx context.Context, id, outcome, errMsg string, durationMS int) error
+	GetAuditEntry(ctx context.Context, id, userID string) (*AuditEntry, error)
+	ListAuditEntries(ctx context.Context, userID string, filter AuditFilter) ([]*AuditEntry, int, error)
+
+	// Pending approvals
+	SavePendingApproval(ctx context.Context, pa *PendingApproval) error
+	GetPendingApproval(ctx context.Context, requestID string) (*PendingApproval, error)
+	UpdatePendingTelegramMsgID(ctx context.Context, requestID, msgID string) error
+	DeletePendingApproval(ctx context.Context, requestID string) error
+	ListExpiredPendingApprovals(ctx context.Context) ([]*PendingApproval, error)
+
 	// Health
 	Ping(ctx context.Context) error
 	Close() error
@@ -140,4 +153,51 @@ type NotificationConfig struct {
 	Config    json.RawMessage `json:"config"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// AuditEntry is one row in the audit_log table.
+type AuditEntry struct {
+	ID             string          `json:"id"`
+	UserID         string          `json:"user_id"`
+	AgentID        *string         `json:"agent_id,omitempty"`
+	RequestID      string          `json:"request_id"`
+	Timestamp      time.Time       `json:"timestamp"`
+	Service        string          `json:"service"`
+	Action         string          `json:"action"`
+	ParamsSafe     json.RawMessage `json:"params_safe"`
+	Decision       string          `json:"decision"`
+	Outcome        string          `json:"outcome"`
+	PolicyID       *string         `json:"policy_id,omitempty"`
+	RuleID         *string         `json:"rule_id,omitempty"`
+	SafetyFlagged  bool            `json:"safety_flagged"`
+	SafetyReason   *string         `json:"safety_reason,omitempty"`
+	Reason         *string         `json:"reason,omitempty"`
+	DataOrigin     *string         `json:"data_origin,omitempty"`
+	ContextSrc     *string         `json:"context_src,omitempty"`
+	DurationMS     int             `json:"duration_ms"`
+	FiltersApplied json.RawMessage `json:"filters_applied,omitempty"`
+	ErrorMsg       *string         `json:"error_msg,omitempty"`
+}
+
+// PendingApproval is a gateway request awaiting human approval.
+type PendingApproval struct {
+	ID            string          `json:"id"`
+	UserID        string          `json:"user_id"`
+	RequestID     string          `json:"request_id"`
+	AuditID       string          `json:"audit_id"`
+	RequestBlob   json.RawMessage `json:"request_blob"`
+	CallbackURL   *string         `json:"callback_url,omitempty"`
+	TelegramMsgID *string         `json:"telegram_msg_id,omitempty"`
+	ExpiresAt     time.Time       `json:"expires_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+}
+
+// AuditFilter controls which entries are returned by ListAuditEntries.
+// Zero values mean "no filter" for that field.
+type AuditFilter struct {
+	Service    string // filter by service
+	Outcome    string // filter by outcome
+	DataOrigin string // filter by data_origin
+	Limit      int    // 0 → default (50)
+	Offset     int
 }
