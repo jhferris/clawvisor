@@ -393,6 +393,53 @@ func TestResponseFilters_CollectedFromExecuteRules(t *testing.T) {
 	}
 }
 
+// ── Conflict detection ────────────────────────────────────────────────────────
+
+func TestDetectConflicts_CrossRoleNotConflict(t *testing.T) {
+	// A global block and a role-specific allow on the same service/action
+	// should NOT be flagged as opposing_decisions — the role rule intentionally overrides.
+	global := CompiledRule{
+		ID: "global:block", PolicyID: "global", RoleID: "",
+		Service: "google.gmail", Actions: []string{"send_message"},
+		Decision: DecisionBlock, Priority: 100,
+	}
+	roleRule := CompiledRule{
+		ID: "researcher:execute", PolicyID: "researcher-policy", RoleID: "researcher-id",
+		Service: "google.gmail", Actions: []string{"*"},
+		Decision: DecisionExecute, Priority: 10,
+	}
+	conflicts := DetectConflicts([]CompiledRule{roleRule}, []CompiledRule{global})
+	for _, c := range conflicts {
+		if c.Type == "opposing_decisions" {
+			t.Errorf("cross-role rules should not be flagged as opposing_decisions: %s", c.Message)
+		}
+	}
+}
+
+func TestDetectConflicts_SameRoleOpposingIsConflict(t *testing.T) {
+	// Two global rules with opposing decisions on the same action are a real conflict.
+	allow := CompiledRule{
+		ID: "p1:allow", PolicyID: "p1", RoleID: "",
+		Service: "google.gmail", Actions: []string{"send_message"},
+		Decision: DecisionExecute, Priority: 10,
+	}
+	block := CompiledRule{
+		ID: "p2:block", PolicyID: "p2", RoleID: "",
+		Service: "google.gmail", Actions: []string{"send_message"},
+		Decision: DecisionBlock, Priority: 100,
+	}
+	conflicts := DetectConflicts([]CompiledRule{allow}, []CompiledRule{block})
+	found := false
+	for _, c := range conflicts {
+		if c.Type == "opposing_decisions" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("same-role opposing decisions should be flagged as a conflict")
+	}
+}
+
 // ── Compiler: multiple block rules ───────────────────────────────────────────
 
 func TestMultipleBlockRules_FirstWins(t *testing.T) {

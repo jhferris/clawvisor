@@ -23,6 +23,13 @@ func DetectConflicts(incoming []CompiledRule, existing []CompiledRule) []Conflic
 				continue
 			}
 
+			// Cross-role comparisons are not conflicts: role rules intentionally
+			// override global rules for agents with that role. Only flag conflicts
+			// within the same role scope (both global, or both the same role).
+			if a.RoleID != b.RoleID {
+				continue
+			}
+
 			// Opposing decisions with no condition to differentiate them
 			if a.Decision != b.Decision && a.Condition == nil && b.Condition == nil {
 				conflicts = append(conflicts, Conflict{
