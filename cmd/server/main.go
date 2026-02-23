@@ -129,13 +129,13 @@ func run(logger *slog.Logger) error {
 
 	// ── Safety Checker ───────────────────────────────────────────────────────
 	var safetyChecker safety.SafetyChecker = safety.NoopChecker{}
-	if cfg.Safety.Enabled {
-		// TODO Phase 9: wire up a real LLM safety checker.
-		logger.Warn("safety checker enabled in config but LLM implementation not yet available; using noop")
+	if cfg.LLM.Safety.Enabled {
+		safetyChecker = safety.NewLLMSafetyChecker(cfg.LLM)
+		logger.Info("LLM safety checker enabled", "model", cfg.LLM.Safety.Model)
 	}
 
 	// ── HTTP Server ─────────────────────────────────────────────────────────
-	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, notifier, safetyChecker)
+	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, notifier, safetyChecker, cfg.LLM)
 	if err != nil {
 		return err
 	}

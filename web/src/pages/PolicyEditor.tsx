@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { EditorView, basicSetup } from 'codemirror'
 import { yaml } from '@codemirror/lang-yaml'
-import { api, type ValidationResult, type PolicyDecision } from '../api/client'
+import { api, type ValidationResult, type PolicyDecision, type SemanticConflict } from '../api/client'
 
 const PLACEHOLDER_YAML = `id: my-policy
 name: My Policy
@@ -27,6 +27,7 @@ export default function PolicyEditor() {
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [aiGenerated, setAiGenerated] = useState(false)
 
   // Dry-run state
   const [evalService, setEvalService] = useState('')
@@ -35,6 +36,14 @@ export default function PolicyEditor() {
   const [evalResult, setEvalResult] = useState<PolicyDecision | null>(null)
   const [isEvaluating, setIsEvaluating] = useState(false)
 
+  // Generate panel state
+  const [generateOpen, setGenerateOpen] = useState(() =>
+    localStorage.getItem('policy-generate-open') === 'true'
+  )
+  const [genDescription, setGenDescription] = useState('')
+  const [genRole, setGenRole] = useState('')
+  const [genError, setGenError] = useState<string | null>(null)
+
   const isEdit = Boolean(id)
 
   // Fetch existing policy when editing
@@ -42,6 +51,12 @@ export default function PolicyEditor() {
     queryKey: ['policy', id],
     queryFn: () => api.policies.get(id!),
     enabled: isEdit,
+  })
+
+  // Fetch roles for Generate panel dropdown
+  const { data: roles } = useQuery({
+    queryKey: ['roles'],
+    queryFn: () => api.roles.list(),
   })
 
   // Initialize CodeMirror
@@ -57,6 +72,7 @@ export default function PolicyEditor() {
           if (update.docChanged) {
             const content = update.state.doc.toString()
             setYamlContent(content)
+            setAiGenerated(false) // clear AI banner on manual edit
           }
         }),
       ],
@@ -82,7 +98,7 @@ export default function PolicyEditor() {
     }
   }, [existingPolicy])
 
-  // Debounced validation
+  // Debounced validation (no semantic check on keystroke)
   const validate = useCallback(async (content: string) => {
     if (!content.trim()) {
       setValidation(null)
@@ -107,17 +123,54 @@ export default function PolicyEditor() {
     }
   }, [yamlContent, validate])
 
+  // Save with semantic conflict check on explicit save
   const saveMut = useMutation({
-    mutationFn: () =>
-      isEdit
+    mutationFn: async () => {
+      // Run semantic check on save (check_semantic=true)
+      const v = await api.policies.validate(yamlContent, true)
+      setValidation(v)
+      if (!v.valid) throw new Error('Policy is invalid')
+      return isEdit
         ? api.policies.update(id!, yamlContent)
-        : api.policies.create(yamlContent),
+        : api.policies.create(yamlContent)
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['policies'] })
       navigate('/dashboard/policies')
     },
     onError: (err: Error) => setError(err.message),
   })
+
+  // Generate policy from description
+  const generateMut = useMutation({
+    mutationFn: () => {
+      const existingIDs = roles?.map(r => r.name) // reuse role names as hints
+      return api.policies.generate(genDescription, {
+        role: genRole || undefined,
+        existing_ids: existingIDs,
+      })
+    },
+    onSuccess: (data) => {
+      if (viewRef.current && yamlContent.trim()) {
+        if (!confirm('Replace current policy content with the generated version?')) return
+      }
+      if (viewRef.current) {
+        const view = viewRef.current
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: data.yaml },
+        })
+        setYamlContent(data.yaml)
+      }
+      setAiGenerated(true)
+      setGenError(null)
+    },
+    onError: (err: Error) => setGenError(err.message),
+  })
+
+  function toggleGenerate(open: boolean) {
+    setGenerateOpen(open)
+    localStorage.setItem('policy-generate-open', String(open))
+  }
 
   async function handleEvaluate() {
     if (!evalService || !evalAction) return
@@ -141,7 +194,7 @@ export default function PolicyEditor() {
     return <div className="p-8 text-sm text-gray-400">Loading policy…</div>
   }
 
-  const decisionColor = {
+  const decisionColor: Record<string, string> = {
     execute: 'text-green-700 bg-green-50',
     approve: 'text-yellow-700 bg-yellow-50',
     block: 'text-red-700 bg-red-50',
@@ -174,6 +227,51 @@ export default function PolicyEditor() {
         <div className="p-3 bg-red-50 text-red-700 text-sm rounded">{error}</div>
       )}
 
+      {/* Generate from description panel */}
+      <div className="border rounded-lg overflow-hidden">
+        <button
+          onClick={() => toggleGenerate(!generateOpen)}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-50 text-sm font-medium text-gray-700 hover:bg-gray-100"
+        >
+          <span>Generate from description</span>
+          <span className="text-gray-400">{generateOpen ? '▾' : '▸'}</span>
+        </button>
+        {generateOpen && (
+          <div className="p-4 space-y-3 bg-white">
+            <textarea
+              value={genDescription}
+              onChange={e => setGenDescription(e.target.value)}
+              placeholder="Describe what you want this policy to do…"
+              rows={3}
+              className="block w-full text-sm rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none"
+            />
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-gray-500">Role (optional)</label>
+                <select
+                  value={genRole}
+                  onChange={e => setGenRole(e.target.value)}
+                  className="mt-0.5 block w-full text-sm rounded border border-gray-300 px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value="">All agents (global)</option>
+                  {roles?.map(r => (
+                    <option key={r.id} value={r.name}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => generateMut.mutate()}
+                disabled={generateMut.isPending || !genDescription.trim()}
+                className="mt-4 px-4 py-1.5 text-sm rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap"
+              >
+                {generateMut.isPending ? 'Generating…' : 'Generate'}
+              </button>
+            </div>
+            {genError && <div className="text-xs text-red-600">{genError}</div>}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-6">
         {/* Left: YAML editor */}
         <div className="space-y-3">
@@ -186,10 +284,19 @@ export default function PolicyEditor() {
               </span>
             )}
           </div>
+
+          {aiGenerated && (
+            <div className="flex items-center gap-2 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded px-3 py-1.5">
+              <span>ℹ</span>
+              <span>AI-generated — review before saving</span>
+            </div>
+          )}
+
           <div
             ref={editorRef}
             className="border rounded-lg overflow-hidden text-sm [&_.cm-editor]:min-h-72 [&_.cm-scroller]:font-mono"
           />
+
           {validation && !validation.valid && validation.errors.length > 0 && (
             <ul className="space-y-1">
               {validation.errors.map((e, i) => (
@@ -197,11 +304,28 @@ export default function PolicyEditor() {
               ))}
             </ul>
           )}
+
           {validation?.conflicts && validation.conflicts.length > 0 && (
             <div className="space-y-1">
               {validation.conflicts.map((c, i) => (
                 <div key={i} className="text-xs text-yellow-700 bg-yellow-50 px-3 py-1.5 rounded">
                   ⚠ {c.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Semantic conflict warnings (only on save, when LLM is configured) */}
+          {validation?.semantic_conflicts && validation.semantic_conflicts.length > 0 && (
+            <div className="space-y-1">
+              {validation.semantic_conflicts.map((sc: SemanticConflict, i: number) => (
+                <div key={i} className={`text-xs px-3 py-1.5 rounded ${sc.severity === 'warning' ? 'text-purple-700 bg-purple-50' : 'text-blue-700 bg-blue-50'}`}>
+                  🤖 {sc.description}
+                  {sc.affected_policies.length > 0 && (
+                    <span className="text-purple-400 ml-1">
+                      ({sc.affected_policies.join(', ')})
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

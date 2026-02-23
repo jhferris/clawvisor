@@ -15,7 +15,7 @@ type Config struct {
 	Vault    VaultConfig    `yaml:"vault"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Approval ApprovalConfig `yaml:"approval"`
-	Safety   SafetyConfig   `yaml:"safety"`
+	LLM      LLMConfig      `yaml:"llm"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	Telegram TelegramConfig `yaml:"telegram"`
 	Google   GoogleConfig   `yaml:"google"`
@@ -50,12 +50,23 @@ type ApprovalConfig struct {
 	OnTimeout string `yaml:"on_timeout"`
 }
 
-type SafetyConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	Endpoint     string `yaml:"endpoint"`
-	Model        string `yaml:"model"`
-	APIKey       string `yaml:"api_key"`
-	SkipReadonly bool   `yaml:"skip_readonly"`
+// LLMProviderConfig holds settings for one LLM provider endpoint.
+// Used for safety checker, response filters, and policy authoring.
+type LLMProviderConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Provider       string `yaml:"provider"`        // "openai" (default) | "anthropic"
+	Endpoint       string `yaml:"endpoint"`        // Base URL, e.g. https://api.anthropic.com/v1
+	APIKey         string `yaml:"api_key"`          // Overridable via env
+	Model          string `yaml:"model"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	SkipReadonly   bool   `yaml:"skip_readonly"` // Safety only: skip check for read actions
+}
+
+// LLMConfig groups all LLM provider configurations.
+type LLMConfig struct {
+	Safety   LLMProviderConfig `yaml:"safety"`   // Post-policy safety checker (runtime)
+	Filters  LLMProviderConfig `yaml:"filters"`  // Semantic response filters (runtime)
+	Authoring LLMProviderConfig `yaml:"authoring"` // Policy authoring assistant (interactive only)
 }
 
 type MCPConfig struct {
@@ -98,9 +109,29 @@ func Default() *Config {
 			Timeout:   300,
 			OnTimeout: "fail",
 		},
-		Safety: SafetyConfig{
-			Enabled:      false,
-			SkipReadonly: true,
+		LLM: LLMConfig{
+			Safety: LLMProviderConfig{
+				Enabled:        false,
+				Provider:       "openai",
+				Endpoint:       "https://api.openai.com/v1",
+				Model:          "gpt-4o-mini",
+				TimeoutSeconds: 10,
+				SkipReadonly:   true,
+			},
+			Filters: LLMProviderConfig{
+				Enabled:        false,
+				Provider:       "openai",
+				Endpoint:       "https://api.openai.com/v1",
+				Model:          "gpt-4o-mini",
+				TimeoutSeconds: 10,
+			},
+			Authoring: LLMProviderConfig{
+				Enabled:        false,
+				Provider:       "anthropic",
+				Endpoint:       "https://api.anthropic.com/v1",
+				Model:          "claude-haiku-4-5-20251001",
+				TimeoutSeconds: 30,
+			},
 		},
 		MCP: MCPConfig{
 			ApprovalTimeout: 240,
@@ -137,9 +168,6 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("GCP_PROJECT"); v != "" {
 		cfg.Vault.GCPProject = v
 	}
-	if v := os.Getenv("SAFETY_LLM_API_KEY"); v != "" {
-		cfg.Safety.APIKey = v
-	}
 	if v := os.Getenv("PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
@@ -161,6 +189,61 @@ func Load(path string) (*Config, error) {
 		cfg.Google.RedirectURL = v
 	}
 
+	// LLM Safety overrides
+	if v := os.Getenv("CLAWVISOR_LLM_SAFETY_ENABLED"); v != "" {
+		cfg.LLM.Safety.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_SAFETY_PROVIDER"); v != "" {
+		cfg.LLM.Safety.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_SAFETY_ENDPOINT"); v != "" {
+		cfg.LLM.Safety.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_SAFETY_API_KEY"); v != "" {
+		cfg.LLM.Safety.APIKey = v
+	}
+	// Backward compat with old env var name
+	if v := os.Getenv("SAFETY_LLM_API_KEY"); v != "" && cfg.LLM.Safety.APIKey == "" {
+		cfg.LLM.Safety.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_SAFETY_MODEL"); v != "" {
+		cfg.LLM.Safety.Model = v
+	}
+
+	// LLM Filters overrides
+	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_ENABLED"); v != "" {
+		cfg.LLM.Filters.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_PROVIDER"); v != "" {
+		cfg.LLM.Filters.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_ENDPOINT"); v != "" {
+		cfg.LLM.Filters.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_API_KEY"); v != "" {
+		cfg.LLM.Filters.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_MODEL"); v != "" {
+		cfg.LLM.Filters.Model = v
+	}
+
+	// LLM Authoring overrides
+	if v := os.Getenv("CLAWVISOR_LLM_AUTHORING_ENABLED"); v != "" {
+		cfg.LLM.Authoring.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_AUTHORING_PROVIDER"); v != "" {
+		cfg.LLM.Authoring.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_AUTHORING_ENDPOINT"); v != "" {
+		cfg.LLM.Authoring.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_AUTHORING_API_KEY"); v != "" {
+		cfg.LLM.Authoring.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_AUTHORING_MODEL"); v != "" {
+		cfg.LLM.Authoring.Model = v
+	}
+
 	return cfg, nil
 }
 
@@ -178,3 +261,4 @@ func (a AuthConfig) RefreshTokenDuration() (time.Duration, error) {
 func (s ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
+

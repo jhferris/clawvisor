@@ -1,9 +1,10 @@
 // Package filters applies policy ResponseFilters to adapter results.
-// Structural filters are applied deterministically; semantic filters are logged
-// as no-ops (LLM execution is deferred to a later phase).
+// Structural filters are applied deterministically; semantic filters are executed
+// via an optional LLM function (nil = log as deferred, no-op).
 package filters
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -16,18 +17,27 @@ import (
 
 // FilterRecord is appended to the audit log for each filter applied.
 type FilterRecord struct {
-	Type        string `json:"type"`             // "structural" | "semantic"
-	Filter      string `json:"filter"`           // e.g. "redact:email_address"
-	Matches     int    `json:"matches,omitempty"`
-	Truncated   bool   `json:"truncated,omitempty"`
-	Applied     bool   `json:"applied"`
-	Error       string `json:"error,omitempty"`
+	Type      string `json:"type"`             // "structural" | "semantic"
+	Filter    string `json:"filter"`           // e.g. "redact:email_address"
+	Matches   int    `json:"matches,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Applied   bool   `json:"applied"`
+	Error     string `json:"error,omitempty"`
 }
 
-// Apply applies all filters in order to result, returning the modified result and
-// a log of what was applied.
-func Apply(result *adapters.Result, filters []policy.ResponseFilter) (*adapters.Result, []FilterRecord) {
-	if len(filters) == 0 {
+// SemanticApplyFn is called for each semantic filter when an LLM is configured.
+// It returns the modified result and whether the filter was applied.
+// A nil fn means LLM is not configured (semantic filters are skipped).
+type SemanticApplyFn func(ctx context.Context, instruction string, result *adapters.Result) (*adapters.Result, bool)
+
+// Apply applies all filters to result without LLM support (semantic filters are no-ops).
+func Apply(result *adapters.Result, responseFilters []policy.ResponseFilter) (*adapters.Result, []FilterRecord) {
+	return ApplyContext(context.Background(), result, responseFilters, nil)
+}
+
+// ApplyContext applies all filters with optional LLM support for semantic filters.
+func ApplyContext(ctx context.Context, result *adapters.Result, responseFilters []policy.ResponseFilter, semanticFn SemanticApplyFn) (*adapters.Result, []FilterRecord) {
+	if len(responseFilters) == 0 {
 		return result, nil
 	}
 
@@ -35,15 +45,32 @@ func Apply(result *adapters.Result, filters []policy.ResponseFilter) (*adapters.
 	data := toMap(result.Data)
 	var log []FilterRecord
 
-	for _, f := range filters {
+	for _, f := range responseFilters {
 		if f.IsSemantic() {
-			// Semantic filters are deferred (no LLM in this phase).
-			log = append(log, FilterRecord{
+			if semanticFn == nil {
+				log = append(log, FilterRecord{
+					Type:    "semantic",
+					Filter:  "semantic:" + truncate(f.Semantic, 50),
+					Applied: false,
+					Error:   "semantic filters deferred (no LLM configured)",
+				})
+				continue
+			}
+			// Call LLM semantic filter.
+			cur := &adapters.Result{Summary: result.Summary, Data: data}
+			filtered, applied := semanticFn(ctx, f.Semantic, cur)
+			rec := FilterRecord{
 				Type:    "semantic",
 				Filter:  "semantic:" + truncate(f.Semantic, 50),
-				Applied: false,
-				Error:   "semantic filters deferred (no LLM configured)",
-			})
+				Applied: applied,
+			}
+			if applied && filtered != nil {
+				data = toMap(filtered.Data)
+				if filtered.Summary != "" {
+					result = &adapters.Result{Summary: filtered.Summary, Data: data}
+				}
+			}
+			log = append(log, rec)
 			continue
 		}
 

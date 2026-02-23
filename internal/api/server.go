@@ -15,6 +15,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/policy"
+	"github.com/ericlevine/clawvisor/internal/policy/authoring"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
@@ -30,6 +31,7 @@ type Server struct {
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier
 	safety     safety.SafetyChecker
+	llmCfg     config.LLMConfig
 	logger     *slog.Logger
 	http       *http.Server
 
@@ -47,6 +49,7 @@ func New(
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
+	llmCfg config.LLMConfig,
 ) (*Server, error) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -61,6 +64,7 @@ func New(
 		adapterReg: adapterReg,
 		notifier:   notifier,
 		safety:     safetyChecker,
+		llmCfg:     llmCfg,
 		logger:     logger,
 	}
 
@@ -87,13 +91,15 @@ func (s *Server) routes() http.Handler {
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth)
 	healthHandler := handlers.NewHealthHandler(s.store, s.vault)
 	rolesHandler := handlers.NewRolesHandler(s.store)
-	policiesHandler := handlers.NewPoliciesHandler(s.store, s.registry)
+	gen := authoring.NewGenerator(s.llmCfg)
+	cc := authoring.NewConflictChecker(s.llmCfg)
+	policiesHandler := handlers.NewPoliciesHandler(s.store, s.registry, gen, cc)
 	agentsHandler := handlers.NewAgentsHandler(s.store)
 	auditHandler := handlers.NewAuditHandler(s.store)
 	notificationsHandler := handlers.NewNotificationsHandler(s.store)
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg, s.registry,
-		s.notifier, s.safety, *s.cfg, s.logger, baseURL,
+		s.notifier, s.safety, s.llmCfg, *s.cfg, s.logger, baseURL,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.logger)
@@ -131,6 +137,7 @@ func (s *Server) routes() http.Handler {
 	// Policies
 	mux.Handle("POST /api/policies/validate", user(policiesHandler.Validate))
 	mux.Handle("POST /api/policies/evaluate", user(policiesHandler.Evaluate))
+	mux.Handle("POST /api/policies/generate", user(policiesHandler.Generate))
 	mux.Handle("GET /api/policies", user(policiesHandler.List))
 	mux.Handle("POST /api/policies", user(policiesHandler.Create))
 	mux.Handle("GET /api/policies/{id}", user(policiesHandler.Get))
@@ -164,6 +171,7 @@ func (s *Server) routes() http.Handler {
 	// Audit (user JWT)
 	mux.Handle("GET /api/audit", user(auditHandler.List))
 	mux.Handle("GET /api/audit/{id}", user(auditHandler.Get))
+
 
 	// SPA fallback
 	if s.cfg.Server.FrontendDir != "" {

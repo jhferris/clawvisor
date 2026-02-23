@@ -6,16 +6,24 @@ import (
 
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
 	"github.com/ericlevine/clawvisor/internal/policy"
+	"github.com/ericlevine/clawvisor/internal/policy/authoring"
 	"github.com/ericlevine/clawvisor/internal/store"
 )
 
 type PoliciesHandler struct {
-	store    store.Store
-	registry *policy.Registry
+	store           store.Store
+	registry        *policy.Registry
+	generator       *authoring.Generator
+	conflictChecker *authoring.ConflictChecker
 }
 
-func NewPoliciesHandler(st store.Store, reg *policy.Registry) *PoliciesHandler {
-	return &PoliciesHandler{store: st, registry: reg}
+func NewPoliciesHandler(
+	st store.Store,
+	reg *policy.Registry,
+	gen *authoring.Generator,
+	cc *authoring.ConflictChecker,
+) *PoliciesHandler {
+	return &PoliciesHandler{store: st, registry: reg, generator: gen, conflictChecker: cc}
 }
 
 // GET /api/policies
@@ -181,10 +189,13 @@ func (h *PoliciesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/policies/validate
+// Body: { yaml: string, check_semantic?: bool }
+// When check_semantic=true and authoring LLM is enabled, also runs semantic conflict detection.
 func (h *PoliciesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	var body struct {
-		YAML string `json:"yaml"`
+		YAML          string `json:"yaml"`
+		CheckSemantic bool   `json:"check_semantic"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -193,9 +204,10 @@ func (h *PoliciesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	p, parseErr := policy.Parse([]byte(body.YAML))
 	if parseErr != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid":     false,
-			"errors":    []string{parseErr.Error()},
-			"conflicts": []policy.Conflict{},
+			"valid":             false,
+			"errors":            []string{parseErr.Error()},
+			"conflicts":         []policy.Conflict{},
+			"semantic_conflicts": nil,
 		})
 		return
 	}
@@ -204,9 +216,10 @@ func (h *PoliciesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	validationErrs := policy.ValidatePolicy(p, knownRoles)
 	if len(validationErrs) > 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid":     false,
-			"errors":    validationErrs,
-			"conflicts": []policy.Conflict{},
+			"valid":             false,
+			"errors":            validationErrs,
+			"conflicts":         []policy.Conflict{},
+			"semantic_conflicts": nil,
 		})
 		return
 	}
@@ -216,11 +229,59 @@ func (h *PoliciesHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	incoming := policy.Compile([]policy.Policy{*p}, user.ID)
 	conflicts := policy.DetectConflicts(incoming, existingRules)
 
+	// Semantic conflict detection — only on explicit request.
+	var semanticConflicts any // nil = LLM not configured or not requested
+	if body.CheckSemantic && h.conflictChecker != nil {
+		incomingRec := &store.PolicyRecord{Slug: p.ID, RulesYAML: body.YAML}
+		sc, err := h.conflictChecker.Check(r.Context(), incomingRec, existing)
+		if err == nil {
+			semanticConflicts = sc // may be nil (disabled) or []SemanticConflict
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"valid":     true,
-		"errors":    []policy.ValidationError{},
-		"conflicts": conflicts,
+		"valid":             true,
+		"errors":            []policy.ValidationError{},
+		"conflicts":         conflicts,
+		"semantic_conflicts": semanticConflicts,
 	})
+}
+
+// POST /api/policies/generate
+// Body: { description: string, context?: { role?: string, existing_ids?: []string } }
+func (h *PoliciesHandler) Generate(w http.ResponseWriter, r *http.Request) {
+	if h.generator == nil || !h.generator.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "LLM_DISABLED", "policy authoring LLM is not enabled")
+		return
+	}
+
+	var body struct {
+		Description string `json:"description"`
+		Context     *struct {
+			Role        string   `json:"role"`
+			ExistingIDs []string `json:"existing_ids"`
+		} `json:"context"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Description == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "description is required")
+		return
+	}
+
+	req := authoring.GenerateRequest{Description: body.Description}
+	if body.Context != nil {
+		req.Role = body.Context.Role
+		req.ExistingIDs = body.Context.ExistingIDs
+	}
+
+	yamlStr, err := h.generator.Generate(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "GENERATION_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"yaml": yamlStr})
 }
 
 // POST /api/policies/evaluate  (dry-run)

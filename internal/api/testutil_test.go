@@ -76,10 +76,9 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 			RefreshTokenTTL: "720h",
 		},
 		Approval: config.ApprovalConfig{Timeout: 300, OnTimeout: "fail"},
-		Safety:   config.SafetyConfig{Enabled: false},
 	}
 
-	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, nil, safety.NoopChecker{})
+	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{})
 	if err != nil {
 		t.Fatalf("api.New: %v", err)
 	}

@@ -95,7 +95,7 @@ func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	result, _, execErr := executeAdapterRequest(r.Context(), h.vault, h.adapterReg,
-		user.ID, blob.Service, blob.Action, blob.Params, blob.ResponseFilters)
+		user.ID, blob.Service, blob.Action, blob.Params, blob.ResponseFilters, nil)
 	dur := int(time.Since(start).Milliseconds())
 
 	outcome := "executed"

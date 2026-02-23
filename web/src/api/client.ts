@@ -123,10 +123,22 @@ export interface PolicyRecord {
   updated_at: string
 }
 
+export interface SemanticConflict {
+  description: string
+  affected_policies: string[]
+  severity: 'warning' | 'info'
+}
+
 export interface ValidationResult {
   valid: boolean
   errors: string[]
   conflicts: PolicyConflict[]
+  semantic_conflicts: SemanticConflict[] | null // null = LLM not configured or not requested
+}
+
+export interface PolicyGenerateContext {
+  role?: string
+  existing_ids?: string[]
 }
 
 export interface PolicyConflict {
@@ -251,8 +263,10 @@ export const api = {
     create: (yaml: string) => post<PolicyRecord>('/api/policies', { yaml }),
     update: (id: string, yaml: string) => put<PolicyRecord>(`/api/policies/${id}`, { yaml }),
     delete: (id: string) => del<void>(`/api/policies/${id}`),
-    validate: (yaml: string) =>
-      post<ValidationResult>('/api/policies/validate', { yaml }),
+    validate: (yaml: string, checkSemantic = false) =>
+      post<ValidationResult>('/api/policies/validate', { yaml, check_semantic: checkSemantic }),
+    generate: (description: string, context?: PolicyGenerateContext) =>
+      post<{ yaml: string }>('/api/policies/generate', { description, context }),
     evaluate: (req: EvalRequest) =>
       post<PolicyDecision>('/api/policies/evaluate', req),
   },

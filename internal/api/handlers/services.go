@@ -218,7 +218,7 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 	}
 
 	result, _, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-		userID, blob.Service, blob.Action, blob.Params, blob.ResponseFilters)
+		userID, blob.Service, blob.Action, blob.Params, blob.ResponseFilters, nil)
 
 	outcome := "executed"
 	errMsg := ""

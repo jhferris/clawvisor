@@ -19,6 +19,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/filters"
 	"github.com/ericlevine/clawvisor/internal/gateway"
+	"github.com/ericlevine/clawvisor/internal/llm"
 	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/safety"
@@ -49,6 +50,7 @@ type GatewayHandler struct {
 	policyReg  *policy.Registry
 	notifier   notify.Notifier // may be nil if Telegram not configured
 	safety     safety.SafetyChecker
+	llmCfg     config.LLMConfig
 	cfg        config.Config
 	logger     *slog.Logger
 	baseURL    string
@@ -61,13 +63,14 @@ func NewGatewayHandler(
 	policyReg *policy.Registry,
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
+	llmCfg config.LLMConfig,
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
 ) *GatewayHandler {
 	return &GatewayHandler{
 		store: st, vault: v, adapterReg: adapterReg, policyReg: policyReg,
-		notifier: notifier, safety: safetyChecker, cfg: cfg, logger: logger, baseURL: baseURL,
+		notifier: notifier, safety: safetyChecker, llmCfg: llmCfg, cfg: cfg, logger: logger, baseURL: baseURL,
 	}
 }
 
@@ -179,7 +182,8 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	case policy.DecisionExecute:
 		result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-			agent.UserID, req.Service, req.Action, req.Params, decision.ResponseFilters)
+			agent.UserID, req.Service, req.Action, req.Params, decision.ResponseFilters,
+			h.llmFilterFn())
 		dur := int(time.Since(start).Milliseconds())
 
 		if execErr != nil {
@@ -291,6 +295,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 // executeAdapterRequest fetches the credential from vault, calls the adapter,
 // and applies response filters. Shared between gateway and approvals handlers.
+// semanticFn is optional; nil disables LLM semantic filter execution.
 func executeAdapterRequest(
 	ctx context.Context,
 	v vault.Vault,
@@ -298,6 +303,7 @@ func executeAdapterRequest(
 	userID, service, action string,
 	params map[string]any,
 	responseFilters []policy.ResponseFilter,
+	semanticFn filters.SemanticApplyFn,
 ) (*adapters.Result, []filters.FilterRecord, error) {
 	adapter, ok := reg.Get(service)
 	if !ok {
@@ -319,12 +325,22 @@ func executeAdapterRequest(
 		return nil, nil, fmt.Errorf("adapter %s: %w", service, err)
 	}
 
-	// Apply structural response filters.
+	// Apply response filters (structural + semantic).
 	if len(responseFilters) > 0 {
-		result, filterRecs := filters.Apply(result, responseFilters)
+		result, filterRecs := filters.ApplyContext(ctx, result, responseFilters, semanticFn)
 		return result, filterRecs, nil
 	}
 	return result, nil, nil
+}
+
+// llmFilterFn builds a SemanticApplyFn from the current LLM filter config.
+// Returns nil if LLM filters are disabled.
+func (h *GatewayHandler) llmFilterFn() filters.SemanticApplyFn {
+	cfg := h.llmCfg.Filters
+	if !cfg.Enabled {
+		return nil
+	}
+	return filters.MakeLLMFilterFn(llm.NewClient(cfg))
 }
 
 // ── Approval routing ──────────────────────────────────────────────────────────
