@@ -110,11 +110,28 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	paramsSafe, _ := json.Marshal(format.StripSecrets(cloneParams(req.Params)))
 
+	// Pre-resolve the recipient_in_contacts condition if needed.
+	// The policy evaluator is a pure function and cannot perform I/O, so we
+	// resolve async conditions here and pass them in ResolvedConditions.
+	resolvedConditions := map[string]bool{}
+	if toEmail, ok := req.Params["to"].(string); ok && toEmail != "" {
+		if contactsAdapter, ok := h.adapterReg.Get("google.contacts"); ok {
+			if cc, ok := contactsAdapter.(adapters.ContactsChecker); ok {
+				if cred, credErr := h.vault.Get(ctx, agent.UserID, "google"); credErr == nil {
+					if inContacts, err := cc.IsInContacts(ctx, cred, toEmail); err == nil {
+						resolvedConditions["recipient_in_contacts"] = inContacts
+					}
+				}
+			}
+		}
+	}
+
 	decision := h.policyReg.Evaluate(agent.UserID, policy.EvalRequest{
-		Service:     req.Service,
-		Action:      req.Action,
-		Params:      req.Params,
-		AgentRoleID: agentRoleName,
+		Service:            req.Service,
+		Action:             req.Action,
+		Params:             req.Params,
+		AgentRoleID:        agentRoleName,
+		ResolvedConditions: resolvedConditions,
 	})
 
 	auditID := uuid.New().String()
@@ -143,6 +160,15 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			e.RuleID = &decision.RuleID
 		}
 		return e
+	}
+
+	// iMessage send_message always requires approval — hardcoded, not overridable by policy.
+	if req.Service == "apple.imessage" && req.Action == "send_message" &&
+		decision.Decision == policy.DecisionExecute {
+		decision.Decision = policy.DecisionApprove
+		if decision.Reason == "" {
+			decision.Reason = "iMessage send_message always requires human approval"
+		}
 	}
 
 	switch decision.Decision {

@@ -12,6 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
+	imessageadapter "github.com/ericlevine/clawvisor/internal/adapters/apple/imessage"
+	githubadapter "github.com/ericlevine/clawvisor/internal/adapters/github"
+	calendaradapter "github.com/ericlevine/clawvisor/internal/adapters/google/calendar"
+	contactsadapter "github.com/ericlevine/clawvisor/internal/adapters/google/contacts"
+	driveadapter "github.com/ericlevine/clawvisor/internal/adapters/google/drive"
 	gmailadapter "github.com/ericlevine/clawvisor/internal/adapters/google/gmail"
 	"github.com/ericlevine/clawvisor/internal/api"
 	"github.com/ericlevine/clawvisor/internal/auth"
@@ -106,16 +111,37 @@ func run(logger *slog.Logger) error {
 	if cfg.Google.ClientID != "" {
 		redirectURL := cfg.Google.RedirectURL
 		if redirectURL == "" {
-			redirectURL = fmt.Sprintf("http://%s/api/oauth/callback", cfg.Server.Addr())
+			// Normalize the host for the OAuth redirect URL. When the server binds to
+			// 0.0.0.0 or 127.0.0.1, use "localhost" instead — Google Cloud Console
+			// requires the redirect URI to match exactly and users typically register
+			// http://localhost:PORT, not http://0.0.0.0:PORT or http://127.0.0.1:PORT.
+			host := cfg.Server.Host
+			if host == "0.0.0.0" || host == "127.0.0.1" || host == "" {
+				host = "localhost"
+			}
+			redirectURL = fmt.Sprintf("http://%s:%d/api/oauth/callback", host, cfg.Server.Port)
 		}
-		adapterReg.Register(gmailadapter.New(
-			cfg.Google.ClientID,
-			cfg.Google.ClientSecret,
-			redirectURL,
-		))
-		logger.Info("gmail adapter registered")
+		// Register all Google adapters — they share the same OAuth credentials (vault key "google").
+		adapterReg.Register(gmailadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
+		adapterReg.Register(calendaradapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
+		adapterReg.Register(driveadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
+		adapterReg.Register(contactsadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
+		logger.Info("google adapters registered (gmail, calendar, drive, contacts)")
 	} else {
-		logger.Info("gmail adapter not registered (GOOGLE_CLIENT_ID not set)")
+		logger.Info("google adapters not registered (GOOGLE_CLIENT_ID not set)")
+	}
+
+	// GitHub adapter — always registered; activated per-user via API key.
+	adapterReg.Register(githubadapter.New())
+	logger.Info("github adapter registered")
+
+	// iMessage adapter — only registered if available (macOS with chat.db).
+	imsg := imessageadapter.New()
+	if imsg.Available() {
+		adapterReg.Register(imsg)
+		logger.Info("imessage adapter registered")
+	} else {
+		logger.Info("imessage adapter not available (requires macOS with Messages.app configured)")
 	}
 
 	// ── Notifier ─────────────────────────────────────────────────────────────

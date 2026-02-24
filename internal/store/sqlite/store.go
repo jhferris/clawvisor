@@ -769,6 +769,17 @@ func (s *Store) DeletePendingApproval(ctx context.Context, requestID string) err
 	return err
 }
 
+func (s *Store) ListPendingApprovals(ctx context.Context, userID string) ([]*store.PendingApproval, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		FROM pending_approvals WHERE user_id = ? AND expires_at > datetime('now') ORDER BY created_at ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSQLitePendingApprovals(rows)
+}
+
 func (s *Store) ListExpiredPendingApprovals(ctx context.Context) ([]*store.PendingApproval, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
@@ -777,7 +788,10 @@ func (s *Store) ListExpiredPendingApprovals(ctx context.Context) ([]*store.Pendi
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSQLitePendingApprovals(rows)
+}
 
+func scanSQLitePendingApprovals(rows *sql.Rows) ([]*store.PendingApproval, error) {
 	var pas []*store.PendingApproval
 	for rows.Next() {
 		pa := &store.PendingApproval{}

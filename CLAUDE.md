@@ -161,8 +161,8 @@ Read the full spec for the current phase before writing any code. Each phase doc
 - [x] **Phase 2** — Policy Engine
 - [ ] **Phase 3** — Core Gateway & First Adapter (Gmail)
 - [ ] **Phase 4** — Dashboard (Frontend)
-- [ ] **Phase 5** — OpenClaw Skill
-- [ ] **Phase 6** — Extended Adapters (Calendar, Drive, Contacts, GitHub)
+- [x] **Phase 5** — OpenClaw Skill
+- [x] **Phase 6** — Extended Adapters (Calendar, Drive, Contacts, GitHub, iMessage)
 - [ ] **Phase 7** — Retrospective Review
 - [ ] **Phase 8** — MCP Server
 - [ ] **Phase 9** — Production Hardening

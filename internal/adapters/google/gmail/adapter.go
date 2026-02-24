@@ -51,16 +51,26 @@ func (a *GmailAdapter) SupportedActions() []string {
 	return []string{"list_messages", "get_message", "send_message"}
 }
 
+// allGoogleScopes is the unified scope set requested for all Google services.
+// All Google adapters (Gmail, Calendar, Drive, Contacts) request the same scope set
+// so a single OAuth consent grants access to all of them.
+var allGoogleScopes = []string{
+	"https://www.googleapis.com/auth/gmail.readonly",
+	"https://www.googleapis.com/auth/gmail.send",
+	"https://www.googleapis.com/auth/calendar.readonly",
+	"https://www.googleapis.com/auth/calendar.events",
+	"https://www.googleapis.com/auth/drive.readonly",
+	"https://www.googleapis.com/auth/drive.file",
+	"https://www.googleapis.com/auth/contacts.readonly",
+}
+
 func (a *GmailAdapter) OAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		RedirectURL:  a.redirectURL,
-		Scopes: []string{
-			"https://www.googleapis.com/auth/gmail.readonly",
-			"https://www.googleapis.com/auth/gmail.send",
-		},
-		Endpoint: google.Endpoint,
+		Scopes:       allGoogleScopes,
+		Endpoint:     google.Endpoint,
 	}
 }
 
@@ -70,10 +80,7 @@ func (a *GmailAdapter) CredentialFromToken(token *oauth2.Token) ([]byte, error) 
 		AccessToken:  token.AccessToken,
 		RefreshToken: token.RefreshToken,
 		Expiry:       token.Expiry,
-		Scopes: []string{
-			"https://www.googleapis.com/auth/gmail.readonly",
-			"https://www.googleapis.com/auth/gmail.send",
-		},
+		Scopes:       allGoogleScopes,
 	}
 	return json.Marshal(cred)
 }

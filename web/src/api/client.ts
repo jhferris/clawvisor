@@ -12,6 +12,28 @@ export function getAccessToken(): string | null {
   return accessToken
 }
 
+// ── 401 refresh callback ───────────────────────────────────────────────────────
+// AuthProvider registers this so the API client can silently refresh the access
+// token when a data endpoint returns 401, without every caller needing to know.
+
+type RefreshFn = () => Promise<string> // resolves to new access token
+
+let _refreshFn: RefreshFn | null = null
+let _refreshPromise: Promise<string> | null = null // deduplicates concurrent 401s
+
+export function setRefreshCallback(fn: RefreshFn | null) {
+  _refreshFn = fn
+}
+
+// All concurrent 401s share one in-flight refresh so the single-use token
+// is only consumed once.
+function doRefreshOnce(): Promise<string> {
+  if (_refreshPromise) return _refreshPromise
+  if (!_refreshFn) return Promise.reject(new Error('no refresh callback registered'))
+  _refreshPromise = _refreshFn().finally(() => { _refreshPromise = null })
+  return _refreshPromise
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -41,6 +63,24 @@ async function request<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'include',
   })
+
+  // On 401 from a non-auth endpoint, attempt a single silent token refresh and
+  // retry the original request. All concurrent 401s share one refresh call.
+  if (res.status === 401 && _refreshFn && !path.startsWith('/api/auth/')) {
+    const newToken = await doRefreshOnce() // throws if refresh fails → clears auth
+    const retryRes = await fetch(url, {
+      method,
+      headers: { ...headers, Authorization: `Bearer ${newToken}` },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: 'include',
+    })
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({ error: retryRes.statusText }))
+      throw new APIError(retryRes.status, err.error ?? retryRes.statusText, err.code)
+    }
+    if (retryRes.status === 204) return undefined as T
+    return retryRes.json()
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -251,10 +291,14 @@ export const api = {
   },
   services: {
     list: () => get<{ services: ServiceInfo[] }>('/api/services'),
-    oauthStartUrl: (serviceID: string, pendingReqId?: string) => {
-      const base = `/api/oauth/start?service=${encodeURIComponent(serviceID)}`
-      return pendingReqId ? `${base}&pending_request_id=${pendingReqId}` : base
-    },
+    // Returns the OAuth consent URL via authenticated fetch (fixes missing-auth-header issue).
+    oauthGetUrl: (serviceID: string, pendingReqId?: string) =>
+      get<{ url: string }>('/api/oauth/url', {
+        service: serviceID,
+        ...(pendingReqId ? { pending_request_id: pendingReqId } : {}),
+      }),
+    activateWithKey: (serviceID: string, token: string) =>
+      post<{ status: string; service: string }>(`/api/services/${serviceID}/activate-key`, { token }),
   },
   policies: {
     list: (roleId?: string) =>

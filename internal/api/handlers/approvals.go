@@ -38,20 +38,16 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List pending approvals via the audit log (outcome = "pending").
-	entries, total, err := h.st.ListAuditEntries(r.Context(), user.ID, store.AuditFilter{
-		Outcome: "pending",
-		Limit:   50,
-	})
+	entries, err := h.st.ListPendingApprovals(r.Context(), user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not list pending approvals")
 		return
 	}
 	if entries == nil {
-		entries = []*store.AuditEntry{}
+		entries = []*store.PendingApproval{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total":   total,
+		"total":   len(entries),
 		"entries": entries,
 	})
 }

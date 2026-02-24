@@ -2,9 +2,9 @@
 name: clawvisor
 description: >
   Route tool requests through Clawvisor for policy enforcement, credential
-  vaulting, and human approval flows. Use for Gmail, Calendar, Drive,
-  Contacts, and GitHub. Clawvisor enforces the user's policies and injects
-  credentials — the agent never handles secrets directly.
+  vaulting, and human approval flows. Use for Gmail, Calendar, Drive, Contacts,
+  GitHub, and iMessage (macOS). Clawvisor enforces the user's policies and
+  injects credentials — the agent never handles secrets directly.
 version: 0.1.0
 homepage: https://github.com/ericlevine/clawvisor-gatekeeper
 metadata:
@@ -224,12 +224,25 @@ return the outcome if it has already been resolved.
 | Action | Key params | Description |
 |---|---|---|
 | `list_issues` | `owner`, `repo`, `state` (opt) | List issues on a repo |
-| `get_issue` | `owner`, `repo`, `issue_number` | Get issue details |
+| `get_issue` | `owner`, `repo`, `number` | Get issue details |
 | `create_issue` | `owner`, `repo`, `title`, `body` | Create an issue |
+| `comment_issue` | `owner`, `repo`, `number`, `body` | Add a comment to an issue |
 | `list_prs` | `owner`, `repo`, `state` (opt) | List pull requests |
-| `get_pr` | `owner`, `repo`, `pr_number` | Get PR details |
-| `create_pr` | `owner`, `repo`, `title`, `body`, `head`, `base` | Open a pull request |
+| `get_pr` | `owner`, `repo`, `number` | Get PR details |
 | `list_repos` | `org` (opt) | List repositories |
+| `search_code` | `query`, `repo` (opt) | Search code |
+
+**Note:** GitHub uses a personal access token (PAT), not OAuth. Activate via the dashboard Services page — enter your PAT when prompted.
+
+### apple.imessage *(macOS only)*
+| Action | Key params | Description |
+|---|---|---|
+| `search_messages` | `query`, `contact` (opt), `days_back` (opt) | Search messages by content/sender |
+| `list_threads` | `max_results` (opt) | List recent conversation threads |
+| `get_thread` | `contact` or `thread_id`, `days_back` (opt) | Get messages from a conversation |
+| `send_message` | `to`, `text` | Send an iMessage (always requires approval) |
+
+**Note:** Only available on macOS with Messages.app configured. Requires Full Disk Access permission in System Settings → Privacy & Security. `send_message` always routes to approval regardless of policy.
 
 ---
 

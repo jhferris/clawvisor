@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -100,6 +101,50 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": services})
 }
 
+// OAuthGetURL returns the OAuth2 authorization URL as JSON without redirecting.
+// The client fetches this endpoint (with Authorization header) and then navigates
+// to the returned URL — e.g. window.open(url, '_blank').
+//
+// GET /api/oauth/url?service=google.gmail[&pending_request_id=...]
+// Auth: user JWT
+// Response: {"url": "https://accounts.google.com/..."}
+func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	serviceID := r.URL.Query().Get("service")
+	if serviceID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "service is required")
+		return
+	}
+
+	adapter, ok := h.adapterReg.Get(serviceID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("service %q not found", serviceID))
+		return
+	}
+
+	oauthCfg := adapter.OAuthConfig()
+	if oauthCfg == nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "service does not use OAuth2")
+		return
+	}
+
+	stateToken := uuid.New().String()
+	h.oauthStates.Store(stateToken, oauthStateEntry{
+		UserID:       user.ID,
+		ServiceID:    serviceID,
+		PendingReqID: r.URL.Query().Get("pending_request_id"),
+		ExpiresAt:    time.Now().Add(10 * time.Minute),
+	})
+
+	authURL := oauthCfg.AuthCodeURL(stateToken)
+	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
+}
+
 // OAuthStart generates an OAuth2 consent URL and redirects the user.
 //
 // GET /api/oauth/start?service=google.gmail[&pending_request_id=...]
@@ -142,6 +187,8 @@ func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // OAuthCallback exchanges the authorization code for tokens and stores the credential.
+// It serves an HTML page that closes the popup and notifies the opener via postMessage,
+// rather than redirecting — the dashboard stays open throughout the OAuth flow.
 //
 // GET /api/oauth/callback?code=...&state=...
 func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -149,24 +196,24 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	code := r.URL.Query().Get("code")
 
 	if state == "" || code == "" {
-		http.Redirect(w, r, h.baseURL+"/?error=oauth_missing_params", http.StatusFound)
+		oauthPopupClose(w, "Missing OAuth parameters.")
 		return
 	}
 
 	val, ok := h.oauthStates.LoadAndDelete(state)
 	if !ok {
-		http.Redirect(w, r, h.baseURL+"/?error=oauth_invalid_state", http.StatusFound)
+		oauthPopupClose(w, "Invalid or expired OAuth state. Please try again.")
 		return
 	}
 	entry := val.(oauthStateEntry)
 	if time.Now().After(entry.ExpiresAt) {
-		http.Redirect(w, r, h.baseURL+"/?error=oauth_state_expired", http.StatusFound)
+		oauthPopupClose(w, "OAuth session expired. Please try again.")
 		return
 	}
 
 	adapter, ok := h.adapterReg.Get(entry.ServiceID)
 	if !ok {
-		http.Redirect(w, r, h.baseURL+"/?error=service_not_found", http.StatusFound)
+		oauthPopupClose(w, "Service not found.")
 		return
 	}
 
@@ -174,21 +221,21 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	token, err := oauthCfg.Exchange(r.Context(), code)
 	if err != nil {
 		h.logger.Warn("oauth token exchange failed", "service", entry.ServiceID, "err", err)
-		http.Redirect(w, r, h.baseURL+"/?error=oauth_exchange_failed", http.StatusFound)
+		oauthPopupClose(w, "Token exchange with provider failed.")
 		return
 	}
 
 	credBytes, err := adapter.CredentialFromToken(token)
 	if err != nil {
 		h.logger.Warn("credential from token failed", "service", entry.ServiceID, "err", err)
-		http.Redirect(w, r, h.baseURL+"/?error=credential_failed", http.StatusFound)
+		oauthPopupClose(w, "Failed to process credential.")
 		return
 	}
 
 	vKey := vaultKeyForService(entry.ServiceID)
 	if err := h.vault.Set(r.Context(), entry.UserID, vKey, credBytes); err != nil {
 		h.logger.Warn("vault set failed", "service", entry.ServiceID, "err", err)
-		http.Redirect(w, r, h.baseURL+"/?error=vault_failed", http.StatusFound)
+		oauthPopupClose(w, "Failed to store credential in vault.")
 		return
 	}
 
@@ -200,7 +247,95 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 		go h.reactivatePendingRequest(context.Background(), entry.UserID, entry.PendingReqID)
 	}
 
-	http.Redirect(w, r, h.baseURL+"/", http.StatusFound)
+	oauthPopupClose(w, "")
+}
+
+// oauthPopupClose serves a minimal HTML page that closes the OAuth popup window.
+// On success (errMsg == "") it posts a message to the opener so the dashboard can
+// refresh its services list. On error it shows the message and auto-closes after 5s.
+func oauthPopupClose(w http.ResponseWriter, errMsg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if errMsg != "" {
+		fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Error – Clawvisor</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
+.card{background:#fff;border-radius:8px;padding:32px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1);max-width:320px}
+h2{color:#dc2626;margin:0 0 8px}p{color:#6b7280;margin:4px 0;font-size:14px}</style></head>
+<body><div class="card"><h2>Authorization failed</h2><p>%s</p><p>This window will close automatically.</p></div>
+<script>setTimeout(function(){window.close()},5000)</script></body></html>`,
+			html.EscapeString(errMsg))
+		return
+	}
+	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Authorized – Clawvisor</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
+.card{background:#fff;border-radius:8px;padding:32px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1);max-width:320px}
+h2{color:#16a34a;margin:0 0 8px}p{color:#6b7280;margin:0;font-size:14px}</style></head>
+<body><div class="card"><h2>&#10003; Authorized</h2><p>Service activated. This window will close automatically.</p></div>
+<script>
+if(window.opener){try{window.opener.postMessage({type:'clawvisor_oauth_done'},'*')}catch(e){}}
+setTimeout(function(){window.close()},1500)
+</script></body></html>`)
+}
+
+// ActivateWithKey activates a non-OAuth service (e.g. GitHub) using an API key.
+//
+// POST /api/services/{serviceID}/activate-key
+// Auth: user JWT
+// Body: {"token": "ghp_..."}
+func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	serviceID := r.PathValue("serviceID")
+	if serviceID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "serviceID is required")
+		return
+	}
+
+	adapter, ok := h.adapterReg.Get(serviceID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("service %q not found", serviceID))
+		return
+	}
+	if adapter.OAuthConfig() != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "service uses OAuth — use /api/oauth/start instead")
+		return
+	}
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Token == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "token is required")
+		return
+	}
+
+	// Build and validate the credential bytes.
+	credBytes, err := json.Marshal(map[string]string{"type": "api_key", "token": body.Token})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to encode credential")
+		return
+	}
+	if err := adapter.ValidateCredential(credBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_CREDENTIAL", err.Error())
+		return
+	}
+
+	vKey := vaultKeyForService(serviceID)
+	if err := h.vault.Set(r.Context(), user.ID, vKey, credBytes); err != nil {
+		h.logger.Warn("vault set failed (api key)", "service", serviceID, "err", err)
+		writeError(w, http.StatusInternalServerError, "VAULT_ERROR", "failed to store credential")
+		return
+	}
+	_ = h.st.UpsertServiceMeta(r.Context(), user.ID, serviceID, time.Now())
+	h.logger.Info("service activated via api key", "user", user.ID, "service", serviceID)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "activated", "service": serviceID})
 }
 
 // reactivatePendingRequest re-executes a pending request after service activation.

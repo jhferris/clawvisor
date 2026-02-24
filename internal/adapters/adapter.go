@@ -20,6 +20,15 @@ type Result struct {
 	Data    any    `json:"data"`
 }
 
+// ContactsChecker is an optional interface implemented by the google.contacts adapter.
+// The gateway handler uses it to pre-resolve the recipient_in_contacts policy condition
+// before calling the policy evaluator (which must remain a pure function).
+type ContactsChecker interface {
+	// IsInContacts returns true if the given email address is found in the user's contacts.
+	// cred is the raw vault credential bytes (vault key "google").
+	IsInContacts(ctx context.Context, cred []byte, email string) (bool, error)
+}
+
 // Adapter is the interface every service adapter implements.
 type Adapter interface {
 	// ServiceID returns the adapter's canonical service identifier (e.g. "google.gmail").

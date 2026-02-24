@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
+	skillfiles "github.com/ericlevine/clawvisor/skills"
 )
 
 // Server is the Clawvisor HTTP server.
@@ -85,7 +87,13 @@ func New(
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	baseURL := fmt.Sprintf("http://%s", s.cfg.Server.Addr())
+	// Normalize bind address to a user-reachable host. 0.0.0.0 / 127.0.0.1
+	// are valid bind addresses but not useful as redirect targets in a browser.
+	baseHost := s.cfg.Server.Host
+	if baseHost == "0.0.0.0" || baseHost == "127.0.0.1" || baseHost == "" {
+		baseHost = "localhost"
+	}
+	baseURL := fmt.Sprintf("http://%s:%d", baseHost, s.cfg.Server.Port)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth)
@@ -160,8 +168,10 @@ func (s *Server) routes() http.Handler {
 
 	// Services / OAuth (user JWT)
 	mux.Handle("GET /api/services", user(servicesHandler.List))
-	mux.Handle("GET /api/oauth/start", user(servicesHandler.OAuthStart))
+	mux.Handle("GET /api/oauth/url", user(servicesHandler.OAuthGetURL))     // fetch → returns {"url":"..."}
+	mux.Handle("GET /api/oauth/start", user(servicesHandler.OAuthStart))    // kept for compat
 	mux.HandleFunc("GET /api/oauth/callback", servicesHandler.OAuthCallback) // no auth: browser redirect
+	mux.Handle("POST /api/services/{serviceID}/activate-key", user(servicesHandler.ActivateWithKey))
 
 	// Approvals (user JWT)
 	mux.Handle("GET /api/approvals", user(approvalsHandler.List))
@@ -172,6 +182,15 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/audit", user(auditHandler.List))
 	mux.Handle("GET /api/audit/{id}", user(auditHandler.Get))
 
+	// Skill files (no auth — served so OpenClaw instances can install the skill)
+	// GET /skill         → redirects to /skill/SKILL.md
+	// GET /skill/*       → embedded clawvisor skill tree (SKILL.md, policies/, …)
+	skillFS, _ := fs.Sub(skillfiles.FS, "clawvisor")
+	skillFileHandler := http.StripPrefix("/skill", http.FileServer(http.FS(skillFS)))
+	mux.HandleFunc("GET /skill", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/skill/SKILL.md", http.StatusFound)
+	})
+	mux.Handle("/skill/", skillFileHandler)
 
 	// SPA fallback
 	if s.cfg.Server.FrontendDir != "" {
