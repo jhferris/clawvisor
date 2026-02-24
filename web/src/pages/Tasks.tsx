@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type Task, type TaskAction, type Agent } from '../api/client'
 import { formatDistanceToNow, differenceInSeconds } from 'date-fns'
+import { serviceName, actionName } from '../lib/services'
 
 const STATUS_STYLES: Record<string, string> = {
   pending_approval: 'bg-orange-100 text-orange-800',
@@ -25,7 +26,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-600'}`}>
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-600'}`}>
       {STATUS_LABELS[status] ?? status}
     </span>
   )
@@ -44,36 +45,44 @@ function ExpiryCountdown({ expiresAt }: { expiresAt: string }) {
   )
 }
 
-function ActionsList({ actions, highlight }: { actions: TaskAction[]; highlight?: TaskAction }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {actions.map((a, i) => {
-        const isHighlight = highlight && a.service === highlight.service && a.action === highlight.action
-        return (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded border ${
-              isHighlight
-                ? 'bg-orange-50 border-orange-200 text-orange-700'
-                : 'bg-gray-50 border-gray-200 text-gray-700'
-            }`}
-          >
-            <span className="font-mono">{a.service}:{a.action}</span>
-            {a.auto_execute && (
-              <span className="text-green-600 font-medium" title="Auto-execute enabled">auto</span>
-            )}
-          </span>
-        )
-      })}
-    </div>
-  )
+function summarizeActions(actions: TaskAction[]): string {
+  const groups = new Map<string, { auto: string[]; manual: string[] }>()
+  for (const a of actions) {
+    const svc = serviceName(a.service)
+    if (!groups.has(svc)) groups.set(svc, { auto: [], manual: [] })
+    const g = groups.get(svc)!
+    if (a.auto_execute) {
+      g.auto.push(actionName(a.action).toLowerCase())
+    } else {
+      g.manual.push(actionName(a.action).toLowerCase())
+    }
+  }
+
+  const parts: string[] = []
+  for (const [svc, g] of groups) {
+    if (g.auto.length > 0) {
+      parts.push(`Can ${joinList(g.auto)} on ${svc}`)
+    }
+    if (g.manual.length > 0) {
+      parts.push(`Can ${joinList(g.manual)} on ${svc} with approval`)
+    }
+  }
+  return parts.join(' · ') || 'No actions authorized'
+}
+
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1]
 }
 
 function LifetimeBadge({ lifetime }: { lifetime?: string }) {
   if (!lifetime || lifetime === 'session') return null
   return (
-    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
-      Standing
+    <span
+      className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700"
+      title="This task does not expire and remains active until revoked"
+    >
+      Ongoing
     </span>
   )
 }
@@ -131,18 +140,17 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
     <div className={`border rounded-lg p-5 bg-white space-y-3 ${
       needsApproval || needsExpansion ? 'border-orange-200' : ''
     }`}>
-      {/* Header */}
+      {/* Header — purpose as hero */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <p className="text-base font-semibold text-gray-900">{task.purpose}</p>
+          <div className="flex items-center gap-2 mt-1.5">
             <StatusBadge status={task.status} />
             <LifetimeBadge lifetime={task.lifetime} />
             <span className="text-xs text-gray-400">
-              {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
+              {agentName} · {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
             </span>
           </div>
-          <p className="text-sm font-medium text-gray-900">{task.purpose}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Agent: {agentName}</p>
         </div>
         <div className="text-right shrink-0 space-y-1">
           {task.status === 'active' && !isStanding && task.expires_at && (
@@ -157,19 +165,16 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
         </div>
       </div>
 
-      {/* Authorized actions */}
-      <div>
-        <div className="text-xs text-gray-500 mb-1">Authorized actions</div>
-        <ActionsList actions={task.authorized_actions} highlight={task.pending_action ?? undefined} />
-      </div>
+      {/* Authorized actions — prose summary */}
+      <p className="text-sm text-gray-600">{summarizeActions(task.authorized_actions)}</p>
 
       {/* Scope expansion detail */}
       {needsExpansion && task.pending_action && (
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
           <div className="text-xs font-medium text-orange-800">Scope expansion requested</div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono bg-white border border-orange-200 rounded px-2 py-0.5 text-orange-700">
-              {task.pending_action.service}:{task.pending_action.action}
+            <span className="text-xs bg-white border border-orange-200 rounded px-2 py-0.5 text-orange-700">
+              {serviceName(task.pending_action.service)}: {actionName(task.pending_action.action)}
             </span>
             {task.pending_action.auto_execute && (
               <span className="text-xs text-green-600 font-medium">auto-execute</span>

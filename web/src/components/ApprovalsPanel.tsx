@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, type PendingApproval } from '../api/client'
 import { formatDistanceToNow, differenceInSeconds } from 'date-fns'
+import { serviceName, actionName } from '../lib/services'
 
 function CountdownTimer({ expiresAt }: { expiresAt: string }) {
   const secs = Math.max(0, differenceInSeconds(new Date(expiresAt), new Date()))
@@ -50,7 +51,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
       <div className="flex items-start justify-between">
         <div>
           <span className="text-sm font-semibold text-gray-900">
-            {blob.service} · {blob.action}
+            {serviceName(blob.service)} · {actionName(blob.action)}
           </span>
           <CountdownTimer expiresAt={approval.expires_at} />
         </div>

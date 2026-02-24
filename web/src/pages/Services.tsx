@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ServiceInfo } from '../api/client'
 import { formatDistanceToNow } from 'date-fns'
+import { serviceName, actionName, serviceBrand } from '../lib/services'
 
 function ServiceCard({ svc }: { svc: ServiceInfo }) {
   const qc = useQueryClient()
@@ -49,11 +50,12 @@ function ServiceCard({ svc }: { svc: ServiceInfo }) {
   const isActivated = svc.status === 'activated'
 
   return (
-    <div className="bg-white border rounded-lg p-5 space-y-3">
+    <div className={`bg-white border rounded-lg p-5 space-y-3 border-l-4 ${serviceBrand(svc.id).border}`}>
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="font-semibold text-gray-900">{svc.id}</h3>
-          <p className="text-xs text-gray-400 mt-0.5">{svc.actions.join(' · ')}</p>
+          <h3 className="font-semibold text-gray-900">{serviceName(svc.id)}</h3>
+          <p className="text-xs text-gray-400 mt-0.5">{svc.id}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{svc.actions.map(a => actionName(a)).join(' · ')}</p>
         </div>
         <StatusBadge status={svc.status} />
       </div>

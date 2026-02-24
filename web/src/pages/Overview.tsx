@@ -1,44 +1,122 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api, type AuditEntry, type Task } from '../api/client'
-import { formatDistanceToNow } from 'date-fns'
+import { api, type Task, type Agent } from '../api/client'
+import { serviceName, actionName } from '../lib/services'
 
 interface Props {
   pendingCount: number
-  actionableTaskCount: number
+  actionableTaskCount?: number
 }
 
-const OUTCOME_COLORS: Record<string, string> = {
-  executed: 'bg-green-100 text-green-800',
-  blocked: 'bg-red-100 text-red-800',
-  pending: 'bg-yellow-100 text-yellow-800',
-  denied: 'bg-gray-100 text-gray-700',
-  timeout: 'bg-gray-100 text-gray-700',
-  error: 'bg-red-100 text-red-800',
+function summarizeTaskActions(actions: Task['authorized_actions']): string {
+  const groups = new Map<string, { auto: string[]; manual: string[] }>()
+  for (const a of actions) {
+    const svc = serviceName(a.service)
+    if (!groups.has(svc)) groups.set(svc, { auto: [], manual: [] })
+    const g = groups.get(svc)!
+    if (a.auto_execute) {
+      g.auto.push(actionName(a.action))
+    } else {
+      g.manual.push(actionName(a.action))
+    }
+  }
+
+  const parts: string[] = []
+  for (const [svc, g] of groups) {
+    if (g.auto.length > 0) parts.push(`${g.auto.join(', ')} on ${svc}`)
+    if (g.manual.length > 0) parts.push(`${g.manual.join(', ')} on ${svc} with approval`)
+  }
+  return parts.join(' · ') || 'No actions'
 }
 
-function OutcomeBadge({ outcome }: { outcome: string }) {
+function PendingTaskCard({ task, agentName }: { task: Task; agentName: string }) {
+  const qc = useQueryClient()
+  const [result, setResult] = useState<string | null>(null)
+
+  const approveMut = useMutation({
+    mutationFn: () => api.tasks.approve(task.id),
+    onSuccess: () => {
+      setResult('Approved')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+
+  const denyMut = useMutation({
+    mutationFn: () => api.tasks.deny(task.id),
+    onSuccess: () => {
+      setResult('Denied')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+
+  const expandApproveMut = useMutation({
+    mutationFn: () => api.tasks.expandApprove(task.id),
+    onSuccess: () => {
+      setResult('Expansion approved')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+
+  const expandDenyMut = useMutation({
+    mutationFn: () => api.tasks.expandDeny(task.id),
+    onSuccess: () => {
+      setResult('Expansion denied')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+
+  const isPending = approveMut.isPending || denyMut.isPending || expandApproveMut.isPending || expandDenyMut.isPending
+  const isExpansion = task.status === 'pending_scope_expansion'
+
+  if (result) {
+    return (
+      <div className="border rounded-lg p-4 bg-gray-50 text-sm text-gray-500">{result}</div>
+    )
+  }
+
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${OUTCOME_COLORS[outcome] ?? 'bg-gray-100 text-gray-700'}`}>
-      {outcome}
-    </span>
+    <div className="border border-orange-200 rounded-lg p-4 bg-white space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-900">{task.purpose}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {agentName} · {summarizeTaskActions(task.authorized_actions)}
+          </p>
+        </div>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 font-medium shrink-0">
+          {isExpansion ? 'Scope expansion' : 'New task'}
+        </span>
+      </div>
+
+      {isExpansion && task.pending_action && (
+        <div className="text-xs text-orange-700 bg-orange-50 rounded p-2">
+          Wants to add: {serviceName(task.pending_action.service)}: {actionName(task.pending_action.action)}
+          {task.pending_reason && <span className="italic ml-1">— "{task.pending_reason}"</span>}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => isExpansion ? expandApproveMut.mutate() : approveMut.mutate()}
+          disabled={isPending}
+          className="flex-1 py-1.5 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          Approve
+        </button>
+        <button
+          onClick={() => isExpansion ? expandDenyMut.mutate() : denyMut.mutate()}
+          disabled={isPending}
+          className="flex-1 py-1.5 text-sm rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+        >
+          Deny
+        </button>
+      </div>
+    </div>
   )
 }
 
-function AuditRow({ entry }: { entry: AuditEntry }) {
-  return (
-    <tr className="border-t hover:bg-gray-50">
-      <td className="px-4 py-2 text-sm text-gray-500">
-        {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
-      </td>
-      <td className="px-4 py-2 text-sm font-mono">{entry.service}</td>
-      <td className="px-4 py-2 text-sm font-mono">{entry.action}</td>
-      <td className="px-4 py-2"><OutcomeBadge outcome={entry.outcome} /></td>
-    </tr>
-  )
-}
-
-export default function Overview({ pendingCount, actionableTaskCount }: Props) {
+export default function Overview({ pendingCount }: Props) {
   const { data: services } = useQuery({
     queryKey: ['services'],
     queryFn: () => api.services.list(),
@@ -47,102 +125,115 @@ export default function Overview({ pendingCount, actionableTaskCount }: Props) {
     queryKey: ['audit', { limit: 10 }],
     queryFn: () => api.audit.list({ limit: 10 }),
   })
-
   const { data: tasksData } = useQuery({
     queryKey: ['tasks'],
     queryFn: () => api.tasks.list(),
+    refetchInterval: 10_000,
+  })
+  const { data: agentsData } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.agents.list(),
   })
 
+  const agentMap = new Map<string, string>()
+  for (const a of (agentsData ?? []) as Agent[]) {
+    agentMap.set(a.id, a.name)
+  }
+
   const activatedCount = services?.services.filter(s => s.status === 'activated').length ?? 0
-  const recentEntries = auditData?.entries ?? []
-  const activeTasks = (tasksData?.tasks ?? []).filter((t: Task) => t.status === 'active')
-  const activeTaskCount = activeTasks.length
+  const allTasks = tasksData?.tasks ?? []
+  const actionableTasks = allTasks.filter(
+    (t: Task) => t.status === 'pending_approval' || t.status === 'pending_scope_expansion'
+  )
+  const activeTasks = allTasks.filter((t: Task) => t.status === 'active')
+  const hasAnythingPending = actionableTasks.length > 0 || pendingCount > 0
 
   return (
     <div className="p-8 space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Attention area */}
+      {hasAnythingPending ? (
+        <section className="space-y-3">
+          {/* Pending task approvals — inline cards */}
+          {actionableTasks.map(task => (
+            <PendingTaskCard
+              key={task.id}
+              task={task}
+              agentName={agentMap.get(task.agent_id) ?? task.agent_id.slice(0, 8)}
+            />
+          ))}
+
+          {/* Pending request approvals banner */}
+          {pendingCount > 0 && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 px-5 py-4 flex items-center justify-between">
+              <span className="text-orange-800 font-medium">
+                {pendingCount} request approval{pendingCount > 1 ? 's' : ''} awaiting your decision
+              </span>
+              <span className="text-orange-600 text-sm">See the panel →</span>
+            </div>
+          )}
+        </section>
+      ) : (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-5 py-4 flex items-center gap-3">
+          <svg className="w-5 h-5 text-green-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <span className="text-green-800 font-medium">All clear — nothing needs your attention</span>
+        </div>
+      )}
+
+      {/* Active tasks summary */}
+      {activeTasks.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Active tasks
+              <span className="ml-2 text-sm font-normal text-gray-400">{activeTasks.length}</span>
+            </h2>
+            <Link to="/dashboard/tasks" className="text-sm text-blue-600 hover:underline">
+              View all
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {activeTasks.slice(0, 5).map(task => (
+              <div key={task.id} className="bg-white border rounded-lg px-4 py-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{task.purpose}</p>
+                  <p className="text-xs text-gray-400">{agentMap.get(task.agent_id) ?? task.agent_id.slice(0, 8)}</p>
+                </div>
+                {task.lifetime === 'standing' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium shrink-0">
+                    Ongoing
+                  </span>
+                )}
+              </div>
+            ))}
+            {activeTasks.length > 5 && (
+              <Link to="/dashboard/tasks" className="block text-center text-sm text-blue-600 hover:underline py-1">
+                +{activeTasks.length - 5} more
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Quick stats */}
+      <div className="grid grid-cols-2 gap-4">
         <StatCard
-          label="Activated Services"
+          label="Services connected"
           value={activatedCount}
           href="/dashboard/services"
           color="blue"
         />
         <StatCard
-          label="Active Tasks"
-          value={activeTaskCount}
-          href="/dashboard/tasks"
-          color={activeTaskCount > 0 ? 'blue' : 'gray'}
-        />
-        <StatCard
-          label="Pending Approvals"
-          value={pendingCount}
-          href="/dashboard"
-          color={pendingCount > 0 ? 'orange' : 'gray'}
-        />
-        <StatCard
-          label="Audit Entries"
+          label="Audit entries"
           value={auditData?.total ?? 0}
           href="/dashboard/audit"
           color="gray"
         />
       </div>
-
-      {/* Pending approvals banner */}
-      {pendingCount > 0 && (
-        <div className="rounded-lg border border-orange-200 bg-orange-50 px-5 py-4 flex items-center justify-between">
-          <span className="text-orange-800 font-medium">
-            {pendingCount} approval{pendingCount > 1 ? 's' : ''} awaiting your decision
-          </span>
-          <span className="text-orange-600 text-sm">See the panel →</span>
-        </div>
-      )}
-
-      {/* Pending task approvals banner */}
-      {actionableTaskCount > 0 && (
-        <Link
-          to="/dashboard/tasks"
-          className="block rounded-lg border border-orange-200 bg-orange-50 px-5 py-4 hover:bg-orange-100 transition-colors"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-orange-800 font-medium">
-              {actionableTaskCount} task{actionableTaskCount > 1 ? 's' : ''} awaiting your approval
-            </span>
-            <span className="text-orange-600 text-sm">Review tasks →</span>
-          </div>
-        </Link>
-      )}
-
-      {/* Recent audit activity */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-800">Recent Activity</h2>
-          <Link to="/dashboard/audit" className="text-sm text-blue-600 hover:underline">
-            View all
-          </Link>
-        </div>
-        {recentEntries.length === 0 ? (
-          <p className="text-sm text-gray-400">No activity yet. Set up an agent to get started.</p>
-        ) : (
-          <div className="bg-white border rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                <tr>
-                  <th className="px-4 py-2 text-left">Time</th>
-                  <th className="px-4 py-2 text-left">Service</th>
-                  <th className="px-4 py-2 text-left">Action</th>
-                  <th className="px-4 py-2 text-left">Outcome</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentEntries.map(e => <AuditRow key={e.id} entry={e} />)}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </div>
   )
 }

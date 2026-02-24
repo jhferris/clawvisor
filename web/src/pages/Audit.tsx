@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type AuditEntry } from '../api/client'
 import { formatDistanceToNow, format } from 'date-fns'
+import { serviceName, actionName, serviceBrand, formatServiceAction } from '../lib/services'
 
 const OUTCOMES = ['', 'executed', 'blocked', 'pending', 'denied', 'error', 'timeout']
 
@@ -33,8 +34,13 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
         <td className="px-4 py-2 text-xs text-gray-400 whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
           {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
         </td>
-        <td className="px-4 py-2 text-sm font-mono">{entry.service}</td>
-        <td className="px-4 py-2 text-sm font-mono">{entry.action}</td>
+        <td className="px-4 py-2 text-sm">
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${serviceBrand(entry.service).dot}`} />
+            {serviceName(entry.service)}
+          </span>
+        </td>
+        <td className="px-4 py-2 text-sm">{actionName(entry.action)}</td>
         <td className="px-4 py-2">
           <span className={`text-xs px-1.5 py-0.5 rounded ${entry.decision === 'block' ? 'bg-red-50 text-red-600' : entry.decision === 'approve' ? 'bg-yellow-50 text-yellow-700' : 'bg-green-50 text-green-700'}`}>
             {entry.decision}
@@ -49,14 +55,19 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
           <td colSpan={7} className="px-4 py-3">
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
-                <div className="text-gray-500 font-medium mb-1">Request</div>
+                <div className="text-gray-500 font-medium mb-1">
+                  {formatServiceAction(entry.service, entry.action)}
+                </div>
                 <pre className="bg-white border rounded p-2 overflow-auto max-h-48 text-gray-700">
                   {JSON.stringify(entry.params_safe, null, 2)}
                 </pre>
               </div>
               <div className="space-y-2">
                 {entry.reason && (
-                  <div><span className="text-gray-500">Reason:</span> {entry.reason}</div>
+                  <div className="bg-blue-50 rounded p-2">
+                    <div className="text-blue-600 font-medium mb-0.5">Agent's reason</div>
+                    <div className="text-gray-700">{entry.reason}</div>
+                  </div>
                 )}
                 {entry.data_origin && (
                   <div><span className="text-gray-500">Data origin:</span> {entry.data_origin}</div>
@@ -68,7 +79,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
                   <div><span className="text-gray-500">Policy:</span> {entry.policy_id}</div>
                 )}
                 {entry.safety_flagged && (
-                  <div className="text-orange-600">⚠ Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                  <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
                 )}
                 <div className="text-gray-400 font-mono">{entry.request_id}</div>
               </div>
@@ -142,12 +153,12 @@ export default function Audit() {
       {entries.length > 0 && (
         <div className="bg-white border rounded-lg overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+            <thead className="bg-gray-50 text-xs text-gray-500 font-medium">
               <tr>
                 <th className="px-4 py-2 text-left">Time</th>
                 <th className="px-4 py-2 text-left">Service</th>
                 <th className="px-4 py-2 text-left">Action</th>
-                <th className="px-4 py-2 text-left">Decision</th>
+                <th className="px-4 py-2 text-left">Authorization</th>
                 <th className="px-4 py-2 text-left">Outcome</th>
                 <th className="px-4 py-2 text-left">Duration</th>
                 <th className="px-4 py-2"></th>

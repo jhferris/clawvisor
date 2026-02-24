@@ -1,0 +1,124 @@
+// Shared service/action display utilities. Zero React dependencies.
+
+export const SERVICE_DISPLAY_NAMES: Record<string, string> = {
+  'google.gmail': 'Gmail',
+  'google.calendar': 'Google Calendar',
+  'google.drive': 'Google Drive',
+  'google.contacts': 'Google Contacts',
+  'github': 'GitHub',
+  'apple.imessage': 'iMessage',
+}
+
+export const SERVICE_BRAND_COLORS: Record<string, {
+  bg: string
+  bgLight: string
+  text: string
+  border: string
+  dot: string
+}> = {
+  'google.gmail': {
+    bg: 'bg-red-600',
+    bgLight: 'bg-red-50',
+    text: 'text-red-700',
+    border: 'border-red-400',
+    dot: 'bg-red-500',
+  },
+  'google.calendar': {
+    bg: 'bg-blue-600',
+    bgLight: 'bg-blue-50',
+    text: 'text-blue-700',
+    border: 'border-blue-400',
+    dot: 'bg-blue-500',
+  },
+  'google.drive': {
+    bg: 'bg-yellow-500',
+    bgLight: 'bg-yellow-50',
+    text: 'text-yellow-700',
+    border: 'border-yellow-400',
+    dot: 'bg-yellow-500',
+  },
+  'google.contacts': {
+    bg: 'bg-sky-600',
+    bgLight: 'bg-sky-50',
+    text: 'text-sky-700',
+    border: 'border-sky-400',
+    dot: 'bg-sky-500',
+  },
+  'github': {
+    bg: 'bg-gray-800',
+    bgLight: 'bg-gray-50',
+    text: 'text-gray-800',
+    border: 'border-gray-600',
+    dot: 'bg-gray-700',
+  },
+  'apple.imessage': {
+    bg: 'bg-green-600',
+    bgLight: 'bg-green-50',
+    text: 'text-green-700',
+    border: 'border-green-500',
+    dot: 'bg-green-500',
+  },
+}
+
+export const ACTION_DISPLAY_NAMES: Record<string, string> = {
+  // Gmail
+  list_messages: 'List messages',
+  get_message: 'Get message',
+  send_message: 'Send message',
+  // Calendar
+  list_events: 'List events',
+  get_event: 'Get event',
+  create_event: 'Create event',
+  update_event: 'Update event',
+  delete_event: 'Delete event',
+  list_calendars: 'List calendars',
+  // Drive
+  list_files: 'List files',
+  get_file: 'Get file',
+  create_file: 'Create file',
+  update_file: 'Update file',
+  search_files: 'Search files',
+  // Contacts
+  list_contacts: 'List contacts',
+  get_contact: 'Get contact',
+  search_contacts: 'Search contacts',
+  // GitHub
+  list_issues: 'List issues',
+  get_issue: 'Get issue',
+  create_issue: 'Create issue',
+  comment_issue: 'Comment on issue',
+  list_prs: 'List PRs',
+  get_pr: 'Get PR',
+  list_repos: 'List repos',
+  search_code: 'Search code',
+  // iMessage
+  search_messages: 'Search messages',
+  list_threads: 'List threads',
+  get_thread: 'Get thread',
+  // send_message already covered by Gmail — same key, same label
+}
+
+const DEFAULT_BRAND = {
+  bg: 'bg-gray-600',
+  bgLight: 'bg-gray-50',
+  text: 'text-gray-700',
+  border: 'border-gray-400',
+  dot: 'bg-gray-400',
+}
+
+export function serviceName(id: string): string {
+  return SERVICE_DISPLAY_NAMES[id] ?? id
+}
+
+export function serviceBrand(id: string) {
+  return SERVICE_BRAND_COLORS[id] ?? DEFAULT_BRAND
+}
+
+export function actionName(action: string): string {
+  if (action === '*') return 'All actions'
+  return ACTION_DISPLAY_NAMES[action] ?? action.replace(/_/g, ' ')
+}
+
+export function formatServiceAction(service: string, action: string): string {
+  return `${serviceName(service)}: ${actionName(action)}`
+}

@@ -1,155 +1,288 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type Restriction } from '../api/client'
-import { formatDistanceToNow } from 'date-fns'
+import { api, type Restriction, type ServiceInfo } from '../api/client'
+import { serviceName, actionName, serviceBrand } from '../lib/services'
 
-export default function Restrictions() {
+function Toggle({
+  checked,
+  disabled,
+  loading,
+  onChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  loading?: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled || loading}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+        disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+      } ${loading ? 'opacity-60' : ''} ${checked ? 'bg-red-500' : 'bg-gray-300'}`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+          checked ? 'translate-x-[18px] ml-0' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  )
+}
+
+function ActionRow({
+  serviceId,
+  action,
+  restrictionId,
+  disabled,
+}: {
+  serviceId: string
+  action: string
+  restrictionId: string | null
+  disabled: boolean
+}) {
   const qc = useQueryClient()
-
-  const [service, setService] = useState('')
-  const [action, setAction] = useState('*')
   const [reason, setReason] = useState('')
-  const [formError, setFormError] = useState<string | null>(null)
-
-  const { data: restrictions, isLoading } = useQuery({
-    queryKey: ['restrictions'],
-    queryFn: () => api.restrictions.list(),
-  })
+  const [showReason, setShowReason] = useState(false)
 
   const createMut = useMutation({
-    mutationFn: () => api.restrictions.create(service.trim(), action.trim() || '*', reason.trim()),
+    mutationFn: (r: string) => api.restrictions.create(serviceId, action, r),
     onSuccess: () => {
-      setService('')
-      setAction('*')
       setReason('')
-      setFormError(null)
+      setShowReason(false)
       qc.invalidateQueries({ queryKey: ['restrictions'] })
-    },
-    onError: (err: Error) => {
-      setFormError(err.message)
     },
   })
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) => api.restrictions.delete(id),
+    mutationFn: () => api.restrictions.delete(restrictionId!),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['restrictions'] })
     },
   })
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!service.trim()) {
-      setFormError('Service is required.')
-      return
+  const isBlocked = !!restrictionId
+  const loading = createMut.isPending || deleteMut.isPending
+
+  function handleToggle(checked: boolean) {
+    if (checked) {
+      setShowReason(true)
+    } else if (restrictionId) {
+      deleteMut.mutate()
     }
-    setFormError(null)
-    createMut.mutate()
   }
 
-  const rows = restrictions ?? []
+  function handleConfirmBlock() {
+    createMut.mutate(reason.trim())
+  }
+
+  return (
+    <div className={`flex items-center gap-3 py-2 px-4 ${loading ? 'opacity-60' : ''}`}>
+      <Toggle
+        checked={isBlocked}
+        disabled={disabled}
+        loading={loading}
+        onChange={handleToggle}
+      />
+      <span className={`text-sm flex-1 ${isBlocked ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
+        {actionName(action)}
+      </span>
+      {isBlocked && !showReason && (
+        <span className="text-xs text-red-400">Blocked</span>
+      )}
+      {showReason && !isBlocked && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleConfirmBlock()}
+            placeholder="Reason (optional)"
+            className="text-xs rounded border border-gray-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-red-400 w-44"
+            autoFocus
+          />
+          <button
+            onClick={handleConfirmBlock}
+            disabled={createMut.isPending}
+            className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            Block
+          </button>
+          <button
+            onClick={() => setShowReason(false)}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function WildcardToggle({
+  serviceId,
+  restrictionId,
+}: {
+  serviceId: string
+  restrictionId: string | null
+}) {
+  const qc = useQueryClient()
+  const [reason, setReason] = useState('')
+  const [showReason, setShowReason] = useState(false)
+
+  const createMut = useMutation({
+    mutationFn: (r: string) => api.restrictions.create(serviceId, '*', r),
+    onSuccess: () => {
+      setReason('')
+      setShowReason(false)
+      qc.invalidateQueries({ queryKey: ['restrictions'] })
+    },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: () => api.restrictions.delete(restrictionId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['restrictions'] })
+    },
+  })
+
+  const isBlocked = !!restrictionId
+  const loading = createMut.isPending || deleteMut.isPending
+
+  function handleToggle(checked: boolean) {
+    if (checked) {
+      setShowReason(true)
+    } else if (restrictionId) {
+      deleteMut.mutate()
+    }
+  }
+
+  function handleConfirmBlock() {
+    createMut.mutate(reason.trim())
+  }
+
+  return (
+    <div className={`flex items-center gap-3 ${loading ? 'opacity-60' : ''}`}>
+      <Toggle checked={isBlocked} loading={loading} onChange={handleToggle} />
+      <span className={`text-xs font-medium ${isBlocked ? 'text-red-600' : 'text-gray-500'}`}>
+        Block all actions
+      </span>
+      {showReason && !isBlocked && (
+        <div className="flex items-center gap-2 ml-2">
+          <input
+            type="text"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleConfirmBlock()}
+            placeholder="Reason (optional)"
+            className="text-xs rounded border border-gray-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-red-400 w-44"
+            autoFocus
+          />
+          <button
+            onClick={handleConfirmBlock}
+            disabled={createMut.isPending}
+            className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            Block
+          </button>
+          <button
+            onClick={() => setShowReason(false)}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ServiceGroup({
+  svc,
+  restrictions,
+}: {
+  svc: ServiceInfo
+  restrictions: Restriction[]
+}) {
+  const brand = serviceBrand(svc.id)
+
+  // Build lookup: "service:action" → restriction ID
+  const lookup = new Map<string, string>()
+  for (const r of restrictions) {
+    if (r.service === svc.id) {
+      lookup.set(`${r.service}:${r.action}`, r.id)
+    }
+  }
+
+  const wildcardId = lookup.get(`${svc.id}:*`) ?? null
+  const hasWildcard = !!wildcardId
+
+  return (
+    <div className={`bg-white border rounded-lg overflow-hidden border-l-4 ${brand.border}`}>
+      <div className="px-4 py-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">{serviceName(svc.id)}</h3>
+          <p className="text-xs text-gray-400">{svc.id}</p>
+        </div>
+        <WildcardToggle serviceId={svc.id} restrictionId={wildcardId} />
+      </div>
+      <div className="border-t divide-y divide-gray-100">
+        {svc.actions.map(action => (
+          <ActionRow
+            key={action}
+            serviceId={svc.id}
+            action={action}
+            restrictionId={lookup.get(`${svc.id}:${action}`) ?? null}
+            disabled={hasWildcard}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function Restrictions() {
+  const { data: servicesData, isLoading: servicesLoading } = useQuery({
+    queryKey: ['services'],
+    queryFn: () => api.services.list(),
+  })
+
+  const { data: restrictions, isLoading: restrictionsLoading } = useQuery({
+    queryKey: ['restrictions'],
+    queryFn: () => api.restrictions.list(),
+  })
+
+  const isLoading = servicesLoading || restrictionsLoading
+  const services = servicesData?.services ?? []
+  const allRestrictions = restrictions ?? []
 
   return (
     <div className="p-8 space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Restrictions</h1>
       <p className="text-sm text-gray-500">
-        Hard blocks applied before policy evaluation. Any gateway request matching a restriction is
-        rejected immediately, regardless of policy rules.
+        Block specific service actions. Any agent request matching a restriction is rejected immediately.
       </p>
 
-      {/* Add form */}
-      <div className="bg-white border rounded-lg p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-4">Add Restriction</h2>
-        <form onSubmit={handleSubmit} className="flex flex-wrap gap-3 items-end">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">
-              Service <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. google.gmail"
-              value={service}
-              onChange={e => setService(e.target.value)}
-              className="text-sm rounded border border-gray-300 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 w-48"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500 font-medium">Action</label>
-            <input
-              type="text"
-              placeholder="* or e.g. send_email"
-              value={action}
-              onChange={e => setAction(e.target.value)}
-              className="text-sm rounded border border-gray-300 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 w-44"
-            />
-          </div>
-          <div className="flex flex-col gap-1 flex-1 min-w-48">
-            <label className="text-xs text-gray-500 font-medium">Reason</label>
-            <input
-              type="text"
-              placeholder="Optional description"
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              className="text-sm rounded border border-gray-300 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 w-full"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={createMut.isPending}
-            className="py-1.5 px-4 text-sm rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {createMut.isPending ? 'Adding...' : 'Add Block'}
-          </button>
-        </form>
-        {formError && (
-          <p className="mt-2 text-xs text-red-600">{formError}</p>
-        )}
-      </div>
+      {isLoading && <div className="text-sm text-gray-400">Loading...</div>}
 
-      {/* Restrictions table */}
-      <div className="bg-white border rounded-lg overflow-hidden">
-        {isLoading ? (
-          <div className="px-4 py-6 text-sm text-gray-400">Loading...</div>
-        ) : rows.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-gray-400">
-            No restrictions configured. Add a block above to prevent specific service actions.
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-              <tr>
-                <th className="px-4 py-2 text-left">Service</th>
-                <th className="px-4 py-2 text-left">Action</th>
-                <th className="px-4 py-2 text-left">Reason</th>
-                <th className="px-4 py-2 text-left">Created</th>
-                <th className="px-4 py-2 text-left"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r: Restriction) => (
-                <tr key={r.id} className="border-t hover:bg-gray-50">
-                  <td className="px-4 py-2 text-sm font-mono text-gray-900">{r.service}</td>
-                  <td className="px-4 py-2 text-sm font-mono text-gray-700">{r.action}</td>
-                  <td className="px-4 py-2 text-sm text-gray-500">
-                    {r.reason ? r.reason : <span className="text-gray-300 italic">—</span>}
-                  </td>
-                  <td className="px-4 py-2 text-sm text-gray-400">
-                    {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => deleteMut.mutate(r.id)}
-                      disabled={deleteMut.isPending}
-                      className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      {!isLoading && services.length === 0 && (
+        <div className="text-sm text-gray-400 py-8 text-center">
+          No services registered. Add adapters in the server configuration to manage restrictions.
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {services.map(svc => (
+          <ServiceGroup
+            key={svc.id}
+            svc={svc}
+            restrictions={allRestrictions}
+          />
+        ))}
       </div>
     </div>
   )
