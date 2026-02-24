@@ -87,191 +87,57 @@ func TestRoles_IsolatedByUser(t *testing.T) {
 	}
 }
 
-// ── Policies ──────────────────────────────────────────────────────────────────
+// ── Restrictions ──────────────────────────────────────────────────────────────
 
-func TestPolicies_Create_ValidYAML(t *testing.T) {
+func TestRestrictions_CRUD(t *testing.T) {
 	env := newTestEnv(t)
 	s := newSession(t, env)
 
-	// Role must exist before policy can reference it by name
-	resp := s.do("POST", "/api/roles", map[string]any{"name": "automation"})
-	mustStatus(t, resp, http.StatusCreated)
-
-	yaml := blockPolicy("p-block-1", "automation", "google.gmail", "send")
-	resp = s.do("POST", "/api/policies", map[string]any{"yaml": yaml})
-	body := mustStatus(t, resp, http.StatusCreated)
-
-	if str(t, body, "id") == "" {
-		t.Error("create policy: id empty")
-	}
-	if str(t, body, "name") == "" {
-		t.Error("create policy: name empty")
-	}
-}
-
-func TestPolicies_Create_MissingYAML(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	resp := s.do("POST", "/api/policies", map[string]any{"yaml": ""})
-	mustStatus(t, resp, http.StatusBadRequest)
-}
-
-func TestPolicies_Create_InvalidYAML(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	resp := s.do("POST", "/api/policies", map[string]any{"yaml": "not: valid: yaml: ::::"})
-	// parser may succeed (YAML is permissive) but validation should catch missing fields
-	// Just check we don't 500
-	if resp.StatusCode == http.StatusInternalServerError {
-		t.Errorf("invalid yaml should not cause 500, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
-}
-
-func TestPolicies_List_ReturnsArray(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	// List when empty
-	resp := s.do("GET", "/api/policies", nil)
-	var policies []any
-	decode(t, resp, &policies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list policies: expected 200, got %d", resp.StatusCode)
-	}
-	if policies == nil {
-		t.Error("list policies: expected empty slice, got nil")
-	}
-}
-
-func TestPolicies_Validate(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	s.do("POST", "/api/roles", map[string]any{"name": "ops"})
-
-	// Valid policy
-	resp := s.do("POST", "/api/policies/validate", map[string]any{
-		"yaml": blockPolicy("vp1", "ops", "google.gmail", "send"),
-	})
-	body := mustStatus(t, resp, http.StatusOK)
-	if v, ok := body["valid"].(bool); !ok || !v {
-		t.Errorf("validate: expected valid=true, got %v", body["valid"])
-	}
-
-	// Empty yaml → body-level error, still HTTP 200 (validate never 400s)
-	resp = s.do("POST", "/api/policies/validate", map[string]any{"yaml": ""})
-	// Note: /validate returns HTTP 400 for missing yaml field, not 200
-	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		t.Errorf("validate empty yaml: unexpected status %d", resp.StatusCode)
-	} else {
-		body = mustStatus(t, resp, resp.StatusCode)
-		if v, _ := body["valid"].(bool); v {
-			t.Error("validate empty yaml: expected valid=false")
-		}
-	}
-}
-
-func TestPolicies_Evaluate_NoRules_DefaultApprove(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	resp := s.do("POST", "/api/policies/evaluate", map[string]any{
-		"service": "google.gmail",
-		"action":  "send",
-	})
-	body := mustStatus(t, resp, http.StatusOK)
-	if str(t, body, "decision") != "approve" {
-		t.Errorf("no rules: expected default decision=approve, got %q", str(t, body, "decision"))
-	}
-}
-
-func TestPolicies_Evaluate_BlockRule(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	s.do("POST", "/api/roles", map[string]any{"name": "bot"})
-	s.do("POST", "/api/policies", map[string]any{
-		"yaml": blockPolicy("p-eval-block", "bot", "google.gmail", "send"),
-	})
-
-	resp := s.do("POST", "/api/policies/evaluate", map[string]any{
-		"service": "google.gmail",
-		"action":  "send",
-		"role":    "bot",
-	})
-	body := mustStatus(t, resp, http.StatusOK)
-	if str(t, body, "decision") != "block" {
-		t.Errorf("block rule: expected decision=block, got %q", str(t, body, "decision"))
-	}
-}
-
-func TestPolicies_GetAndDelete(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	s.do("POST", "/api/roles", map[string]any{"name": "ci"})
-	resp := s.do("POST", "/api/policies", map[string]any{
-		"yaml": blockPolicy("p-get-del", "ci", "google.gmail", "send"),
+	// Create
+	resp := s.do("POST", "/api/restrictions", map[string]any{
+		"service": "google.gmail", "action": "send", "reason": "no sending",
 	})
 	body := mustStatus(t, resp, http.StatusCreated)
 	id := str(t, body, "id")
+	if id == "" {
+		t.Fatal("create restriction: id empty")
+	}
 
-	// Get
-	resp = s.do("GET", fmt.Sprintf("/api/policies/%s", id), nil)
-	mustStatus(t, resp, http.StatusOK)
+	// List
+	resp = s.do("GET", "/api/restrictions", nil)
+	var restrictions []any
+	decode(t, resp, &restrictions)
+	if len(restrictions) != 1 {
+		t.Errorf("list restrictions: expected 1, got %d", len(restrictions))
+	}
 
 	// Delete
-	resp = s.do("DELETE", fmt.Sprintf("/api/policies/%s", id), nil)
+	resp = s.do("DELETE", fmt.Sprintf("/api/restrictions/%s", id), nil)
 	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("delete policy: expected 204, got %d", resp.StatusCode)
+		t.Errorf("delete restriction: expected 204, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	// Get after delete → 404
-	resp = s.do("GET", fmt.Sprintf("/api/policies/%s", id), nil)
-	mustStatus(t, resp, http.StatusNotFound)
+	// List after delete
+	resp = s.do("GET", "/api/restrictions", nil)
+	var after []any
+	decode(t, resp, &after)
+	if len(after) != 0 {
+		t.Errorf("after delete: expected 0, got %d", len(after))
+	}
 }
 
-func TestPolicies_Update_ChangesRegistryDecision(t *testing.T) {
+func TestRestrictions_Duplicate_Conflict(t *testing.T) {
 	env := newTestEnv(t)
 	s := newSession(t, env)
 
-	s.do("POST", "/api/roles", map[string]any{"name": "bot"})
-
-	// Create a block policy with slug "update-test-block"
-	resp := s.do("POST", "/api/policies", map[string]any{
-		"yaml": blockPolicy("update-test-block", "bot", "google.gmail", "send"),
+	s.do("POST", "/api/restrictions", map[string]any{
+		"service": "google.gmail", "action": "send",
 	})
-	body := mustStatus(t, resp, http.StatusCreated)
-	policyID := str(t, body, "id")
-
-	// Confirm evaluate returns block
-	resp = s.do("POST", "/api/policies/evaluate", map[string]any{
-		"service": "google.gmail", "action": "send", "role": "bot",
+	resp := s.do("POST", "/api/restrictions", map[string]any{
+		"service": "google.gmail", "action": "send",
 	})
-	body = mustStatus(t, resp, http.StatusOK)
-	if str(t, body, "decision") != "block" {
-		t.Fatalf("before update: expected block, got %q", str(t, body, "decision"))
-	}
-
-	// Update to an approve policy — note the YAML id changes to "update-test-approve"
-	resp = s.do("PUT", fmt.Sprintf("/api/policies/%s", policyID), map[string]any{
-		"yaml": approvePolicy("update-test-approve", "bot", "google.gmail", "send"),
-	})
-	mustStatus(t, resp, http.StatusOK)
-
-	// Evaluate again — old block rules must be gone; should now return approve
-	resp = s.do("POST", "/api/policies/evaluate", map[string]any{
-		"service": "google.gmail", "action": "send", "role": "bot",
-	})
-	body = mustStatus(t, resp, http.StatusOK)
-	if str(t, body, "decision") != "approve" {
-		t.Errorf("after update: expected approve, got %q", str(t, body, "decision"))
-	}
+	mustStatus(t, resp, http.StatusConflict)
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────────
@@ -354,11 +220,11 @@ func TestGateway_MissingServiceAction_Returns400(t *testing.T) {
 	mustStatus(t, resp, http.StatusBadRequest)
 }
 
-func TestGateway_Block(t *testing.T) {
+func TestGateway_Block_WithRestriction(t *testing.T) {
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "automation")
 
-	sc.createPolicy(t, blockPolicy("p-gw-block", "automation", "google.gmail", "send"))
+	sc.createRestriction(t, "google.gmail", "send", "Blocked by test restriction")
 
 	result := sc.gatewayRequest(env, "req-block-1", "google.gmail", "send")
 	if result["status"] != "blocked" {
@@ -375,7 +241,7 @@ func TestGateway_Block(t *testing.T) {
 func TestGateway_Block_AuditEntryRecorded(t *testing.T) {
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "automation")
-	sc.createPolicy(t, blockPolicy("p-audit-block", "automation", "google.gmail", "send"))
+	sc.createRestriction(t, "google.gmail", "send", "Blocked by test")
 
 	reqID := fmt.Sprintf("req-audit-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "google.gmail", "send")
@@ -396,35 +262,34 @@ func TestGateway_Block_AuditEntryRecorded(t *testing.T) {
 	}
 }
 
-func TestGateway_DefaultApprove_NoPolicy(t *testing.T) {
-	// Without any matching policy, the default decision is "approve".
+func TestGateway_DefaultPending_NoTaskOrRestriction(t *testing.T) {
+	// Without any task or restriction, the default is per-request approval (pending).
 	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "bot")
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
-	result := sc.gatewayRequest(env, "req-default-approve", "google.gmail", "send")
+	result := sc.gatewayRequest(env, "req-default-pending", "google.gmail", "send")
 	if result["status"] != "pending" {
-		t.Errorf("no policy: expected status=pending (default approve), got %v", result["status"])
+		t.Errorf("no task: expected status=pending, got %v", result["status"])
 	}
 }
 
-func TestGateway_ApprovePolicy_QueuesPending(t *testing.T) {
+func TestGateway_Pending_QueuesPending(t *testing.T) {
 	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "automation")
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-gw-approve", "automation", "google.gmail", "send"))
 
 	reqID := fmt.Sprintf("req-approve-%s", randSuffix())
 	result := sc.gatewayRequest(env, reqID, "google.gmail", "send")
 	if result["status"] != "pending" {
-		t.Errorf("approve policy: expected status=pending, got %v", result["status"])
+		t.Errorf("default: expected status=pending, got %v", result["status"])
 	}
 	if result["request_id"] != reqID {
-		t.Errorf("approve policy: request_id mismatch")
+		t.Errorf("default: request_id mismatch")
 	}
 
 	// Verify it shows up in approvals list
@@ -436,21 +301,21 @@ func TestGateway_ApprovePolicy_QueuesPending(t *testing.T) {
 	}
 }
 
-func TestGateway_ExecutePolicy_WithMockAdapter(t *testing.T) {
+func TestGateway_Execute_WithTask(t *testing.T) {
 	adapter := newMockAdapter("mock.echo", "echo").
 		withResult("echo ok", map[string]any{"msg": "hello"})
 	env := newTestEnv(t, adapter)
 
 	sc := newScenario(t, env, "automation")
-	sc.createPolicy(t, executePolicy("p-exec", "automation", "mock.echo", "echo"))
-
 	// Pre-seed vault credential for this user (the gateway requires one)
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.echo", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
+	taskID := sc.createApprovedTask(t, env, "mock.echo", "echo", true)
+
 	reqID := fmt.Sprintf("req-exec-%s", randSuffix())
-	result := sc.gatewayRequest(env, reqID, "mock.echo", "echo")
+	result := sc.gatewayRequestWithTask(env, reqID, "mock.echo", "echo", taskID)
 	if result["status"] != "executed" {
 		t.Errorf("execute: expected status=executed, got %v (full: %v)", result["status"], result)
 	}
@@ -465,13 +330,13 @@ func TestGateway_Execute_AdapterError_ReturnsError(t *testing.T) {
 	env := newTestEnv(t, adapter)
 
 	sc := newScenario(t, env, "ci")
-	sc.createPolicy(t, executePolicy("p-fail", "ci", "mock.fail", "run"))
-
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.fail", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
-	result := sc.gatewayRequest(env, fmt.Sprintf("req-fail-%s", randSuffix()), "mock.fail", "run")
+	taskID := sc.createApprovedTask(t, env, "mock.fail", "run", true)
+
+	result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-fail-%s", randSuffix()), "mock.fail", "run", taskID)
 	if result["status"] != "error" {
 		t.Errorf("adapter error: expected status=error, got %v", result["status"])
 	}
@@ -485,13 +350,109 @@ func TestGateway_Execute_NoVaultCred_ReturnsPendingActivation(t *testing.T) {
 	env := newTestEnv(t, adapter)
 
 	sc := newScenario(t, env, "runner")
-	sc.createPolicy(t, executePolicy("p-noauth", "runner", "mock.noauth", "go"))
+	taskID := sc.createApprovedTask(t, env, "mock.noauth", "go", true)
 
 	// No vault credential seeded — gateway should return pending_activation
-	result := sc.gatewayRequest(env, fmt.Sprintf("req-na-%s", randSuffix()), "mock.noauth", "go")
+	result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-na-%s", randSuffix()), "mock.noauth", "go", taskID)
 	if result["status"] != "pending_activation" {
 		t.Errorf("no vault cred: expected status=pending_activation, got %v", result["status"])
 	}
+}
+
+// ── Standing task guards ──────────────────────────────────────────────────────
+
+func TestStandingTask_RejectsExpiresInSeconds(t *testing.T) {
+	env := newTestEnv(t, newMockAdapter("mock.echo", "echo"))
+	sc := newScenario(t, env, "automation")
+
+	resp := env.do("POST", "/api/tasks", sc.AgentToken, map[string]any{
+		"purpose":            "bad combo",
+		"lifetime":           "standing",
+		"expires_in_seconds": 3600,
+		"authorized_actions": []map[string]any{
+			{"service": "mock.echo", "action": "echo", "auto_execute": true},
+		},
+	})
+	body := mustStatus(t, resp, http.StatusBadRequest)
+	if body["code"] != "INVALID_REQUEST" {
+		t.Errorf("expected code=INVALID_REQUEST, got %v", body["code"])
+	}
+	msg, _ := body["error"].(string)
+	strContains(t, msg, "expires_in_seconds cannot be set on a standing task", "error message")
+}
+
+func TestStandingTask_ResponseOmitsExpiry(t *testing.T) {
+	env := newTestEnv(t, newMockAdapter("mock.echo", "echo"))
+	sc := newScenario(t, env, "automation")
+
+	taskID := sc.createApprovedStandingTask(t, env, "mock.echo", "echo", true)
+
+	// GET as agent — expires_at and expires_in_seconds should be absent
+	resp := env.do("GET", fmt.Sprintf("/api/tasks/%s", taskID), sc.AgentToken, nil)
+	body := mustStatus(t, resp, http.StatusOK)
+	if body["expires_at"] != nil {
+		t.Errorf("standing task Get: expected expires_at to be absent, got %v", body["expires_at"])
+	}
+	if v, ok := body["expires_in_seconds"]; ok && v != nil && v != 0.0 {
+		t.Errorf("standing task Get: expected expires_in_seconds absent/zero, got %v", v)
+	}
+
+	// LIST as user — check the task in the list
+	resp = sc.session.do("GET", "/api/tasks", nil)
+	listBody := mustStatus(t, resp, http.StatusOK)
+	tasks := arr(t, listBody, "tasks")
+	for _, raw := range tasks {
+		task, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if task["id"] == taskID {
+			if task["expires_at"] != nil {
+				t.Errorf("standing task List: expected expires_at nil, got %v", task["expires_at"])
+			}
+			return
+		}
+	}
+	t.Error("standing task not found in list response")
+}
+
+func TestStandingTask_Expand_Rejected(t *testing.T) {
+	adapter := newMockAdapter("mock.echo", "echo", "other")
+	env := newTestEnv(t, adapter)
+	sc := newScenario(t, env, "automation")
+
+	taskID := sc.createApprovedStandingTask(t, env, "mock.echo", "echo", true)
+
+	// Try to expand the standing task — should fail
+	resp := env.do("POST", fmt.Sprintf("/api/tasks/%s/expand", taskID), sc.AgentToken, map[string]any{
+		"service": "mock.echo", "action": "other", "auto_execute": true, "reason": "need more",
+	})
+	body := mustStatus(t, resp, http.StatusConflict)
+	if body["code"] != "INVALID_OPERATION" {
+		t.Errorf("expected code=INVALID_OPERATION, got %v", body["code"])
+	}
+	msg, _ := body["error"].(string)
+	strContains(t, msg, "standing tasks cannot be expanded", "error message")
+}
+
+func TestStandingTask_OutOfScope_MessageSuggestsNewTask(t *testing.T) {
+	adapter := newMockAdapter("mock.echo", "echo", "other")
+	env := newTestEnv(t, adapter)
+	sc := newScenario(t, env, "automation")
+	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.echo", []byte("cred")); err != nil {
+		t.Fatalf("vault seed: %v", err)
+	}
+
+	taskID := sc.createApprovedStandingTask(t, env, "mock.echo", "echo", true)
+
+	// Request an action outside the standing task's scope
+	result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-standing-oos-%s", randSuffix()), "mock.echo", "other", taskID)
+	if result["status"] != "pending_scope_expansion" {
+		t.Errorf("expected status=pending_scope_expansion, got %v", result["status"])
+	}
+	msg, _ := result["message"].(string)
+	strContains(t, msg, "standing task", "gateway out-of-scope message for standing task")
+	strContains(t, msg, "cannot be expanded", "gateway out-of-scope message for standing task")
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
@@ -502,7 +463,6 @@ func TestApprovals_Deny(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-deny", "automation", "google.gmail", "send"))
 
 	reqID := fmt.Sprintf("req-deny-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "google.gmail", "send")
@@ -538,7 +498,6 @@ func TestApprovals_Approve_WithMockAdapter(t *testing.T) {
 	env := newTestEnv(t, adapter)
 
 	sc := newScenario(t, env, "ci")
-	sc.createPolicy(t, approvePolicy("p-app-exec", "ci", "mock.ok", "run"))
 
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.ok", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
@@ -564,7 +523,6 @@ func TestApprovals_Approve_WrongUser_Forbidden(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc1.session.UserID, "google", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc1.createPolicy(t, approvePolicy("p-forbidden", "bot1", "google.gmail", "send"))
 
 	reqID := fmt.Sprintf("req-forbidden-%s", randSuffix())
 	sc1.gatewayRequest(env, reqID, "google.gmail", "send")
@@ -592,7 +550,7 @@ func TestApprovals_UnknownID_Returns404(t *testing.T) {
 func TestAudit_GetByID(t *testing.T) {
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "automation")
-	sc.createPolicy(t, blockPolicy("p-audit-id", "automation", "google.gmail", "send"))
+	sc.createRestriction(t, "google.gmail", "send", "blocked for audit test")
 
 	sc.gatewayRequest(env, fmt.Sprintf("req-audit-id-%s", randSuffix()), "google.gmail", "send")
 
@@ -620,7 +578,7 @@ func TestAudit_GetByID(t *testing.T) {
 func TestAudit_FilterByService(t *testing.T) {
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "automation")
-	sc.createPolicy(t, blockPolicy("p-filt", "automation", "google.gmail", "send"))
+	sc.createRestriction(t, "google.gmail", "send", "blocked for filter test")
 
 	sc.gatewayRequest(env, fmt.Sprintf("req-filt-%s", randSuffix()), "google.gmail", "send")
 
@@ -641,7 +599,7 @@ func TestAudit_FilterByService(t *testing.T) {
 func TestAudit_IsolatedByUser(t *testing.T) {
 	env := newTestEnv(t)
 	sc1 := newScenario(t, env, "bot")
-	sc1.createPolicy(t, blockPolicy("p-iso", "bot", "google.gmail", "send"))
+	sc1.createRestriction(t, "google.gmail", "send", "blocked for isolation test")
 	sc1.gatewayRequest(env, "req-iso-1", "google.gmail", "send")
 
 	// Different user should see 0 entries
@@ -654,20 +612,19 @@ func TestAudit_IsolatedByUser(t *testing.T) {
 }
 
 func TestAudit_AllOutcomesRecorded(t *testing.T) {
-	// In one test, generate block, approve(→pending), and deny outcomes, then verify all appear.
+	// In one test, generate block and deny outcomes, then verify all appear.
 	env := newTestEnv(t, newMockAdapter("mock.svc", "blocked-action", "approved-action"))
 	sc := newScenario(t, env, "mixed")
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
-	sc.createPolicy(t, blockPolicy("p-mix-block", "mixed", "mock.svc", "blocked-action"))
-	sc.createPolicy(t, approvePolicy("p-mix-approve", "mixed", "mock.svc", "approved-action"))
+	sc.createRestriction(t, "mock.svc", "blocked-action", "blocked by test")
 
 	// Block outcome
 	sc.gatewayRequest(env, fmt.Sprintf("req-blk-%s", randSuffix()), "mock.svc", "blocked-action")
 
-	// Approve → pending
+	// No restriction on approved-action → per-request approval (pending)
 	reqID := fmt.Sprintf("req-pend-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "mock.svc", "approved-action")
 

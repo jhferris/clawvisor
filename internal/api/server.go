@@ -15,8 +15,6 @@ import (
 	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/notify"
-	"github.com/ericlevine/clawvisor/internal/policy"
-	"github.com/ericlevine/clawvisor/internal/policy/authoring"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
@@ -29,7 +27,6 @@ type Server struct {
 	store      store.Store
 	vault      vault.Vault
 	jwtSvc     *auth.JWTService
-	registry   *policy.Registry
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier
 	safety     safety.SafetyChecker
@@ -47,7 +44,6 @@ func New(
 	st store.Store,
 	v vault.Vault,
 	jwtSvc *auth.JWTService,
-	reg *policy.Registry,
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
@@ -62,7 +58,6 @@ func New(
 		store:      st,
 		vault:      v,
 		jwtSvc:     jwtSvc,
-		registry:   reg,
 		adapterReg: adapterReg,
 		notifier:   notifier,
 		safety:     safetyChecker,
@@ -99,21 +94,19 @@ func (s *Server) routes() http.Handler {
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth)
 	healthHandler := handlers.NewHealthHandler(s.store, s.vault)
 	rolesHandler := handlers.NewRolesHandler(s.store)
-	gen := authoring.NewGenerator(s.llmCfg)
-	cc := authoring.NewConflictChecker(s.llmCfg)
-	policiesHandler := handlers.NewPoliciesHandler(s.store, s.registry, gen, cc)
+	restrictionsHandler := handlers.NewRestrictionsHandler(s.store)
 	agentsHandler := handlers.NewAgentsHandler(s.store)
 	auditHandler := handlers.NewAuditHandler(s.store)
 	notificationsHandler := handlers.NewNotificationsHandler(s.store)
 	gatewayHandler := handlers.NewGatewayHandler(
-		s.store, s.vault, s.adapterReg, s.registry,
+		s.store, s.vault, s.adapterReg,
 		s.notifier, s.safety, s.llmCfg, *s.cfg, s.logger, baseURL,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
-	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.registry, s.logger)
+	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)
 	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.logger)
 	s.approvalsHandler = approvalsHandler
-	tasksHandler := handlers.NewTasksHandler(s.store, s.vault, s.adapterReg, s.registry,
+	tasksHandler := handlers.NewTasksHandler(s.store,
 		s.notifier, *s.cfg, s.logger, baseURL)
 
 	// Middleware
@@ -145,15 +138,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("PUT /api/roles/{id}", user(rolesHandler.Update))
 	mux.Handle("DELETE /api/roles/{id}", user(rolesHandler.Delete))
 
-	// Policies
-	mux.Handle("POST /api/policies/validate", user(policiesHandler.Validate))
-	mux.Handle("POST /api/policies/evaluate", user(policiesHandler.Evaluate))
-	mux.Handle("POST /api/policies/generate", user(policiesHandler.Generate))
-	mux.Handle("GET /api/policies", user(policiesHandler.List))
-	mux.Handle("POST /api/policies", user(policiesHandler.Create))
-	mux.Handle("GET /api/policies/{id}", user(policiesHandler.Get))
-	mux.Handle("PUT /api/policies/{id}", user(policiesHandler.Update))
-	mux.Handle("DELETE /api/policies/{id}", user(policiesHandler.Delete))
+	// Restrictions
+	mux.Handle("GET /api/restrictions", user(restrictionsHandler.List))
+	mux.Handle("POST /api/restrictions", user(restrictionsHandler.Create))
+	mux.Handle("DELETE /api/restrictions/{id}", user(restrictionsHandler.Delete))
 
 	// Agents (user JWT)
 	mux.Handle("GET /api/agents", user(agentsHandler.List))
@@ -196,6 +184,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/tasks", user(tasksHandler.List))
 	mux.Handle("POST /api/tasks/{id}/approve", user(tasksHandler.Approve))
 	mux.Handle("POST /api/tasks/{id}/deny", user(tasksHandler.Deny))
+	mux.Handle("POST /api/tasks/{id}/revoke", user(tasksHandler.Revoke))
 	mux.Handle("POST /api/tasks/{id}/expand/approve", user(tasksHandler.ExpandApprove))
 	mux.Handle("POST /api/tasks/{id}/expand/deny", user(tasksHandler.ExpandDeny))
 

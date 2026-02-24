@@ -21,7 +21,6 @@ import (
 	"github.com/ericlevine/clawvisor/internal/gateway"
 	"github.com/ericlevine/clawvisor/internal/llm"
 	"github.com/ericlevine/clawvisor/internal/notify"
-	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
@@ -30,17 +29,17 @@ import (
 // pendingRequestBlob is stored in pending_approvals.request_blob.
 // It contains everything needed to re-execute the request on approval.
 type pendingRequestBlob struct {
-	Service         string                  `json:"service"`
-	Action          string                  `json:"action"`
-	Params          map[string]any          `json:"params"`
-	UserID          string                  `json:"user_id"`
-	AgentID         string                  `json:"agent_id"`
-	AgentName       string                  `json:"agent_name"`
-	RequestID       string                  `json:"request_id"`
-	Reason          string                  `json:"reason"`
-	CallbackURL     string                  `json:"callback_url"`
-	CallbackKey     string                  `json:"callback_key,omitempty"` // SHA-256(agentToken) — used to HMAC-sign callbacks; not a live credential
-	ResponseFilters []policy.ResponseFilter `json:"response_filters,omitempty"`
+	Service         string                   `json:"service"`
+	Action          string                   `json:"action"`
+	Params          map[string]any           `json:"params"`
+	UserID          string                   `json:"user_id"`
+	AgentID         string                   `json:"agent_id"`
+	AgentName       string                   `json:"agent_name"`
+	RequestID       string                   `json:"request_id"`
+	Reason          string                   `json:"reason"`
+	CallbackURL     string                   `json:"callback_url"`
+	CallbackKey     string                   `json:"callback_key,omitempty"`
+	ResponseFilters []filters.ResponseFilter `json:"response_filters,omitempty"`
 }
 
 // GatewayHandler handles POST /api/gateway/request.
@@ -48,7 +47,6 @@ type GatewayHandler struct {
 	store      store.Store
 	vault      vault.Vault
 	adapterReg *adapters.Registry
-	policyReg  *policy.Registry
 	notifier   notify.Notifier // may be nil if Telegram not configured
 	safety     safety.SafetyChecker
 	llmCfg     config.LLMConfig
@@ -61,7 +59,6 @@ func NewGatewayHandler(
 	st store.Store,
 	v vault.Vault,
 	adapterReg *adapters.Registry,
-	policyReg *policy.Registry,
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
 	llmCfg config.LLMConfig,
@@ -70,12 +67,14 @@ func NewGatewayHandler(
 	baseURL string,
 ) *GatewayHandler {
 	return &GatewayHandler{
-		store: st, vault: v, adapterReg: adapterReg, policyReg: policyReg,
+		store: st, vault: v, adapterReg: adapterReg,
 		notifier: notifier, safety: safetyChecker, llmCfg: llmCfg, cfg: cfg, logger: logger, baseURL: baseURL,
 	}
 }
 
 // HandleRequest is the main gateway entry point.
+//
+// Authorization flow: restrictions → task scope → per-request approval.
 //
 // POST /api/gateway/request
 // Auth: agent bearer token
@@ -107,78 +106,54 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve agent role name (policy engine matches on role name, not UUID).
-	agentRoleName := ""
-	if agent.RoleID != nil {
-		if role, err := h.store.GetRole(ctx, *agent.RoleID, agent.UserID); err == nil {
-			agentRoleName = role.Name
-		}
-	}
-
 	paramsSafe, _ := json.Marshal(format.StripSecrets(cloneParams(req.Params)))
-
-	// Pre-resolve the recipient_in_contacts condition if needed.
-	// The policy evaluator is a pure function and cannot perform I/O, so we
-	// resolve async conditions here and pass them in ResolvedConditions.
-	resolvedConditions := map[string]bool{}
-	if toEmail, ok := req.Params["to"].(string); ok && toEmail != "" {
-		if contactsAdapter, ok := h.adapterReg.Get("google.contacts"); ok {
-			if cc, ok := contactsAdapter.(adapters.ContactsChecker); ok {
-				if cred, credErr := h.vault.Get(ctx, agent.UserID, "google"); credErr == nil {
-					if inContacts, err := cc.IsInContacts(ctx, cred, toEmail); err == nil {
-						resolvedConditions["recipient_in_contacts"] = inContacts
-					}
-				}
-			}
-		}
-	}
-
-	decision := h.policyReg.Evaluate(agent.UserID, policy.EvalRequest{
-		Service:            req.Service,
-		Action:             req.Action,
-		Params:             req.Params,
-		AgentRoleID:        agentRoleName,
-		ResolvedConditions: resolvedConditions,
-	})
 
 	auditID := uuid.New().String()
 
 	// baseEntry builds an AuditEntry with fields common to all outcomes.
-	baseEntry := func(outcome string) *store.AuditEntry {
-		e := &store.AuditEntry{
+	baseEntry := func(decision, outcome string, taskID *string) *store.AuditEntry {
+		return &store.AuditEntry{
 			ID:         auditID,
 			UserID:     agent.UserID,
 			AgentID:    &agent.ID,
 			RequestID:  req.RequestID,
+			TaskID:     taskID,
 			Timestamp:  time.Now().UTC(),
 			Service:    req.Service,
 			Action:     req.Action,
 			ParamsSafe: json.RawMessage(paramsSafe),
-			Decision:   string(decision.Decision),
+			Decision:   decision,
 			Outcome:    outcome,
 			Reason:     nullableStr(req.Reason),
 			DataOrigin: req.Context.DataOrigin,
 			ContextSrc: nullableStr(req.Context.Source),
 		}
-		if decision.PolicyID != "" {
-			e.PolicyID = &decision.PolicyID
-		}
-		if decision.RuleID != "" {
-			e.RuleID = &decision.RuleID
-		}
-		return e
 	}
 
-	// iMessage send_message always requires approval — hardcoded, not overridable by policy.
-	if RequiresHardcodedApproval(req.Service, req.Action) &&
-		decision.Decision == policy.DecisionExecute {
-		decision.Decision = policy.DecisionApprove
-		if decision.Reason == "" {
-			decision.Reason = "iMessage send_message always requires human approval"
+	// ── Step 1: Check restrictions ────────────────────────────────────────────
+	if restriction, err := h.store.MatchRestriction(ctx, agent.UserID, req.Service, req.Action); err == nil {
+		e := baseEntry("block", "blocked", nil)
+		e.DurationMS = int(time.Since(start).Milliseconds())
+		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+			h.logger.Warn("audit log failed", "err", logErr)
 		}
+		reason := restriction.Reason
+		if reason == "" {
+			reason = fmt.Sprintf("Restricted: %s:%s is blocked", restriction.Service, restriction.Action)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":     "blocked",
+			"request_id": req.RequestID,
+			"audit_id":   auditID,
+			"reason":     reason,
+		})
+		return
 	}
 
-	// ── Task scope enforcement ────────────────────────────────────────────────
+	// ── Step 2: Hardcoded approval check ─────────────────────────────────────
+	hardcoded := RequiresHardcodedApproval(req.Service, req.Action)
+
+	// ── Step 3: Task scope enforcement ───────────────────────────────────────
 	if req.TaskID != "" {
 		task, taskErr := h.store.GetTask(ctx, req.TaskID)
 		if taskErr != nil {
@@ -203,216 +178,128 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Tag audit entries with task_id.
-		baseEntry = func(outcome string) *store.AuditEntry {
-			e := &store.AuditEntry{
-				ID:         auditID,
-				UserID:     agent.UserID,
-				AgentID:    &agent.ID,
-				RequestID:  req.RequestID,
-				TaskID:     &req.TaskID,
-				Timestamp:  time.Now().UTC(),
-				Service:    req.Service,
-				Action:     req.Action,
-				ParamsSafe: json.RawMessage(paramsSafe),
-				Decision:   string(decision.Decision),
-				Outcome:    outcome,
-				Reason:     nullableStr(req.Reason),
-				DataOrigin: req.Context.DataOrigin,
-				ContextSrc: nullableStr(req.Context.Source),
-			}
-			if decision.PolicyID != "" {
-				e.PolicyID = &decision.PolicyID
-			}
-			if decision.RuleID != "" {
-				e.RuleID = &decision.RuleID
-			}
-			return e
-		}
+		match := CheckTaskScope(task, req.Service, req.Action)
 
-		// Block always enforced regardless of task scope.
-		// Execute (policy-allowed) proceeds normally, tagged with task_id.
-		// Approve: check task scope.
-		if decision.Decision == policy.DecisionApprove {
-			match := CheckTaskScope(task, req.Service, req.Action)
-			if match.InScope && match.AutoExecute {
-				// Override to execute — task scope grants auto-execution.
-				decision.Decision = policy.DecisionExecute
-			} else if !match.InScope {
-				// Out of scope — tell agent to expand.
-				_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
-				writeJSON(w, http.StatusOK, map[string]any{
-					"status":     "pending_scope_expansion",
-					"task_id":    req.TaskID,
-					"request_id": req.RequestID,
-					"message": fmt.Sprintf("Action %s:%s is outside the approved task scope. Use POST /api/tasks/%s/expand to request it.",
-						req.Service, req.Action, req.TaskID),
-				})
-				return
+		if !match.InScope {
+			_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
+			msg := fmt.Sprintf("Action %s:%s is outside the approved task scope. Use POST /api/tasks/%s/expand to request it.",
+				req.Service, req.Action, req.TaskID)
+			if task.Lifetime == "standing" {
+				msg = fmt.Sprintf("Action %s:%s is outside this standing task's scope. Standing tasks cannot be expanded — create a separate session task for this action, or revoke this task and create a new one with the additional actions.",
+					req.Service, req.Action)
 			}
-			// In scope + auto_execute=false: falls through to normal approval flow.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":     "pending_scope_expansion",
+				"task_id":    req.TaskID,
+				"request_id": req.RequestID,
+				"message":    msg,
+			})
+			return
 		}
 
 		_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
-	}
 
-	switch decision.Decision {
+		// In scope + auto_execute + not hardcoded → execute directly
+		if match.AutoExecute && !hardcoded {
+			taskIDPtr := &req.TaskID
+			responseFilters := getTaskActionFilters(task, req.Service, req.Action)
+			result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
+				agent.UserID, req.Service, req.Action, req.Params, responseFilters,
+				h.llmFilterFn())
+			dur := int(time.Since(start).Milliseconds())
 
-	case policy.DecisionBlock:
-		e := baseEntry("blocked")
-		e.DurationMS = int(time.Since(start).Milliseconds())
-		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-			h.logger.Warn("audit log failed", "err", logErr)
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "blocked",
-			"request_id": req.RequestID,
-			"audit_id":  auditID,
-			"reason":    decision.Reason,
-			"policy_id": decision.PolicyID,
-		})
-
-	case policy.DecisionApprove:
-		// Reject unknown services immediately — there is no point queuing an
-		// approval for a request that can never execute.
-		approveAdapter, ok := h.adapterReg.Get(req.Service)
-		if !ok {
-			e := baseEntry("error")
-			e.DurationMS = int(time.Since(start).Milliseconds())
-			errMsg := fmt.Sprintf("unknown service %q", req.Service)
-			e.ErrorMsg = &errMsg
-			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-				h.logger.Warn("audit log failed", "err", logErr)
-			}
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"status":     "error",
-				"request_id": req.RequestID,
-				"audit_id":   auditID,
-				"error":      fmt.Sprintf("unknown service %q: not a supported service", req.Service),
-				"code":       "UNKNOWN_SERVICE",
-			})
-			return
-		}
-		// Service is registered — if it requires credentials but none are stored,
-		// route to activation before wasting queue space. Services that accept a
-		// nil credential (e.g. apple.imessage, which uses local file access) skip
-		// this check entirely.
-		vKey := vaultKeyForService(req.Service)
-		if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) &&
-			approveAdapter.ValidateCredential(nil) != nil {
-			e := baseEntry("pending_activation")
-			e.DurationMS = int(time.Since(start).Milliseconds())
-			errMsg := fmt.Sprintf("service %q not activated", req.Service)
-			e.ErrorMsg = &errMsg
-			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-				h.logger.Warn("audit log failed", "err", logErr)
-			}
-			expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-			blob := buildRequestBlob(req, agent, nil)
-			activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-				h.baseURL, req.Service, req.RequestID)
-			denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
-			if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
-				req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
-				activateURL, denyURL); notifyErr != nil {
-				h.logger.Warn("activation notification failed", "err", notifyErr)
-			}
-			writeJSON(w, http.StatusAccepted, map[string]any{
-				"status":       "pending_activation",
-				"request_id":   req.RequestID,
-				"audit_id":     auditID,
-				"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
-				"code":         "SERVICE_NOT_CONFIGURED",
-				"activate_url": activateURL,
-			})
-			return
-		}
-		e := baseEntry("pending")
-		e.DurationMS = int(time.Since(start).Milliseconds())
-		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-			h.logger.Warn("audit log failed", "err", logErr)
-		}
-		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-		blob := buildRequestBlob(req, agent, decision.ResponseFilters)
-		if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
-			req.Context.CallbackURL, expiresAt, decision.Reason, false, ""); routeErr != nil {
-			h.logger.Warn("route to approval failed", "err", routeErr)
-		}
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"status":     "pending",
-			"request_id": req.RequestID,
-			"audit_id":   auditID,
-			"message":    fmt.Sprintf("Approval requested. Waiting up to %ds.", h.cfg.Approval.Timeout),
-		})
-
-	case policy.DecisionExecute:
-		result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-			agent.UserID, req.Service, req.Action, req.Params, decision.ResponseFilters,
-			h.llmFilterFn())
-		dur := int(time.Since(start).Milliseconds())
-
-		if execErr != nil {
-			if errors.Is(execErr, vault.ErrNotFound) {
-				// Service not activated — queue an activation request.
-				e := baseEntry("pending_activation")
-				e.DurationMS = dur
+			if execErr != nil {
+				if errors.Is(execErr, vault.ErrNotFound) {
+					// Vault credential missing — handle pending_activation inline.
+					adapter, adapterOK := h.adapterReg.Get(req.Service)
+					if adapterOK && adapter.ValidateCredential(nil) != nil {
+						e := baseEntry("approve", "pending_activation", taskIDPtr)
+						e.DurationMS = dur
+						errMsg := fmt.Sprintf("service %q not activated", req.Service)
+						e.ErrorMsg = &errMsg
+						if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+							h.logger.Warn("audit log failed", "err", logErr)
+						}
+						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
+						blob := buildRequestBlob(req, agent, nil)
+						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
+							h.baseURL, req.Service, req.RequestID)
+						denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
+						if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
+							req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
+							activateURL, denyURL); notifyErr != nil {
+							h.logger.Warn("activation notification failed", "err", notifyErr)
+						}
+						writeJSON(w, http.StatusAccepted, map[string]any{
+							"status":       "pending_activation",
+							"request_id":   req.RequestID,
+							"audit_id":     auditID,
+							"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
+							"code":         "SERVICE_NOT_CONFIGURED",
+							"activate_url": activateURL,
+						})
+						return
+					}
+				}
 				errMsg := execErr.Error()
+				e := baseEntry("execute", "error", taskIDPtr)
+				e.DurationMS = dur
 				e.ErrorMsg = &errMsg
 				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
-				expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-				blob := buildRequestBlob(req, agent, nil)
-				activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-					h.baseURL, req.Service, req.RequestID)
-				denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
-				if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
-					req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
-					activateURL, denyURL); notifyErr != nil {
-					h.logger.Warn("activation notification failed", "err", notifyErr)
+				if req.Context.CallbackURL != "" {
+					tokenHash := agent.TokenHash
+					go func() {
+						_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
+							RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
+						}, tokenHash)
+					}()
 				}
-				writeJSON(w, http.StatusAccepted, map[string]any{
-					"status":       "pending_activation",
-					"request_id":   req.RequestID,
-					"audit_id":     auditID,
-					"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
-					"code":         "SERVICE_NOT_CONFIGURED",
-					"activate_url": activateURL,
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":     "error",
+					"request_id": req.RequestID,
+					"audit_id":   auditID,
+					"error":      errMsg,
+					"code":       "EXECUTION_ERROR",
 				})
 				return
 			}
-			errMsg := execErr.Error()
-			e := baseEntry("error")
-			e.DurationMS = dur
-			e.ErrorMsg = &errMsg
-			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-				h.logger.Warn("audit log failed", "err", logErr)
-			}
-			if req.Context.CallbackURL != "" {
-				tokenHash := agent.TokenHash
-				go func() {
-					_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
-						RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
-					}, tokenHash)
-				}()
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status":     "error",
-				"request_id": req.RequestID,
-				"audit_id":   auditID,
-				"error":      errMsg,
-				"code":       "EXECUTION_ERROR",
-			})
-			return
-		}
 
-		// LLM safety check (noop if safety disabled).
-		safetyResult, _ := h.safety.Check(ctx, agent.UserID, &req, result)
-		if !safetyResult.Safe {
-			e := baseEntry("pending")
+			// LLM safety check
+			safetyResult, _ := h.safety.Check(ctx, agent.UserID, &req, result)
+			if !safetyResult.Safe {
+				e := baseEntry("execute", "pending", taskIDPtr)
+				e.DurationMS = dur
+				e.SafetyFlagged = true
+				e.SafetyReason = &safetyResult.Reason
+				if len(filterRecs) > 0 {
+					if b, err := json.Marshal(filterRecs); err == nil {
+						e.FiltersApplied = b
+					}
+				}
+				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+					h.logger.Warn("audit log failed", "err", logErr)
+				}
+				expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
+				blob := buildRequestBlob(req, agent, responseFilters)
+				if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
+					req.Context.CallbackURL, expiresAt, "Safety: "+safetyResult.Reason,
+					true, safetyResult.Reason); routeErr != nil {
+					h.logger.Warn("route to approval failed (safety)", "err", routeErr)
+				}
+				writeJSON(w, http.StatusAccepted, map[string]any{
+					"status":     "pending",
+					"request_id": req.RequestID,
+					"audit_id":   auditID,
+					"message":    "Safety check flagged this request. Approval requested.",
+				})
+				return
+			}
+
+			// Success
+			e := baseEntry("execute", "executed", taskIDPtr)
 			e.DurationMS = dur
-			e.SafetyFlagged = true
-			e.SafetyReason = &safetyResult.Reason
 			if len(filterRecs) > 0 {
 				if b, err := json.Marshal(filterRecs); err == nil {
 					e.FiltersApplied = b
@@ -421,48 +308,106 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
-			expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-			blob := buildRequestBlob(req, agent, decision.ResponseFilters)
-			if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
-				req.Context.CallbackURL, expiresAt, "Safety: "+safetyResult.Reason,
-				true, safetyResult.Reason); routeErr != nil {
-				h.logger.Warn("route to approval failed (safety)", "err", routeErr)
+			if req.Context.CallbackURL != "" {
+				tokenHash := agent.TokenHash
+				go func() {
+					_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
+						RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
+					}, tokenHash)
+				}()
 			}
-			writeJSON(w, http.StatusAccepted, map[string]any{
-				"status":     "pending",
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":     "executed",
 				"request_id": req.RequestID,
 				"audit_id":   auditID,
-				"message":    "Safety check flagged this request. Approval requested.",
+				"result":     result,
 			})
 			return
 		}
 
-		// Success — log and return.
-		e := baseEntry("executed")
-		e.DurationMS = dur
-		if len(filterRecs) > 0 {
-			if b, err := json.Marshal(filterRecs); err == nil {
-				e.FiltersApplied = b
-			}
-		}
+		// In scope + (!auto_execute || hardcoded) → falls through to per-request approval below
+	}
+
+	// ── Step 4: Per-request approval (default path) ──────────────────────────
+	// This covers: no task_id, or task in-scope but not auto-execute, or hardcoded approval.
+
+	// Reject unknown services immediately.
+	approveAdapter, ok := h.adapterReg.Get(req.Service)
+	if !ok {
+		e := baseEntry("approve", "error", nil)
+		e.DurationMS = int(time.Since(start).Milliseconds())
+		errMsg := fmt.Sprintf("unknown service %q", req.Service)
+		e.ErrorMsg = &errMsg
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
-		if req.Context.CallbackURL != "" {
-			tokenHash := agent.TokenHash
-			go func() {
-				_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
-					RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
-				}, tokenHash)
-			}()
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":     "executed",
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"status":     "error",
 			"request_id": req.RequestID,
 			"audit_id":   auditID,
-			"result":     result,
+			"error":      fmt.Sprintf("unknown service %q: not a supported service", req.Service),
+			"code":       "UNKNOWN_SERVICE",
 		})
+		return
 	}
+
+	// Check if service needs activation.
+	vKey := vaultKeyForService(req.Service)
+	if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) &&
+		approveAdapter.ValidateCredential(nil) != nil {
+		e := baseEntry("approve", "pending_activation", nil)
+		e.DurationMS = int(time.Since(start).Milliseconds())
+		errMsg := fmt.Sprintf("service %q not activated", req.Service)
+		e.ErrorMsg = &errMsg
+		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+			h.logger.Warn("audit log failed", "err", logErr)
+		}
+		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
+		blob := buildRequestBlob(req, agent, nil)
+		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
+			h.baseURL, req.Service, req.RequestID)
+		denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
+		if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
+			req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
+			activateURL, denyURL); notifyErr != nil {
+			h.logger.Warn("activation notification failed", "err", notifyErr)
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"status":       "pending_activation",
+			"request_id":   req.RequestID,
+			"audit_id":     auditID,
+			"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
+			"code":         "SERVICE_NOT_CONFIGURED",
+			"activate_url": activateURL,
+		})
+		return
+	}
+
+	// Route to per-request approval.
+	e := baseEntry("approve", "pending", nil)
+	if req.TaskID != "" {
+		e.TaskID = &req.TaskID
+	}
+	e.DurationMS = int(time.Since(start).Milliseconds())
+	if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+		h.logger.Warn("audit log failed", "err", logErr)
+	}
+	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
+	blob := buildRequestBlob(req, agent, nil)
+	reason := ""
+	if hardcoded {
+		reason = "iMessage send_message always requires human approval"
+	}
+	if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
+		req.Context.CallbackURL, expiresAt, reason, false, ""); routeErr != nil {
+		h.logger.Warn("route to approval failed", "err", routeErr)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":     "pending",
+		"request_id": req.RequestID,
+		"audit_id":   auditID,
+		"message":    fmt.Sprintf("Approval requested. Waiting up to %ds.", h.cfg.Approval.Timeout),
+	})
 }
 
 // HandleStatus returns the current status of a gateway request by request_id.
@@ -508,14 +453,13 @@ func writeGatewayStatusResponse(w http.ResponseWriter, e *store.AuditEntry) {
 
 // executeAdapterRequest fetches the credential from vault, calls the adapter,
 // and applies response filters. Shared between gateway and approvals handlers.
-// semanticFn is optional; nil disables LLM semantic filter execution.
 func executeAdapterRequest(
 	ctx context.Context,
 	v vault.Vault,
 	reg *adapters.Registry,
 	userID, service, action string,
 	params map[string]any,
-	responseFilters []policy.ResponseFilter,
+	responseFilters []filters.ResponseFilter,
 	semanticFn filters.SemanticApplyFn,
 ) (*adapters.Result, []filters.FilterRecord, error) {
 	adapter, ok := reg.Get(service)
@@ -526,12 +470,10 @@ func executeAdapterRequest(
 	vKey := vaultKeyForService(service)
 	cred, err := v.Get(ctx, userID, vKey)
 	if err != nil {
-		// For credential-free adapters (e.g. apple.imessage uses local file access),
-		// ValidateCredential(nil) returns nil — proceed without a vault entry.
 		if errors.Is(err, vault.ErrNotFound) && adapter.ValidateCredential(nil) == nil {
 			cred = nil
 		} else {
-			return nil, nil, err // vault.ErrNotFound propagated to caller
+			return nil, nil, err
 		}
 	}
 
@@ -544,7 +486,6 @@ func executeAdapterRequest(
 		return nil, nil, fmt.Errorf("adapter %s: %w", service, err)
 	}
 
-	// Apply response filters (structural + semantic).
 	if len(responseFilters) > 0 {
 		result, filterRecs := filters.ApplyContext(ctx, result, responseFilters, semanticFn)
 		return result, filterRecs, nil
@@ -553,7 +494,6 @@ func executeAdapterRequest(
 }
 
 // llmFilterFn builds a SemanticApplyFn from the current LLM filter config.
-// Returns nil if LLM filters are disabled.
 func (h *GatewayHandler) llmFilterFn() filters.SemanticApplyFn {
 	cfg := h.llmCfg.Filters
 	if !cfg.Enabled {
@@ -564,7 +504,6 @@ func (h *GatewayHandler) llmFilterFn() filters.SemanticApplyFn {
 
 // ── Approval routing ──────────────────────────────────────────────────────────
 
-// routeToApproval saves a pending_approval record and sends a Telegram notification.
 func (h *GatewayHandler) routeToApproval(
 	ctx context.Context,
 	userID string,
@@ -620,14 +559,13 @@ func (h *GatewayHandler) routeToApproval(
 	})
 	if err != nil {
 		h.logger.Warn("telegram approval notification failed", "err", err)
-		return nil // non-fatal: the pending_approval is saved; dashboard can show it
+		return nil
 	}
 
 	_ = h.store.UpdatePendingTelegramMsgID(ctx, blob.RequestID, msgID)
 	return nil
 }
 
-// saveAndNotifyActivation saves a pending_approval and sends an activation notification.
 func (h *GatewayHandler) saveAndNotifyActivation(
 	ctx context.Context,
 	userID string,
@@ -670,8 +608,6 @@ func (h *GatewayHandler) saveAndNotifyActivation(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// vaultKeyForService maps a service ID to its vault storage key.
-// All Google adapters share the "google" key.
 func vaultKeyForService(serviceID string) string {
 	if strings.HasPrefix(serviceID, "google.") {
 		return "google"
@@ -679,11 +615,7 @@ func vaultKeyForService(serviceID string) string {
 	return serviceID
 }
 
-// buildRequestBlob constructs the pendingRequestBlob stored in pending_approvals.
-// The callback signing key is the agent's token hash (SHA-256 of the raw token),
-// which is already stored in the agents table — storing it here leaks nothing new,
-// and it cannot be used to authenticate as the agent.
-func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters []policy.ResponseFilter) *pendingRequestBlob {
+func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters []filters.ResponseFilter) *pendingRequestBlob {
 	return &pendingRequestBlob{
 		Service:         req.Service,
 		Action:          req.Action,
@@ -699,7 +631,6 @@ func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters [
 	}
 }
 
-// nullableStr returns nil if s is empty, otherwise &s.
 func nullableStr(s string) *string {
 	if s == "" {
 		return nil
@@ -707,7 +638,6 @@ func nullableStr(s string) *string {
 	return &s
 }
 
-// cloneParams makes a shallow copy of a params map (to avoid mutating the original).
 func cloneParams(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
@@ -717,4 +647,22 @@ func cloneParams(m map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// getTaskActionFilters finds the matching TaskAction for service/action and
+// unmarshals its response_filters JSON.
+func getTaskActionFilters(task *store.Task, service, action string) []filters.ResponseFilter {
+	for _, a := range task.AuthorizedActions {
+		if a.Service == service && (a.Action == action || a.Action == "*") {
+			if len(a.ResponseFilters) == 0 {
+				return nil
+			}
+			var rf []filters.ResponseFilter
+			if err := json.Unmarshal(a.ResponseFilters, &rf); err != nil {
+				return nil
+			}
+			return rf
+		}
+	}
+	return nil
 }

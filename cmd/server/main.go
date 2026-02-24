@@ -23,7 +23,6 @@ import (
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/notify"
 	telegramnotify "github.com/ericlevine/clawvisor/internal/notify/telegram"
-	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	pgstore "github.com/ericlevine/clawvisor/internal/store/postgres"
@@ -100,12 +99,6 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// ── Policy Registry ─────────────────────────────────────────────────────
-	reg := policy.NewRegistry()
-	if err := loadPoliciesIntoRegistry(ctx, st, reg, logger); err != nil {
-		return fmt.Errorf("loading policies: %w", err)
-	}
-
 	// ── Adapter Registry ─────────────────────────────────────────────────────
 	adapterReg := adapters.NewRegistry()
 	if cfg.Google.ClientID != "" {
@@ -161,38 +154,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	// ── HTTP Server ─────────────────────────────────────────────────────────
-	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, notifier, safetyChecker, cfg.LLM)
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, safetyChecker, cfg.LLM)
 	if err != nil {
 		return err
 	}
 	return srv.Run(ctx)
-}
-
-// loadPoliciesIntoRegistry compiles all stored policies into the in-memory registry at startup.
-// After this, incremental updates (Create/Update/Delete policy) keep the registry in sync.
-func loadPoliciesIntoRegistry(ctx context.Context, st store.Store, reg *policy.Registry, logger *slog.Logger) error {
-	records, err := st.ListAllPolicies(ctx)
-	if err != nil {
-		return fmt.Errorf("loadPoliciesIntoRegistry: %w", err)
-	}
-
-	// Group by user and load each user's set in bulk.
-	byUser := make(map[string][]*store.PolicyRecord)
-	for _, r := range records {
-		byUser[r.UserID] = append(byUser[r.UserID], r)
-	}
-	for userID, recs := range byUser {
-		var policies []policy.Policy
-		for _, rec := range recs {
-			p, parseErr := policy.Parse([]byte(rec.RulesYAML))
-			if parseErr == nil {
-				policies = append(policies, *p)
-			}
-		}
-		reg.Load(userID, policies)
-	}
-	logger.Info("policy registry loaded", "users", len(byUser), "policies", len(records))
-	return nil
 }
 
 func buildVault(cfg *config.Config, db *sql.DB, driver string) (vault.Vault, error) {

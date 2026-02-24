@@ -3,8 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api/client'
 import Services from './Services'
-import Policies from './Policies'
-import PolicyEditor from './PolicyEditor'
+import Restrictions from './Restrictions'
 import Audit from './Audit'
 import Agents from './Agents'
 import Settings from './Settings'
@@ -16,7 +15,7 @@ const navItems = [
   { to: '/dashboard', label: 'Overview', end: true },
   { to: '/dashboard/tasks', label: 'Tasks' },
   { to: '/dashboard/services', label: 'Services' },
-  { to: '/dashboard/policies', label: 'Policies' },
+  { to: '/dashboard/restrictions', label: 'Restrictions' },
   { to: '/dashboard/agents', label: 'Agents' },
   { to: '/dashboard/audit', label: 'Audit Log' },
   { to: '/dashboard/settings', label: 'Settings' },
@@ -96,9 +95,7 @@ export default function Dashboard() {
           <Route index element={<Overview pendingCount={pendingCount} actionableTaskCount={actionableTaskCount} />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="services" element={<Services />} />
-          <Route path="policies" element={<Policies />} />
-          <Route path="policies/new" element={<PolicyEditor />} />
-          <Route path="policies/:id" element={<PolicyEditor />} />
+          <Route path="restrictions" element={<Restrictions />} />
           <Route path="audit" element={<Audit />} />
           <Route path="agents" element={<Agents />} />
           <Route path="settings" element={<Settings />} />

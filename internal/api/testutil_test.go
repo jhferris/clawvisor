@@ -17,7 +17,6 @@ import (
 	"github.com/ericlevine/clawvisor/internal/api"
 	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/config"
-	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
 	sqlitestore "github.com/ericlevine/clawvisor/internal/store/sqlite"
@@ -61,8 +60,6 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 		t.Fatalf("jwt: %v", err)
 	}
 
-	reg := policy.NewRegistry()
-
 	adapterReg := adapters.NewRegistry()
 	for _, a := range extra {
 		adapterReg.Register(a)
@@ -76,9 +73,10 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 			RefreshTokenTTL: "720h",
 		},
 		Approval: config.ApprovalConfig{Timeout: 300, OnTimeout: "fail"},
+		Task:     config.TaskConfig{DefaultExpirySeconds: 3600},
 	}
 
-	srv, err := api.New(cfg, st, v, jwtSvc, reg, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{})
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{})
 	if err != nil {
 		t.Fatalf("api.New: %v", err)
 	}
@@ -295,45 +293,6 @@ func (m *mockAdapter) ValidateCredential(b []byte) error {
 	return nil
 }
 
-// ── Policy YAML helpers ───────────────────────────────────────────────────────
-
-// blockPolicy returns a YAML policy string that blocks the given service+action for roleName.
-func blockPolicy(id, roleName, service, action string) string {
-	return fmt.Sprintf(`id: %s
-name: Block %s %s
-role: %s
-rules:
-  - service: %s
-    actions: [%s]
-    allow: false
-    reason: Blocked by test policy
-`, id, service, action, roleName, service, action)
-}
-
-// approvePolicy returns a YAML policy string that requires approval.
-func approvePolicy(id, roleName, service, action string) string {
-	return fmt.Sprintf(`id: %s
-name: Approve %s/%s
-role: %s
-rules:
-  - service: %s
-    actions: [%s]
-    require_approval: true
-    reason: Requires human approval
-`, id, service, action, roleName, service, action)
-}
-
-// executePolicy returns a YAML policy string that allows execution.
-func executePolicy(id, roleName, service, action string) string {
-	return fmt.Sprintf(`id: %s
-name: Execute %s/%s
-role: %s
-rules:
-  - service: %s
-    actions: [%s]
-    allow: true
-`, id, service, action, roleName, service, action)
-}
 
 // ── Scenario builder ──────────────────────────────────────────────────────────
 
@@ -376,23 +335,71 @@ func newScenario(t *testing.T, env *testEnv, roleName string) *scenario {
 	}
 }
 
-// createPolicy creates a policy via the API and returns its ID.
-func (sc *scenario) createPolicy(t *testing.T, yamlStr string) string {
+// createRestriction creates a restriction via the API and returns its ID.
+func (sc *scenario) createRestriction(t *testing.T, service, action, reason string) string {
 	t.Helper()
-	resp := sc.session.do("POST", "/api/policies", map[string]any{"yaml": yamlStr})
+	resp := sc.session.do("POST", "/api/restrictions", map[string]any{
+		"service": service, "action": action, "reason": reason,
+	})
 	body := mustStatus(t, resp, http.StatusCreated)
 	return str(t, body, "id")
 }
 
+// createApprovedTask creates a task via agent token and approves it via user JWT.
+// Returns the task ID.
+func (sc *scenario) createApprovedTask(t *testing.T, env *testEnv, service, action string, autoExecute bool) string {
+	t.Helper()
+	resp := env.do("POST", "/api/tasks", sc.AgentToken, map[string]any{
+		"purpose": "test task",
+		"authorized_actions": []map[string]any{{
+			"service": service, "action": action, "auto_execute": autoExecute,
+		}},
+	})
+	body := mustStatus(t, resp, http.StatusCreated)
+	taskID := str(t, body, "task_id")
+
+	// Approve the task as user.
+	resp = sc.session.do("POST", fmt.Sprintf("/api/tasks/%s/approve", taskID), nil)
+	mustStatus(t, resp, http.StatusOK)
+	return taskID
+}
+
+// createApprovedStandingTask creates a standing task and approves it. Returns the task ID.
+func (sc *scenario) createApprovedStandingTask(t *testing.T, env *testEnv, service, action string, autoExecute bool) string {
+	t.Helper()
+	resp := env.do("POST", "/api/tasks", sc.AgentToken, map[string]any{
+		"purpose":  "standing test task",
+		"lifetime": "standing",
+		"authorized_actions": []map[string]any{{
+			"service": service, "action": action, "auto_execute": autoExecute,
+		}},
+	})
+	body := mustStatus(t, resp, http.StatusCreated)
+	taskID := str(t, body, "task_id")
+
+	resp = sc.session.do("POST", fmt.Sprintf("/api/tasks/%s/approve", taskID), nil)
+	mustStatus(t, resp, http.StatusOK)
+	return taskID
+}
+
 // gatewayRequest sends a request through the gateway using the scenario's agent token.
 func (sc *scenario) gatewayRequest(env *testEnv, reqID, service, action string) map[string]any {
-	resp := env.do("POST", "/api/gateway/request", sc.AgentToken, map[string]any{
+	return sc.gatewayRequestWithTask(env, reqID, service, action, "")
+}
+
+// gatewayRequestWithTask sends a gateway request with an optional task_id.
+func (sc *scenario) gatewayRequestWithTask(env *testEnv, reqID, service, action, taskID string) map[string]any {
+	body := map[string]any{
 		"service":    service,
 		"action":     action,
 		"params":     map[string]any{"to": "bob@example.com"},
 		"reason":     "test reason",
 		"request_id": reqID,
-	})
+	}
+	if taskID != "" {
+		body["task_id"] = taskID
+	}
+	resp := env.do("POST", "/api/gateway/request", sc.AgentToken, body)
 	var m map[string]any
 	decode(sc.session.env.t, resp, &m)
 	return m

@@ -152,53 +152,13 @@ export interface ServiceInfo {
   activated_at?: string
 }
 
-export interface PolicyRecord {
+export interface Restriction {
   id: string
   user_id: string
-  slug: string
-  name: string
-  description: string
-  role_id: string | null
-  rules_yaml: string
-  created_at: string
-  updated_at: string
-}
-
-export interface SemanticConflict {
-  description: string
-  affected_policies: string[]
-  severity: 'warning' | 'info'
-}
-
-export interface ValidationResult {
-  valid: boolean
-  errors: string[]
-  conflicts: PolicyConflict[]
-  semantic_conflicts: SemanticConflict[] | null // null = LLM not configured or not requested
-}
-
-export interface PolicyGenerateContext {
-  role?: string
-  existing_ids?: string[]
-}
-
-export interface PolicyConflict {
-  type: string
-  message: string
-}
-
-export interface PolicyDecision {
-  decision: 'execute' | 'approve' | 'block'
-  policy_id: string
-  rule_id: string
-  reason: string
-}
-
-export interface EvalRequest {
   service: string
   action: string
-  params?: Record<string, unknown>
-  role?: string
+  reason: string
+  created_at: string
 }
 
 export interface AuditEntry {
@@ -260,6 +220,7 @@ export interface TaskAction {
   service: string
   action: string
   auto_execute: boolean
+  response_filters?: unknown[]
 }
 
 export interface Task {
@@ -267,7 +228,8 @@ export interface Task {
   user_id: string
   agent_id: string
   purpose: string
-  status: 'pending_approval' | 'pending_scope_expansion' | 'active' | 'completed' | 'expired' | 'denied'
+  lifetime: 'session' | 'standing'
+  status: 'pending_approval' | 'pending_scope_expansion' | 'active' | 'completed' | 'expired' | 'denied' | 'revoked'
   authorized_actions: TaskAction[]
   callback_url?: string
   created_at: string
@@ -324,19 +286,11 @@ export const api = {
     activateWithKey: (serviceID: string, token: string) =>
       post<{ status: string; service: string }>(`/api/services/${serviceID}/activate-key`, { token }),
   },
-  policies: {
-    list: (roleId?: string) =>
-      get<PolicyRecord[]>('/api/policies', roleId ? { role: roleId } : undefined),
-    get: (id: string) => get<PolicyRecord>(`/api/policies/${id}`),
-    create: (yaml: string) => post<PolicyRecord>('/api/policies', { yaml }),
-    update: (id: string, yaml: string) => put<PolicyRecord>(`/api/policies/${id}`, { yaml }),
-    delete: (id: string) => del<void>(`/api/policies/${id}`),
-    validate: (yaml: string, checkSemantic = false) =>
-      post<ValidationResult>('/api/policies/validate', { yaml, check_semantic: checkSemantic }),
-    generate: (description: string, context?: PolicyGenerateContext) =>
-      post<{ yaml: string }>('/api/policies/generate', { description, context }),
-    evaluate: (req: EvalRequest) =>
-      post<PolicyDecision>('/api/policies/evaluate', req),
+  restrictions: {
+    list: () => get<Restriction[]>('/api/restrictions'),
+    create: (service: string, action: string, reason?: string) =>
+      post<Restriction>('/api/restrictions', { service, action, reason: reason ?? '' }),
+    delete: (id: string) => del<void>(`/api/restrictions/${id}`),
   },
   audit: {
     list: (filter?: AuditFilter) =>
@@ -368,6 +322,8 @@ export const api = {
       post<{ task_id: string; status: string; expires_at: string }>(`/api/tasks/${id}/expand/approve`, {}),
     expandDeny: (id: string) =>
       post<{ task_id: string; status: string }>(`/api/tasks/${id}/expand/deny`, {}),
+    revoke: (id: string) =>
+      post<{ task_id: string; status: string }>(`/api/tasks/${id}/revoke`, {}),
   },
 }
 

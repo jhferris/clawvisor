@@ -33,7 +33,7 @@ func TestGateway_Dedup_BlockedRequest(t *testing.T) {
 	// the existing outcome without creating a duplicate audit entry.
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "dedup-block")
-	sc.createPolicy(t, blockPolicy("p-dedup-blk", "dedup-block", "mock.svc", "run"))
+	sc.createRestriction(t, "mock.svc", "run", "blocked by test")
 
 	reqID := fmt.Sprintf("dedup-blk-%s", randSuffix())
 
@@ -76,7 +76,7 @@ func TestGateway_Dedup_PendingRequest(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-dedup-pend", "dedup-pend", "mock.svc", "run"))
+	// No restriction, no task → default is per-request approval (pending)
 
 	reqID := fmt.Sprintf("dedup-pend-%s", randSuffix())
 
@@ -110,19 +110,20 @@ func TestGateway_Dedup_ExecutedRequest(t *testing.T) {
 	adapter := newMockAdapter("mock.dedup-exec", "run").withResult("dedup-exec-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "dedup-exec")
-	sc.createPolicy(t, executePolicy("p-dedup-exec", "dedup-exec", "mock.dedup-exec", "run"))
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.dedup-exec", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
+	taskID := sc.createApprovedTask(t, env, "mock.dedup-exec", "run", true)
+
 	reqID := fmt.Sprintf("dedup-exec-%s", randSuffix())
 
-	first := sc.gatewayRequest(env, reqID, "mock.dedup-exec", "run")
+	first := sc.gatewayRequestWithTask(env, reqID, "mock.dedup-exec", "run", taskID)
 	if first["status"] != "executed" {
 		t.Fatalf("first request: expected executed, got %v", first["status"])
 	}
 
-	second := sc.gatewayRequest(env, reqID, "mock.dedup-exec", "run")
+	second := sc.gatewayRequestWithTask(env, reqID, "mock.dedup-exec", "run", taskID)
 	if second["status"] != "executed" {
 		t.Errorf("dedup executed: expected status=executed, got %v", second["status"])
 	}
@@ -137,7 +138,7 @@ func TestGateway_Dedup_DifferentRequestIDs_NotDeduplicated(t *testing.T) {
 	// Two requests with different request_ids should each be processed independently.
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "dedup-diff")
-	sc.createPolicy(t, blockPolicy("p-dedup-diff", "dedup-diff", "mock.svc", "run"))
+	sc.createRestriction(t, "mock.svc", "run", "blocked by test")
 
 	r1 := sc.gatewayRequest(env, fmt.Sprintf("dedup-diff-a-%s", randSuffix()), "mock.svc", "run")
 	r2 := sc.gatewayRequest(env, fmt.Sprintf("dedup-diff-b-%s", randSuffix()), "mock.svc", "run")
@@ -167,7 +168,7 @@ func TestGateway_Status_RequiresAgentToken(t *testing.T) {
 func TestGateway_Status_Blocked(t *testing.T) {
 	env := newTestEnv(t)
 	sc := newScenario(t, env, "status-blk")
-	sc.createPolicy(t, blockPolicy("p-status-blk", "status-blk", "mock.svc", "run"))
+	sc.createRestriction(t, "mock.svc", "run", "blocked by test")
 
 	reqID := fmt.Sprintf("status-blk-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "mock.svc", "run")
@@ -191,7 +192,7 @@ func TestGateway_Status_Pending(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-status-pend", "status-pend", "mock.svc", "run"))
+	// No restriction, no task → default pending
 
 	reqID := fmt.Sprintf("status-pend-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "mock.svc", "run")
@@ -207,13 +208,14 @@ func TestGateway_Status_Executed(t *testing.T) {
 	adapter := newMockAdapter("mock.status-exec", "run").withResult("status-exec-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "status-exec")
-	sc.createPolicy(t, executePolicy("p-status-exec", "status-exec", "mock.status-exec", "run"))
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.status-exec", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
+	taskID := sc.createApprovedTask(t, env, "mock.status-exec", "run", true)
+
 	reqID := fmt.Sprintf("status-exec-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "mock.status-exec", "run")
+	sc.gatewayRequestWithTask(env, reqID, "mock.status-exec", "run", taskID)
 
 	resp := env.do("GET", fmt.Sprintf("/api/gateway/request/%s/status", reqID), sc.AgentToken, nil)
 	body := mustStatus(t, resp, http.StatusOK)
@@ -229,7 +231,7 @@ func TestGateway_Status_UpdatesAfterDeny(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-status-deny", "status-deny", "mock.svc", "run"))
+	// No restriction, no task → default pending
 
 	reqID := fmt.Sprintf("status-deny-%s", randSuffix())
 	sc.gatewayRequest(env, reqID, "mock.svc", "run")
@@ -247,7 +249,7 @@ func TestGateway_Status_IsolatedByUser(t *testing.T) {
 	// An agent belonging to user2 cannot poll the status of user1's request.
 	env := newTestEnv(t)
 	sc1 := newScenario(t, env, "status-iso1")
-	sc1.createPolicy(t, blockPolicy("p-status-iso", "status-iso1", "mock.svc", "run"))
+	sc1.createRestriction(t, "mock.svc", "run", "blocked for isolation test")
 
 	reqID := fmt.Sprintf("status-iso-%s", randSuffix())
 	sc1.gatewayRequest(env, reqID, "mock.svc", "run")
@@ -294,15 +296,16 @@ func verifyCallbackHMAC(t *testing.T, body []byte, sig, key, label string) {
 }
 
 func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
-	// When a request is immediately executed, the callback POST must carry a valid
+	// When a request is immediately executed via task, the callback POST must carry a valid
 	// X-Clawvisor-Signature header, signed with the agent's bearer token.
 	adapter := newMockAdapter("mock.cb-exec", "run").withResult("cb-exec-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-exec")
-	sc.createPolicy(t, executePolicy("p-cb-exec", "cb-exec", "mock.cb-exec", "run"))
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-exec", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
+
+	taskID := sc.createApprovedTask(t, env, "mock.cb-exec", "run", true)
 
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-exec-%s", randSuffix())
@@ -312,6 +315,7 @@ func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 		"action":     "run",
 		"params":     map[string]any{},
 		"request_id": reqID,
+		"task_id":    taskID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
 	})
 	body := mustStatus(t, resp, http.StatusOK)
@@ -344,10 +348,10 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 	adapter := newMockAdapter("mock.cb-approve", "run").withResult("approve-cb-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-approve")
-	sc.createPolicy(t, approvePolicy("p-cb-approve", "cb-approve", "mock.cb-approve", "run"))
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-approve", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
+	// No restriction, no task → default pending
 
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-approve-%s", randSuffix())
@@ -392,7 +396,7 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
-	sc.createPolicy(t, approvePolicy("p-cb-deny", "cb-deny", "mock.svc", "run"))
+	// No restriction, no task → default pending
 
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-deny-%s", randSuffix())
@@ -435,12 +439,13 @@ func TestGateway_Callback_NoCallbackURL_NoDelivery(t *testing.T) {
 	adapter := newMockAdapter("mock.cb-none", "run").withResult("no-cb-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-none")
-	sc.createPolicy(t, executePolicy("p-cb-none", "cb-none", "mock.cb-none", "run"))
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-none", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
 
-	result := sc.gatewayRequest(env, fmt.Sprintf("cb-none-%s", randSuffix()), "mock.cb-none", "run")
+	taskID := sc.createApprovedTask(t, env, "mock.cb-none", "run", true)
+
+	result := sc.gatewayRequestWithTask(env, fmt.Sprintf("cb-none-%s", randSuffix()), "mock.cb-none", "run", taskID)
 	if result["status"] != "executed" {
 		t.Errorf("no callback_url: expected status=executed, got %v", result["status"])
 	}

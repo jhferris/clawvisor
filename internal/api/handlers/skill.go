@@ -9,7 +9,6 @@ import (
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
-	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
 )
@@ -19,7 +18,6 @@ type SkillHandler struct {
 	st         store.Store
 	vault      vault.Vault
 	adapterReg *adapters.Registry
-	policyReg  *policy.Registry
 	logger     *slog.Logger
 }
 
@@ -27,11 +25,10 @@ func NewSkillHandler(
 	st store.Store,
 	v vault.Vault,
 	adapterReg *adapters.Registry,
-	policyReg *policy.Registry,
 	logger *slog.Logger,
 ) *SkillHandler {
 	return &SkillHandler{
-		st: st, vault: v, adapterReg: adapterReg, policyReg: policyReg, logger: logger,
+		st: st, vault: v, adapterReg: adapterReg, logger: logger,
 	}
 }
 
@@ -91,7 +88,7 @@ var serviceDesc = map[string]string{
 }
 
 // Catalog returns a personalized markdown document listing the agent's
-// activated services (with policy-filtered actions) and available services.
+// activated services (with restriction-filtered actions) and available services.
 //
 // GET /api/skill/catalog
 // Auth: agent bearer token
@@ -102,14 +99,6 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 	if agent == nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
-	}
-
-	// Resolve agent role name (policy engine matches on role name, not UUID).
-	agentRoleName := ""
-	if agent.RoleID != nil {
-		if role, err := h.st.GetRole(ctx, *agent.RoleID, agent.UserID); err == nil {
-			agentRoleName = role.Name
-		}
 	}
 
 	// Determine which vault keys are activated for this user.
@@ -152,22 +141,17 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 		anyActive = true
 		buf.WriteString(fmt.Sprintf("\n### %s\n\n", svc.id))
 		for _, action := range svc.actions {
-			decision := h.policyReg.Evaluate(agent.UserID, policy.EvalRequest{
-				Service:     svc.id,
-				Action:      action,
-				AgentRoleID: agentRoleName,
-			})
-			if decision.Decision == policy.DecisionBlock {
+			// If a restriction matches this action, skip it.
+			restriction, _ := h.st.MatchRestriction(ctx, agent.UserID, svc.id, action)
+			if restriction != nil {
 				continue
 			}
 
 			key := svc.id + ":" + action
 			meta, hasMeta := actionMeta[key]
 
-			label := ""
-			if decision.Decision == policy.DecisionApprove {
-				label = " ⚠️ requires approval"
-			}
+			// All non-restricted actions require approval unless covered by a task.
+			label := " (requires approval or task)"
 
 			if hasMeta {
 				buf.WriteString(fmt.Sprintf("**%s**%s — %s\n", action, label, meta.Desc))

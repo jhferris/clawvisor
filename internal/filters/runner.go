@@ -12,7 +12,6 @@ import (
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/adapters/format"
-	"github.com/ericlevine/clawvisor/internal/policy"
 )
 
 // FilterRecord is appended to the audit log for each filter applied.
@@ -31,12 +30,12 @@ type FilterRecord struct {
 type SemanticApplyFn func(ctx context.Context, instruction string, result *adapters.Result) (*adapters.Result, bool)
 
 // Apply applies all filters to result without LLM support (semantic filters are no-ops).
-func Apply(result *adapters.Result, responseFilters []policy.ResponseFilter) (*adapters.Result, []FilterRecord) {
+func Apply(result *adapters.Result, responseFilters []ResponseFilter) (*adapters.Result, []FilterRecord) {
 	return ApplyContext(context.Background(), result, responseFilters, nil)
 }
 
 // ApplyContext applies all filters with optional LLM support for semantic filters.
-func ApplyContext(ctx context.Context, result *adapters.Result, responseFilters []policy.ResponseFilter, semanticFn SemanticApplyFn) (*adapters.Result, []FilterRecord) {
+func ApplyContext(ctx context.Context, result *adapters.Result, responseFilters []ResponseFilter, semanticFn SemanticApplyFn) (*adapters.Result, []FilterRecord) {
 	if len(responseFilters) == 0 {
 		return result, nil
 	}
@@ -86,7 +85,7 @@ func ApplyContext(ctx context.Context, result *adapters.Result, responseFilters 
 	return out, log
 }
 
-func applyStructural(data map[string]any, f policy.ResponseFilter) (FilterRecord, map[string]any) {
+func applyStructural(data map[string]any, f ResponseFilter) (FilterRecord, map[string]any) {
 	switch {
 	case f.Redact != "":
 		pattern := builtinPattern(f.Redact)

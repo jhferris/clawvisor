@@ -9,14 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
 	"github.com/ericlevine/clawvisor/internal/callback"
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/notify"
-	"github.com/ericlevine/clawvisor/internal/policy"
 	"github.com/ericlevine/clawvisor/internal/store"
-	"github.com/ericlevine/clawvisor/internal/vault"
 )
 
 // hardcodedApprovalActions lists service:action pairs that always require
@@ -33,39 +30,33 @@ func RequiresHardcodedApproval(service, action string) bool {
 
 // TasksHandler manages task-scoped authorization.
 type TasksHandler struct {
-	st         store.Store
-	vault      vault.Vault
-	adapterReg *adapters.Registry
-	policyReg  *policy.Registry
-	notifier   notify.Notifier
-	cfg        config.Config
-	logger     *slog.Logger
-	baseURL    string
+	st       store.Store
+	notifier notify.Notifier
+	cfg      config.Config
+	logger   *slog.Logger
+	baseURL  string
 }
 
 func NewTasksHandler(
 	st store.Store,
-	v vault.Vault,
-	adapterReg *adapters.Registry,
-	policyReg *policy.Registry,
 	notifier notify.Notifier,
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
 ) *TasksHandler {
 	return &TasksHandler{
-		st: st, vault: v, adapterReg: adapterReg, policyReg: policyReg,
-		notifier: notifier, cfg: cfg, logger: logger, baseURL: baseURL,
+		st: st, notifier: notifier, cfg: cfg, logger: logger, baseURL: baseURL,
 	}
 }
 
 // ── Create ────────────────────────────────────────────────────────────────────
 
 type createTaskRequest struct {
-	Purpose          string             `json:"purpose"`
+	Purpose           string             `json:"purpose"`
 	AuthorizedActions []store.TaskAction `json:"authorized_actions"`
-	ExpiresInSeconds int                `json:"expires_in_seconds"`
-	CallbackURL      string             `json:"callback_url"`
+	ExpiresInSeconds  int                `json:"expires_in_seconds"`
+	CallbackURL       string             `json:"callback_url"`
+	Lifetime          string             `json:"lifetime"` // "session" (default) or "standing"
 }
 
 // Create declares a new task scope.
@@ -102,31 +93,18 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve agent role name for policy evaluation.
-	agentRoleName := ""
-	if agent.RoleID != nil {
-		if role, err := h.st.GetRole(ctx, *agent.RoleID, agent.UserID); err == nil {
-			agentRoleName = role.Name
-		}
+	lifetime := req.Lifetime
+	if lifetime == "" {
+		lifetime = "session"
 	}
-
-	// Policy check: see if any action would produce DecisionApprove.
-	needsApproval := false
-	for _, a := range req.AuthorizedActions {
-		decision := h.policyReg.Evaluate(agent.UserID, policy.EvalRequest{
-			Service:     a.Service,
-			Action:      a.Action,
-			AgentRoleID: agentRoleName,
-		})
-		if decision.Decision == policy.DecisionBlock {
-			// Block stays — we allow the task to be created but note that this
-			// action will be blocked at execution time anyway.
-			continue
-		}
-		if decision.Decision == policy.DecisionApprove {
-			needsApproval = true
-		}
-		// DecisionExecute: already allowed, no approval needed for this action.
+	if lifetime != "session" && lifetime != "standing" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "lifetime must be \"session\" or \"standing\"")
+		return
+	}
+	if lifetime == "standing" && req.ExpiresInSeconds > 0 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+			"expires_in_seconds cannot be set on a standing task — standing tasks have no expiry (revoke them to deactivate)")
+		return
 	}
 
 	expiresIn := req.ExpiresInSeconds
@@ -134,30 +112,19 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		expiresIn = h.cfg.Task.DefaultExpirySeconds
 	}
 
-	status := "active"
-	if needsApproval {
-		status = "pending_approval"
-	}
-
+	// All tasks start as pending_approval — no policy-based auto-activation.
 	task := &store.Task{
 		ID:                uuid.New().String(),
 		UserID:            agent.UserID,
 		AgentID:           agent.ID,
 		Purpose:           req.Purpose,
-		Status:            status,
+		Status:            "pending_approval",
+		Lifetime:          lifetime,
 		AuthorizedActions: req.AuthorizedActions,
 		ExpiresInSeconds:  expiresIn,
 	}
 	if req.CallbackURL != "" {
 		task.CallbackURL = &req.CallbackURL
-	}
-
-	// If task goes straight to active (no approval needed), set expiry now.
-	if status == "active" {
-		now := time.Now().UTC()
-		exp := now.Add(time.Duration(expiresIn) * time.Second)
-		task.ApprovedAt = &now
-		task.ExpiresAt = &exp
 	}
 
 	if err := h.st.CreateTask(ctx, task); err != nil {
@@ -166,33 +133,31 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := "Task is active — all policy-allowed actions are pre-authorized."
-	if needsApproval {
-		msg = "Task approval requested. Waiting for human review."
-		// Send notification.
-		if h.notifier != nil {
-			approveURL := fmt.Sprintf("%s/api/tasks/%s/approve", h.baseURL, task.ID)
-			denyURL := fmt.Sprintf("%s/api/tasks/%s/deny", h.baseURL, task.ID)
-			expiresInStr := fmt.Sprintf("%d minutes", expiresIn/60)
-
-			agentName := agent.Name
-			_, _ = h.notifier.SendTaskApprovalRequest(ctx, notify.TaskApprovalRequest{
-				TaskID:     task.ID,
-				UserID:     agent.UserID,
-				AgentName:  agentName,
-				Purpose:    req.Purpose,
-				Actions:    req.AuthorizedActions,
-				ApproveURL: approveURL,
-				DenyURL:    denyURL,
-				ExpiresIn:  expiresInStr,
-			})
+	// Send notification.
+	if h.notifier != nil {
+		approveURL := fmt.Sprintf("%s/api/tasks/%s/approve", h.baseURL, task.ID)
+		denyURL := fmt.Sprintf("%s/api/tasks/%s/deny", h.baseURL, task.ID)
+		expiresInStr := fmt.Sprintf("%d minutes", expiresIn/60)
+		if lifetime == "standing" {
+			expiresInStr = "standing (no expiry)"
 		}
+
+		_, _ = h.notifier.SendTaskApprovalRequest(ctx, notify.TaskApprovalRequest{
+			TaskID:     task.ID,
+			UserID:     agent.UserID,
+			AgentName:  agent.Name,
+			Purpose:    req.Purpose,
+			Actions:    req.AuthorizedActions,
+			ApproveURL: approveURL,
+			DenyURL:    denyURL,
+			ExpiresIn:  expiresInStr,
+		})
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"task_id": task.ID,
-		"status":  status,
-		"message": msg,
+		"status":  "pending_approval",
+		"message": "Task approval requested. Waiting for human review.",
 	})
 }
 
@@ -225,6 +190,7 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sanitizeTaskForResponse(task)
 	writeJSON(w, http.StatusOK, task)
 }
 
@@ -250,11 +216,29 @@ func (h *TasksHandler) List(w http.ResponseWriter, r *http.Request) {
 	if tasks == nil {
 		tasks = []*store.Task{}
 	}
+	for _, t := range tasks {
+		sanitizeTaskForResponse(t)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total": len(tasks),
 		"tasks": tasks,
 	})
+}
+
+// sanitizeTaskForResponse cleans up task fields before serialization:
+//   - Standing tasks: nil out the sentinel expiry so it doesn't leak.
+//   - Active session tasks past their expiry: report status as "expired"
+//     even if the background cleanup goroutine hasn't swept them yet.
+func sanitizeTaskForResponse(t *store.Task) {
+	if t.Lifetime == "standing" {
+		t.ExpiresAt = nil
+		t.ExpiresInSeconds = 0
+		return
+	}
+	if t.Status == "active" && t.ExpiresAt != nil && t.ExpiresAt.Before(time.Now()) {
+		t.Status = "expired"
+	}
 }
 
 // ── Approve ───────────────────────────────────────────────────────────────────
@@ -290,7 +274,14 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresAt := time.Now().UTC().Add(time.Duration(task.ExpiresInSeconds) * time.Second)
+	// Standing tasks have no expiry; session tasks expire after ExpiresInSeconds.
+	var expiresAt time.Time
+	if task.Lifetime == "standing" {
+		// Far-future sentinel — standing tasks are revoked manually, not expired.
+		expiresAt = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	} else {
+		expiresAt = time.Now().UTC().Add(time.Duration(task.ExpiresInSeconds) * time.Second)
+	}
 	if err := h.st.UpdateTaskApproved(ctx, taskID, expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not approve task")
 		return
@@ -307,11 +298,14 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"task_id":    taskID,
-		"status":     "active",
-		"expires_at": expiresAt.Format(time.RFC3339),
-	})
+	resp := map[string]any{
+		"task_id": taskID,
+		"status":  "active",
+	}
+	if task.Lifetime != "standing" {
+		resp["expires_at"] = expiresAt.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── Deny ──────────────────────────────────────────────────────────────────────
@@ -466,6 +460,11 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 	}
 	if task.Status != "active" && task.Status != "expired" {
 		writeError(w, http.StatusConflict, "INVALID_STATE", "task must be active or expired to expand")
+		return
+	}
+	if task.Lifetime == "standing" {
+		writeError(w, http.StatusConflict, "INVALID_OPERATION",
+			"standing tasks cannot be expanded — revoke this task and create a new one with the additional actions, or create a separate session task for the new action")
 		return
 	}
 
@@ -628,6 +627,36 @@ func (h *TasksHandler) ExpandDeny(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_id": taskID,
 		"status":  newStatus,
+	})
+}
+
+// ── Revoke ────────────────────────────────────────────────────────────────────
+
+// Revoke cancels an active (typically standing) task.
+//
+// POST /api/tasks/{id}/revoke
+// Auth: user JWT
+func (h *TasksHandler) Revoke(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := middleware.UserFromContext(ctx)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	taskID := r.PathValue("id")
+	if err := h.st.RevokeTask(ctx, taskID, user.ID); err != nil {
+		if err == store.ErrNotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "task not found or not active")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not revoke task")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task_id": taskID,
+		"status":  "revoked",
 	})
 }
 

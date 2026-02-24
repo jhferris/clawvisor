@@ -31,15 +31,11 @@ type Store interface {
 	ListRoles(ctx context.Context, userID string) ([]*AgentRole, error)
 	DeleteRole(ctx context.Context, id, userID string) error
 
-	// Policies
-	CreatePolicy(ctx context.Context, userID string, p *PolicyRecord) (*PolicyRecord, error)
-	UpdatePolicy(ctx context.Context, id, userID string, p *PolicyRecord) (*PolicyRecord, error)
-	DeletePolicy(ctx context.Context, id, userID string) error
-	GetPolicy(ctx context.Context, id, userID string) (*PolicyRecord, error)
-	GetPolicyBySlug(ctx context.Context, slug, userID string) (*PolicyRecord, error)
-	ListPolicies(ctx context.Context, userID string, filter PolicyFilter) ([]*PolicyRecord, error)
-	// ListAllPolicies returns every policy across all users; used at startup to seed the registry.
-	ListAllPolicies(ctx context.Context) ([]*PolicyRecord, error)
+	// Restrictions
+	CreateRestriction(ctx context.Context, r *Restriction) (*Restriction, error)
+	DeleteRestriction(ctx context.Context, id, userID string) error
+	ListRestrictions(ctx context.Context, userID string) ([]*Restriction, error)
+	MatchRestriction(ctx context.Context, userID, service, action string) (*Restriction, error)
 
 	// Agents
 	CreateAgent(ctx context.Context, userID, name, tokenHash string, roleID *string) (*Agent, error)
@@ -80,6 +76,7 @@ type Store interface {
 	IncrementTaskRequestCount(ctx context.Context, id string) error
 	SetTaskPendingExpansion(ctx context.Context, id string, action *TaskAction, reason string) error
 	ListExpiredTasks(ctx context.Context) ([]*Task, error)
+	RevokeTask(ctx context.Context, id, userID string) error
 
 	// Pending approvals
 	SavePendingApproval(ctx context.Context, pa *PendingApproval) error
@@ -113,7 +110,6 @@ type Session struct {
 }
 
 // AgentRole is an optional label assigned to one or more agents.
-// Policies can target a role; agents with no role receive only global policies.
 type AgentRole struct {
 	ID          string    `json:"id"`
 	UserID      string    `json:"user_id"`
@@ -142,24 +138,14 @@ type ServiceMeta struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// PolicyRecord is a policy as stored in the database.
-type PolicyRecord struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	Slug        string    `json:"slug"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	RoleID      *string   `json:"role_id"`
-	RulesYAML   string    `json:"rules_yaml"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-// PolicyFilter controls which policies are returned by ListPolicies.
-// Zero value returns all policies for the user.
-type PolicyFilter struct {
-	RoleID     *string // only policies for this role
-	GlobalOnly bool    // only policies with no role (role_id IS NULL)
+// Restriction is a hard block on a service/action that no task can override.
+type Restriction struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Service   string    `json:"service"`
+	Action    string    `json:"action"`
+	Reason    string    `json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // NotificationConfig stores per-user, per-channel notification settings.
@@ -199,9 +185,10 @@ type AuditEntry struct {
 
 // TaskAction represents a single authorized action within a task scope.
 type TaskAction struct {
-	Service     string `json:"service"`
-	Action      string `json:"action"`       // specific action or "*"
-	AutoExecute bool   `json:"auto_execute"`
+	Service        string          `json:"service"`
+	Action         string          `json:"action"`          // specific action or "*"
+	AutoExecute    bool            `json:"auto_execute"`
+	ResponseFilters json.RawMessage `json:"response_filters,omitempty"`
 }
 
 // Task represents a task-scoped authorization.
@@ -210,7 +197,8 @@ type Task struct {
 	UserID            string       `json:"user_id"`
 	AgentID           string       `json:"agent_id"`
 	Purpose           string       `json:"purpose"`
-	Status            string       `json:"status"` // pending_approval | active | completed | expired | denied | cancelled | pending_scope_expansion
+	Status            string       `json:"status"` // pending_approval | active | completed | expired | denied | cancelled | pending_scope_expansion | revoked
+	Lifetime          string       `json:"lifetime"` // session | standing
 	AuthorizedActions []TaskAction `json:"authorized_actions"`
 	CallbackURL       *string      `json:"callback_url,omitempty"`
 	CreatedAt         time.Time    `json:"created_at"`

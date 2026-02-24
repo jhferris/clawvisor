@@ -1,10 +1,11 @@
 ---
 name: clawvisor
 description: >
-  Route tool requests through Clawvisor for policy enforcement, credential
-  vaulting, and human approval flows. Use for Gmail, Calendar, Drive, Contacts,
-  GitHub, and iMessage (macOS). Clawvisor enforces the user's policies and
-  injects credentials — the agent never handles secrets directly.
+  Route tool requests through Clawvisor for credential vaulting, task-scoped
+  authorization, and human approval flows. Use for Gmail, Calendar, Drive,
+  Contacts, GitHub, and iMessage (macOS). Clawvisor enforces restrictions,
+  manages task scopes, and injects credentials — the agent never handles
+  secrets directly.
 version: 0.1.0
 homepage: https://github.com/ericlevine/clawvisor-gatekeeper
 metadata:
@@ -16,15 +17,20 @@ metadata:
       - "Set CLAWVISOR_URL to your Clawvisor instance URL"
       - "Create an agent in the Clawvisor dashboard, copy the token, then run: openclaw credentials set CLAWVISOR_AGENT_TOKEN"
       - "Activate any services you want the agent to use (Gmail, GitHub, etc.) in the dashboard under Services"
-      - "Optionally create policies in the dashboard to control what the agent is allowed to do"
+      - "Optionally create restrictions in the dashboard to block specific actions"
 ---
 
 # Clawvisor Skill
 
 Clawvisor is a gatekeeper between you and external services. Every action goes
-through Clawvisor, which checks policy, injects credentials, optionally routes
-to the user for approval, and returns a clean semantic result. You never hold
-API keys.
+through Clawvisor, which checks restrictions, validates task scopes, injects
+credentials, optionally routes to the user for approval, and returns a clean
+semantic result. You never hold API keys.
+
+The authorization model has three layers:
+1. **Restrictions** — hard blocks the user sets. If a restriction matches, the action is blocked immediately.
+2. **Tasks** — pre-authorized scopes you declare. If the action is in scope with `auto_execute`, it runs without approval.
+3. **Per-request approval** — the default. Any action without a covering task goes to the user for approval.
 
 ---
 
@@ -38,9 +44,9 @@ Authorization: Bearer $CLAWVISOR_AGENT_TOKEN
 ```
 
 This returns the services available to you, their supported actions, which
-actions require approval, and a list of services you can ask the user to
-activate. Always fetch this before making gateway requests so you know what's
-available and what will need human approval.
+actions are restricted (blocked), and a list of services you can ask the user
+to activate. Always fetch this before making gateway requests so you know
+what's available and what is restricted.
 
 ---
 
@@ -120,9 +126,29 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
   }'
 ```
 
-If all actions are already allowed by policy, the task goes straight to `active`
-with no approval needed. Otherwise, the response status is `pending_approval` and
-the user is notified to approve.
+All tasks start as `pending_approval` — the user is notified to approve the task
+scope before it becomes active.
+
+#### Standing tasks
+
+For recurring workflows, you can create a **standing task** that does not expire:
+
+```bash
+curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
+  -H "Authorization: Bearer $CLAWVISOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "purpose": "Ongoing email triage",
+    "lifetime": "standing",
+    "authorized_actions": [
+      {"service": "google.gmail", "action": "list_messages", "auto_execute": true},
+      {"service": "google.gmail", "action": "get_message", "auto_execute": true}
+    ]
+  }'
+```
+
+Standing tasks remain active until the user revokes them from the dashboard.
+Session tasks (the default) expire after the configured TTL.
 
 Once the task is active, include `"task_id": "<task-uuid>"` in each gateway
 request to auto-execute in-scope actions without per-request approvals:
@@ -184,7 +210,7 @@ Every response has a `status` field. Handle each case as follows:
 | Status | Meaning | What to do |
 |---|---|---|
 | `executed` | Action completed successfully | Use `result.summary` and `result.data`. Report to the user. |
-| `blocked` | A policy explicitly blocked this action | Tell the user: "I wasn't allowed to [action] — [reason]." Do **not** retry or attempt a workaround. |
+| `blocked` | A restriction blocks this action | Tell the user: "I wasn't allowed to [action] — [reason]." Do **not** retry or attempt a workaround. |
 | `pending` | Action is awaiting human approval | Tell the user: "I've requested approval for [action]. Check the Approvals panel in the Clawvisor dashboard to approve or deny it." Do **not** retry — wait for the callback. |
 | `pending_activation` | Service not yet connected | The response includes an `activate_url` field. Tell the user: "[Service] isn't activated yet. Activate it here: [activate_url]" so they can connect it directly. |
 | `error` (code `SERVICE_NOT_CONFIGURED`) | Same as `pending_activation` | Same as above — surface the `activate_url` from the response. |
@@ -238,25 +264,26 @@ services (Gmail, Calendar, Drive, Contacts), a single OAuth connection covers
 all of them.
 
 **"My request keeps returning `pending`"**
-The user has a policy requiring approval for that action. They need to respond
-via the Approvals panel in the dashboard.
+The action requires human approval. Either create a task with `auto_execute` to
+skip per-request approval, or ask the user to respond via the Approvals panel
+in the dashboard.
 
 **"I got an `EXECUTION_ERROR`"**
-The action was allowed by policy but the adapter failed (e.g. invalid params,
-upstream API error). The `error` field in the response has the details. Report
-it to the user — do not silently retry.
+The action was approved but the adapter failed (e.g. invalid params, upstream
+API error). The `error` field in the response has the details. Report it to
+the user — do not silently retry.
 
 **"I was blocked and I don't know why"**
-The `reason` field in the response explains the policy rule that matched. Pass
+The `reason` field in the response explains the restriction that matched. Pass
 it to the user verbatim — don't guess or try to work around it.
 
 ---
 
-## Policy decision vocabulary
+## Authorization model summary
 
-| YAML rule | `evaluate` decision | Gateway `status` |
-|---|---|---|
-| `allow: true` | `execute` | `executed` |
-| `require_approval: true` | `approve` | `pending` |
-| `allow: false` | `block` | `blocked` |
-| (no matching rule) | `approve` | `pending` |
+| Condition | Gateway `status` |
+|---|---|
+| Restriction matches | `blocked` |
+| Task in scope + `auto_execute` | `executed` |
+| Task in scope + no `auto_execute` | `pending` (per-request approval) |
+| No task | `pending` (per-request approval) |

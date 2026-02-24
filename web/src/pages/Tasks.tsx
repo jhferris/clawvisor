@@ -10,6 +10,7 @@ const STATUS_STYLES: Record<string, string> = {
   completed: 'bg-gray-100 text-gray-600',
   expired: 'bg-gray-100 text-gray-500',
   denied: 'bg-red-100 text-red-700',
+  revoked: 'bg-gray-100 text-gray-500',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -19,6 +20,7 @@ const STATUS_LABELS: Record<string, string> = {
   completed: 'Completed',
   expired: 'Expired',
   denied: 'Denied',
+  revoked: 'Revoked',
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -67,6 +69,15 @@ function ActionsList({ actions, highlight }: { actions: TaskAction[]; highlight?
   )
 }
 
+function LifetimeBadge({ lifetime }: { lifetime?: string }) {
+  if (!lifetime || lifetime === 'session') return null
+  return (
+    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+      Standing
+    </span>
+  )
+}
+
 function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
   const qc = useQueryClient()
   const [result, setResult] = useState<string | null>(null)
@@ -103,9 +114,18 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
     },
   })
 
-  const isPending = approveMut.isPending || denyMut.isPending || expandApproveMut.isPending || expandDenyMut.isPending
+  const revokeMut = useMutation({
+    mutationFn: () => api.tasks.revoke(task.id),
+    onSuccess: () => {
+      setResult('Revoked')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+
+  const isPending = approveMut.isPending || denyMut.isPending || expandApproveMut.isPending || expandDenyMut.isPending || revokeMut.isPending
   const needsApproval = task.status === 'pending_approval'
   const needsExpansion = task.status === 'pending_scope_expansion'
+  const isStanding = task.lifetime === 'standing'
 
   return (
     <div className={`border rounded-lg p-5 bg-white space-y-3 ${
@@ -116,6 +136,7 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             <StatusBadge status={task.status} />
+            <LifetimeBadge lifetime={task.lifetime} />
             <span className="text-xs text-gray-400">
               {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
             </span>
@@ -124,8 +145,11 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           <p className="text-xs text-gray-500 mt-0.5">Agent: {agentName}</p>
         </div>
         <div className="text-right shrink-0 space-y-1">
-          {task.status === 'active' && task.expires_at && (
+          {task.status === 'active' && !isStanding && task.expires_at && (
             <ExpiryCountdown expiresAt={task.expires_at} />
+          )}
+          {task.status === 'active' && isStanding && (
+            <span className="text-xs text-purple-600 font-medium">No expiry</span>
           )}
           {task.request_count > 0 && (
             <div className="text-xs text-gray-400">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</div>
@@ -200,6 +224,19 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           </button>
         </div>
       )}
+
+      {/* Revoke button for any active task */}
+      {!result && task.status === 'active' && (
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={() => revokeMut.mutate()}
+            disabled={isPending}
+            className="py-1.5 px-4 text-sm rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+          >
+            {revokeMut.isPending ? 'Revoking...' : 'Revoke'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -211,6 +248,7 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'completed', label: 'Completed' },
   { value: 'expired', label: 'Expired' },
   { value: 'denied', label: 'Denied' },
+  { value: 'revoked', label: 'Revoked' },
 ]
 
 export default function Tasks() {

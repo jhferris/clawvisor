@@ -223,47 +223,37 @@ func (s *Store) DeleteRole(ctx context.Context, id, userID string) error {
 	return nil
 }
 
-// ── Policies ──────────────────────────────────────────────────────────────────
+// ── Restrictions ──────────────────────────────────────────────────────────────
 
-func (s *Store) CreatePolicy(ctx context.Context, userID string, p *store.PolicyRecord) (*store.PolicyRecord, error) {
-	id := uuid.New().String()
+func (s *Store) CreateRestriction(ctx context.Context, r *store.Restriction) (*store.Restriction, error) {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO policies (id, user_id, slug, name, description, role_id, rules_yaml)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, id, userID, p.Slug, p.Name, p.Description, p.RoleID, p.RulesYAML)
+		INSERT INTO restrictions (id, user_id, service, action, reason)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.ID, r.UserID, r.Service, r.Action, r.Reason)
 	if err != nil {
 		if isDuplicate(err) {
 			return nil, store.ErrConflict
 		}
 		return nil, err
 	}
-	return s.GetPolicy(ctx, id, userID)
-}
-
-func (s *Store) UpdatePolicy(ctx context.Context, id, userID string, p *store.PolicyRecord) (*store.PolicyRecord, error) {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE policies
-		SET slug = ?, name = ?, description = ?, role_id = ?, rules_yaml = ?, updated_at = datetime('now')
-		WHERE id = ? AND user_id = ?
-	`, p.Slug, p.Name, p.Description, p.RoleID, p.RulesYAML, id, userID)
+	out := &store.Restriction{}
+	var createdAt string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, service, action, reason, created_at FROM restrictions WHERE id = ?`, r.ID,
+	).Scan(&out.ID, &out.UserID, &out.Service, &out.Action, &out.Reason, &createdAt)
 	if err != nil {
-		if isDuplicate(err) {
-			return nil, store.ErrConflict
-		}
 		return nil, err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return nil, store.ErrNotFound
-	}
-	return s.GetPolicy(ctx, id, userID)
+	out.CreatedAt = parseTime(createdAt)
+	return out, nil
 }
 
-func (s *Store) DeletePolicy(ctx context.Context, id, userID string) error {
+func (s *Store) DeleteRestriction(ctx context.Context, id, userID string) error {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM policies WHERE id = ? AND user_id = ?`,
-		id, userID,
-	)
+		`DELETE FROM restrictions WHERE id = ? AND user_id = ?`, id, userID)
 	if err != nil {
 		return err
 	}
@@ -274,97 +264,43 @@ func (s *Store) DeletePolicy(ctx context.Context, id, userID string) error {
 	return nil
 }
 
-func (s *Store) GetPolicy(ctx context.Context, id, userID string) (*store.PolicyRecord, error) {
-	p := &store.PolicyRecord{}
-	var createdAt, updatedAt string
+func (s *Store) ListRestrictions(ctx context.Context, userID string) ([]*store.Restriction, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, service, action, reason, created_at FROM restrictions WHERE user_id = ? ORDER BY service, action`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var restrictions []*store.Restriction
+	for rows.Next() {
+		r := &store.Restriction{}
+		var createdAt string
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Service, &r.Action, &r.Reason, &createdAt); err != nil {
+			return nil, err
+		}
+		r.CreatedAt = parseTime(createdAt)
+		restrictions = append(restrictions, r)
+	}
+	return restrictions, rows.Err()
+}
+
+func (s *Store) MatchRestriction(ctx context.Context, userID, service, action string) (*store.Restriction, error) {
+	r := &store.Restriction{}
+	var createdAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
-		FROM policies WHERE id = ? AND user_id = ?
-	`, id, userID).Scan(&p.ID, &p.UserID, &p.Slug, &p.Name, &p.Description, &p.RoleID, &p.RulesYAML, &createdAt, &updatedAt)
+		SELECT id, user_id, service, action, reason, created_at FROM restrictions
+		WHERE user_id = ? AND (service = ? OR service = '*') AND (action = ? OR action = '*')
+		LIMIT 1
+	`, userID, service, action).Scan(&r.ID, &r.UserID, &r.Service, &r.Action, &r.Reason, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	p.CreatedAt = parseTime(createdAt)
-	p.UpdatedAt = parseTime(updatedAt)
-	return p, nil
-}
-
-func (s *Store) GetPolicyBySlug(ctx context.Context, slug, userID string) (*store.PolicyRecord, error) {
-	p := &store.PolicyRecord{}
-	var createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
-		FROM policies WHERE slug = ? AND user_id = ?
-	`, slug, userID).Scan(&p.ID, &p.UserID, &p.Slug, &p.Name, &p.Description, &p.RoleID, &p.RulesYAML, &createdAt, &updatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	p.CreatedAt = parseTime(createdAt)
-	p.UpdatedAt = parseTime(updatedAt)
-	return p, nil
-}
-
-func (s *Store) ListPolicies(ctx context.Context, userID string, filter store.PolicyFilter) ([]*store.PolicyRecord, error) {
-	query := `
-		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
-		FROM policies WHERE user_id = ?`
-	args := []any{userID}
-
-	if filter.GlobalOnly {
-		query += ` AND role_id IS NULL`
-	} else if filter.RoleID != nil {
-		query += ` AND role_id = ?`
-		args = append(args, *filter.RoleID)
-	}
-	query += ` ORDER BY created_at ASC`
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var policies []*store.PolicyRecord
-	for rows.Next() {
-		p := &store.PolicyRecord{}
-		var createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Slug, &p.Name, &p.Description, &p.RoleID, &p.RulesYAML, &createdAt, &updatedAt); err != nil {
-			return nil, err
-		}
-		p.CreatedAt = parseTime(createdAt)
-		p.UpdatedAt = parseTime(updatedAt)
-		policies = append(policies, p)
-	}
-	return policies, rows.Err()
-}
-
-func (s *Store) ListAllPolicies(ctx context.Context) ([]*store.PolicyRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
-		FROM policies ORDER BY created_at ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var policies []*store.PolicyRecord
-	for rows.Next() {
-		p := &store.PolicyRecord{}
-		var createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Slug, &p.Name, &p.Description, &p.RoleID, &p.RulesYAML, &createdAt, &updatedAt); err != nil {
-			return nil, err
-		}
-		p.CreatedAt = parseTime(createdAt)
-		p.UpdatedAt = parseTime(updatedAt)
-		policies = append(policies, p)
-	}
-	return policies, rows.Err()
+	r.CreatedAt = parseTime(createdAt)
+	return r, nil
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────────
@@ -781,6 +717,9 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 	if task.ID == "" {
 		task.ID = uuid.New().String()
 	}
+	if task.Lifetime == "" {
+		task.Lifetime = "session"
+	}
 	actionsJSON, err := json.Marshal(task.AuthorizedActions)
 	if err != nil {
 		return err
@@ -805,11 +744,11 @@ func (s *Store) CreateTask(ctx context.Context, task *store.Task) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO tasks (id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
-			expires_in_seconds, approved_at, expires_at, pending_action, pending_reason)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+			expires_in_seconds, approved_at, expires_at, pending_action, pending_reason, lifetime)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, task.ID, task.UserID, task.AgentID, task.Purpose, task.Status,
 		string(actionsJSON), task.CallbackURL, task.ExpiresInSeconds,
-		approvedAt, expiresAt, pendingActionJSON, task.PendingReason)
+		approvedAt, expiresAt, pendingActionJSON, task.PendingReason, task.Lifetime)
 	return err
 }
 
@@ -820,11 +759,11 @@ func (s *Store) GetTask(ctx context.Context, id string) (*store.Task, error) {
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
-		       pending_action, pending_reason
+		       pending_action, pending_reason, lifetime
 		FROM tasks WHERE id = ?
 	`, id).Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 		&t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
-		&t.RequestCount, &pendingActionStr, &t.PendingReason)
+		&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -856,7 +795,7 @@ func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, er
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
-		       pending_action, pending_reason
+		       pending_action, pending_reason, lifetime
 		FROM tasks WHERE user_id = ?
 		ORDER BY created_at DESC
 	`, userID)
@@ -872,7 +811,7 @@ func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, er
 		var approvedAt, expiresAt, pendingActionStr *string
 		if err := rows.Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 			&t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
-			&t.RequestCount, &pendingActionStr, &t.PendingReason); err != nil {
+			&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime); err != nil {
 			return nil, err
 		}
 		t.CreatedAt = parseTime(createdAt)
@@ -974,12 +913,26 @@ func (s *Store) SetTaskPendingExpansion(ctx context.Context, id string, action *
 	return nil
 }
 
+func (s *Store) RevokeTask(ctx context.Context, id, userID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tasks SET status = 'revoked' WHERE id = ? AND user_id = ? AND status = 'active'`,
+		id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListExpiredTasks(ctx context.Context) ([]*store.Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
-		       pending_action, pending_reason
-		FROM tasks WHERE status = 'active' AND expires_at < datetime('now')
+		       pending_action, pending_reason, lifetime
+		FROM tasks WHERE status = 'active' AND lifetime = 'session' AND expires_at < datetime('now')
 	`)
 	if err != nil {
 		return nil, err
@@ -993,7 +946,7 @@ func (s *Store) ListExpiredTasks(ctx context.Context) ([]*store.Task, error) {
 		var approvedAt, expiresAt, pendingActionStr *string
 		if err := rows.Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 			&t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
-			&t.RequestCount, &pendingActionStr, &t.PendingReason); err != nil {
+			&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime); err != nil {
 			return nil, err
 		}
 		t.CreatedAt = parseTime(createdAt)
