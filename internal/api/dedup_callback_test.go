@@ -71,7 +71,7 @@ func TestGateway_Dedup_BlockedRequest(t *testing.T) {
 func TestGateway_Dedup_PendingRequest(t *testing.T) {
 	// A pending (awaiting approval) request, when resubmitted, should return
 	// status=pending without queueing a duplicate approval.
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "dedup-pend")
 	sc.createPolicy(t, approvePolicy("p-dedup-pend", "dedup-pend", "mock.svc", "run"))
 
@@ -183,7 +183,7 @@ func TestGateway_Status_Blocked(t *testing.T) {
 }
 
 func TestGateway_Status_Pending(t *testing.T) {
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "status-pend")
 	sc.createPolicy(t, approvePolicy("p-status-pend", "status-pend", "mock.svc", "run"))
 
@@ -218,7 +218,7 @@ func TestGateway_Status_Executed(t *testing.T) {
 
 func TestGateway_Status_UpdatesAfterDeny(t *testing.T) {
 	// A pending request, once denied, should show status=denied on the status endpoint.
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "status-deny")
 	sc.createPolicy(t, approvePolicy("p-status-deny", "status-deny", "mock.svc", "run"))
 
@@ -378,7 +378,7 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 
 func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 	// When a pending request is denied, the callback must be HMAC-signed.
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "cb-deny")
 	sc.createPolicy(t, approvePolicy("p-cb-deny", "cb-deny", "mock.svc", "run"))
 

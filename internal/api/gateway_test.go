@@ -398,7 +398,7 @@ func TestGateway_Block_AuditEntryRecorded(t *testing.T) {
 
 func TestGateway_DefaultApprove_NoPolicy(t *testing.T) {
 	// Without any matching policy, the default decision is "approve".
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "bot")
 
 	result := sc.gatewayRequest(env, "req-default-approve", "google.gmail", "send")
@@ -408,7 +408,7 @@ func TestGateway_DefaultApprove_NoPolicy(t *testing.T) {
 }
 
 func TestGateway_ApprovePolicy_QueuesPending(t *testing.T) {
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "automation")
 	sc.createPolicy(t, approvePolicy("p-gw-approve", "automation", "google.gmail", "send"))
 
@@ -491,7 +491,7 @@ func TestGateway_Execute_NoVaultCred_ReturnsPendingActivation(t *testing.T) {
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 func TestApprovals_Deny(t *testing.T) {
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "automation")
 	sc.createPolicy(t, approvePolicy("p-deny", "automation", "google.gmail", "send"))
 
@@ -550,7 +550,7 @@ func TestApprovals_Approve_WithMockAdapter(t *testing.T) {
 }
 
 func TestApprovals_Approve_WrongUser_Forbidden(t *testing.T) {
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc1 := newScenario(t, env, "bot1")
 	sc1.createPolicy(t, approvePolicy("p-forbidden", "bot1", "google.gmail", "send"))
 
@@ -643,7 +643,7 @@ func TestAudit_IsolatedByUser(t *testing.T) {
 
 func TestAudit_AllOutcomesRecorded(t *testing.T) {
 	// In one test, generate block, approve(→pending), and deny outcomes, then verify all appear.
-	env := newTestEnv(t)
+	env := newTestEnv(t, newMockAdapter("mock.svc", "blocked-action", "approved-action"))
 	sc := newScenario(t, env, "mixed")
 
 	sc.createPolicy(t, blockPolicy("p-mix-block", "mixed", "mock.svc", "blocked-action"))

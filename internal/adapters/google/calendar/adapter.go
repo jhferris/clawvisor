@@ -147,14 +147,8 @@ func (a *CalendarAdapter) listEvents(ctx context.Context, client *http.Client, p
 	if v, ok := params["calendar_id"].(string); ok && v != "" {
 		calendarID = v
 	}
-	timeMin, _ := params["time_min"].(string)
-	if timeMin == "" {
-		timeMin, _ = params["from"].(string) // accept "from" as alias for "time_min"
-	}
-	timeMax, _ := params["time_max"].(string)
-	if timeMax == "" {
-		timeMax, _ = params["to"].(string) // accept "to" as alias for "time_max"
-	}
+	timeMin := dateToRFC3339(params, "time_min", "from")
+	timeMax := dateToRFC3339(params, "time_max", "to")
 	// Default to now if no start time — avoids returning old recurring events.
 	if timeMin == "" {
 		timeMin = time.Now().UTC().Format(time.RFC3339)
@@ -529,4 +523,27 @@ func truncate(s string, max int) string {
 		return s[:max] + "..."
 	}
 	return s
+}
+
+// dateToRFC3339 reads a date/datetime param (primary key or alias) from params
+// and ensures it is in RFC3339 format. Plain ISO dates ("2006-01-02") are
+// converted to "2006-01-02T00:00:00Z" so the Google Calendar API accepts them.
+func dateToRFC3339(params map[string]any, key, alias string) string {
+	s, _ := params[key].(string)
+	if s == "" {
+		s, _ = params[alias].(string)
+	}
+	if s == "" {
+		return ""
+	}
+	// Already looks like RFC3339 — pass through.
+	if len(s) > 10 {
+		return s
+	}
+	// Plain date "YYYY-MM-DD" → parse and reformat as RFC3339.
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return s // return as-is if we can't parse; API will reject with a clear error
+	}
+	return t.UTC().Format(time.RFC3339)
 }
