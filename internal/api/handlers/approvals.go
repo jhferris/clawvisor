@@ -109,13 +109,14 @@ func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		if execErr == nil {
 			cbResult = result
 		}
+		tok := blob.CallbackKey
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
 				RequestID: requestID,
 				Status:    outcome,
 				Result:    cbResult,
 				AuditID:   pa.AuditID,
-			})
+			}, tok)
 		}()
 	}
 
@@ -164,16 +165,20 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var denyBlob pendingRequestBlob
+	_ = json.Unmarshal(pa.RequestBlob, &denyBlob)
+
 	_ = h.st.UpdateAuditOutcome(r.Context(), pa.AuditID, "denied", "", 0)
 	_ = h.st.DeletePendingApproval(r.Context(), requestID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
+		tok := denyBlob.CallbackKey
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
 				RequestID: requestID,
 				Status:    "denied",
 				AuditID:   pa.AuditID,
-			})
+			}, tok)
 		}()
 	}
 
@@ -210,11 +215,13 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 		_ = h.st.DeletePendingApproval(ctx, pa.RequestID)
 
 		if pa.CallbackURL != nil && *pa.CallbackURL != "" {
+			var expiryBlob pendingRequestBlob
+			_ = json.Unmarshal(pa.RequestBlob, &expiryBlob)
 			_ = callback.DeliverResult(ctx, *pa.CallbackURL, &callback.Payload{
 				RequestID: pa.RequestID,
 				Status:    "timeout",
 				AuditID:   pa.AuditID,
-			})
+			}, expiryBlob.CallbackKey)
 		}
 		h.logger.Info("pending approval expired", "request_id", pa.RequestID)
 	}

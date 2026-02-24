@@ -4,6 +4,9 @@ package callback
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,8 +26,10 @@ type Payload struct {
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // DeliverResult POSTs a result payload to the given callback URL.
+// signingKey is the raw agent bearer token; if non-empty an HMAC-SHA256 signature
+// of the body is added as X-Clawvisor-Signature: sha256=<hex>.
 // It is best-effort: errors are returned but never retried.
-func DeliverResult(ctx context.Context, callbackURL string, payload *Payload) error {
+func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, signingKey string) error {
 	if callbackURL == "" {
 		return nil
 	}
@@ -39,6 +44,12 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload) er
 		return fmt.Errorf("callback: building request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	if signingKey != "" {
+		mac := hmac.New(sha256.New, []byte(signingKey))
+		mac.Write(body)
+		req.Header.Set("X-Clawvisor-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

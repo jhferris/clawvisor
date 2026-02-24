@@ -657,6 +657,37 @@ func (s *Store) GetAuditEntry(ctx context.Context, id, userID string) (*store.Au
 	return e, nil
 }
 
+func (s *Store) GetAuditEntryByRequestID(ctx context.Context, requestID, userID string) (*store.AuditEntry, error) {
+	e := &store.AuditEntry{}
+	var timestamp, paramsSafe string
+	var safetyFlagged int
+	var filtersApplied *string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, agent_id, request_id, timestamp, service, action,
+		       params_safe, decision, outcome, policy_id, rule_id,
+		       safety_flagged, safety_reason, reason, data_origin, context_src,
+		       duration_ms, filters_applied, error_msg
+		FROM audit_log WHERE request_id = ? AND user_id = ?
+	`, requestID, userID).Scan(
+		&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &timestamp,
+		&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
+		&e.PolicyID, &e.RuleID, &safetyFlagged, &e.SafetyReason, &e.Reason,
+		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.Timestamp = parseTime(timestamp)
+	e.SafetyFlagged = safetyFlagged != 0
+	e.ParamsSafe = json.RawMessage(paramsSafe)
+	if filtersApplied != nil {
+		e.FiltersApplied = json.RawMessage(*filtersApplied)
+	}
+	return e, nil
+}
+
 func (s *Store) ListAuditEntries(ctx context.Context, userID string, filter store.AuditFilter) ([]*store.AuditEntry, int, error) {
 	limit := filter.Limit
 	if limit <= 0 {

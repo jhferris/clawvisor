@@ -165,6 +165,7 @@ func (s *Server) routes() http.Handler {
 
 	// Gateway (agent token)
 	mux.Handle("POST /api/gateway/request", agent(gatewayHandler.HandleRequest))
+	mux.Handle("GET /api/gateway/request/{request_id}/status", agent(gatewayHandler.HandleStatus))
 
 	// Services / OAuth (user JWT)
 	mux.Handle("GET /api/services", user(servicesHandler.List))

@@ -30,15 +30,16 @@ import (
 // pendingRequestBlob is stored in pending_approvals.request_blob.
 // It contains everything needed to re-execute the request on approval.
 type pendingRequestBlob struct {
-	Service         string               `json:"service"`
-	Action          string               `json:"action"`
-	Params          map[string]any       `json:"params"`
-	UserID          string               `json:"user_id"`
-	AgentID         string               `json:"agent_id"`
-	AgentName       string               `json:"agent_name"`
-	RequestID       string               `json:"request_id"`
-	Reason          string               `json:"reason"`
-	CallbackURL     string               `json:"callback_url"`
+	Service         string                  `json:"service"`
+	Action          string                  `json:"action"`
+	Params          map[string]any          `json:"params"`
+	UserID          string                  `json:"user_id"`
+	AgentID         string                  `json:"agent_id"`
+	AgentName       string                  `json:"agent_name"`
+	RequestID       string                  `json:"request_id"`
+	Reason          string                  `json:"reason"`
+	CallbackURL     string                  `json:"callback_url"`
+	CallbackKey     string                  `json:"callback_key,omitempty"` // SHA-256(agentToken) — used to HMAC-sign callbacks; not a live credential
 	ResponseFilters []policy.ResponseFilter `json:"response_filters,omitempty"`
 }
 
@@ -98,6 +99,12 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RequestID == "" {
 		req.RequestID = uuid.New().String()
+	} else {
+		// Dedup: if this request_id was already processed, return the existing outcome.
+		if existing, err := h.store.GetAuditEntryByRequestID(ctx, req.RequestID, agent.UserID); err == nil {
+			writeGatewayStatusResponse(w, existing)
+			return
+		}
 	}
 
 	// Resolve agent role name (policy engine matches on role name, not UUID).
@@ -302,10 +309,11 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
 		if req.Context.CallbackURL != "" {
+			tokenHash := agent.TokenHash
 			go func() {
 				_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
 					RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
-				})
+				}, tokenHash)
 			}()
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -315,6 +323,45 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			"result":     result,
 		})
 	}
+}
+
+// HandleStatus returns the current status of a gateway request by request_id.
+//
+// GET /api/gateway/request/{request_id}/status
+// Auth: agent bearer token
+func (h *GatewayHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.AgentFromContext(r.Context())
+	if agent == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	requestID := r.PathValue("request_id")
+	entry, err := h.store.GetAuditEntryByRequestID(r.Context(), requestID, agent.UserID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "request not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not fetch request status")
+		return
+	}
+	writeGatewayStatusResponse(w, entry)
+}
+
+// writeGatewayStatusResponse writes a consistent status payload for a resolved audit entry.
+func writeGatewayStatusResponse(w http.ResponseWriter, e *store.AuditEntry) {
+	resp := map[string]any{
+		"status":     e.Outcome,
+		"request_id": e.RequestID,
+		"audit_id":   e.ID,
+	}
+	if e.ErrorMsg != nil && *e.ErrorMsg != "" {
+		resp["error"] = *e.ErrorMsg
+	}
+	if e.Reason != nil {
+		resp["reason"] = *e.Reason
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── Shared execution logic ────────────────────────────────────────────────────
@@ -487,6 +534,9 @@ func vaultKeyForService(serviceID string) string {
 }
 
 // buildRequestBlob constructs the pendingRequestBlob stored in pending_approvals.
+// The callback signing key is the agent's token hash (SHA-256 of the raw token),
+// which is already stored in the agents table — storing it here leaks nothing new,
+// and it cannot be used to authenticate as the agent.
 func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters []policy.ResponseFilter) *pendingRequestBlob {
 	return &pendingRequestBlob{
 		Service:         req.Service,
@@ -498,6 +548,7 @@ func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters [
 		RequestID:       req.RequestID,
 		Reason:          req.Reason,
 		CallbackURL:     req.Context.CallbackURL,
+		CallbackKey:     agent.TokenHash,
 		ResponseFilters: responseFilters,
 	}
 }

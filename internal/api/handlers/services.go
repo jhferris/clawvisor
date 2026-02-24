@@ -375,7 +375,7 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 			Status:    outcome,
 			Result:    cbResult,
 			AuditID:   pa.AuditID,
-		})
+		}, blob.CallbackKey)
 	}
 
 	h.logger.Info("pending request re-executed after activation",

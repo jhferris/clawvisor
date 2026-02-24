@@ -65,6 +65,7 @@ type Store interface {
 	LogAudit(ctx context.Context, entry *AuditEntry) error
 	UpdateAuditOutcome(ctx context.Context, id, outcome, errMsg string, durationMS int) error
 	GetAuditEntry(ctx context.Context, id, userID string) (*AuditEntry, error)
+	GetAuditEntryByRequestID(ctx context.Context, requestID, userID string) (*AuditEntry, error)
 	ListAuditEntries(ctx context.Context, userID string, filter AuditFilter) ([]*AuditEntry, int, error)
 
 	// Pending approvals
