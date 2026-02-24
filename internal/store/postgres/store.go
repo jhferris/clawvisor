@@ -104,95 +104,6 @@ func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-// ── Agent Roles ───────────────────────────────────────────────────────────────
-
-func (s *Store) CreateRole(ctx context.Context, userID, name, description string) (*store.AgentRole, error) {
-	r := &store.AgentRole{
-		ID:          uuid.New().String(),
-		UserID:      userID,
-		Name:        name,
-		Description: description,
-	}
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agent_roles (id, user_id, name, description) VALUES ($1, $2, $3, $4)`,
-		r.ID, r.UserID, r.Name, r.Description,
-	)
-	if err != nil {
-		if isDuplicate(err) {
-			return nil, store.ErrConflict
-		}
-		return nil, err
-	}
-	return s.GetRole(ctx, r.ID, userID)
-}
-
-func (s *Store) GetRole(ctx context.Context, id, userID string) (*store.AgentRole, error) {
-	r := &store.AgentRole{}
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, name, description, created_at FROM agent_roles WHERE id = $1 AND user_id = $2`,
-		id, userID,
-	).Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return r, err
-}
-
-func (s *Store) ListRoles(ctx context.Context, userID string) ([]*store.AgentRole, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, name, description, created_at FROM agent_roles WHERE user_id = $1 ORDER BY name`,
-		userID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanRoles(rows)
-}
-
-func (s *Store) UpdateRole(ctx context.Context, id, userID, name, description string) (*store.AgentRole, error) {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE agent_roles SET name = $1, description = $2 WHERE id = $3 AND user_id = $4`,
-		name, description, id, userID,
-	)
-	if err != nil {
-		if isDuplicate(err) {
-			return nil, store.ErrConflict
-		}
-		return nil, err
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, store.ErrNotFound
-	}
-	return s.GetRole(ctx, id, userID)
-}
-
-func (s *Store) GetRoleByName(ctx context.Context, name, userID string) (*store.AgentRole, error) {
-	r := &store.AgentRole{}
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, name, description, created_at FROM agent_roles WHERE name = $1 AND user_id = $2`,
-		name, userID,
-	).Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return r, err
-}
-
-func (s *Store) DeleteRole(ctx context.Context, id, userID string) error {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM agent_roles WHERE id = $1 AND user_id = $2`,
-		id, userID,
-	)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
-	}
-	return nil
-}
-
 // ── Restrictions ──────────────────────────────────────────────────────────────
 
 func (s *Store) CreateRestriction(ctx context.Context, r *store.Restriction) (*store.Restriction, error) {
@@ -268,17 +179,16 @@ func (s *Store) MatchRestriction(ctx context.Context, userID, service, action st
 
 // ── Agents ────────────────────────────────────────────────────────────────────
 
-func (s *Store) CreateAgent(ctx context.Context, userID, name, tokenHash string, roleID *string) (*store.Agent, error) {
+func (s *Store) CreateAgent(ctx context.Context, userID, name, tokenHash string) (*store.Agent, error) {
 	a := &store.Agent{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		Name:      name,
 		TokenHash: tokenHash,
-		RoleID:    roleID,
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO agents (id, user_id, name, token_hash, role_id) VALUES ($1, $2, $3, $4, $5)`,
-		a.ID, a.UserID, a.Name, a.TokenHash, a.RoleID,
+		`INSERT INTO agents (id, user_id, name, token_hash) VALUES ($1, $2, $3, $4)`,
+		a.ID, a.UserID, a.Name, a.TokenHash,
 	)
 	if err != nil {
 		return nil, err
@@ -286,26 +196,12 @@ func (s *Store) CreateAgent(ctx context.Context, userID, name, tokenHash string,
 	return s.getAgentByID(ctx, a.ID)
 }
 
-func (s *Store) UpdateAgentRole(ctx context.Context, id, userID string, roleID *string) (*store.Agent, error) {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE agents SET role_id = $1 WHERE id = $2 AND user_id = $3`,
-		roleID, id, userID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, store.ErrNotFound
-	}
-	return s.getAgentByID(ctx, id)
-}
-
 func (s *Store) GetAgentByToken(ctx context.Context, tokenHash string) (*store.Agent, error) {
 	a := &store.Agent{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, name, token_hash, role_id, created_at FROM agents WHERE token_hash = $1`,
+		`SELECT id, user_id, name, token_hash, created_at FROM agents WHERE token_hash = $1`,
 		tokenHash,
-	).Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.RoleID, &a.CreatedAt)
+	).Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -314,7 +210,7 @@ func (s *Store) GetAgentByToken(ctx context.Context, tokenHash string) (*store.A
 
 func (s *Store) ListAgents(ctx context.Context, userID string) ([]*store.Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, name, token_hash, role_id, created_at FROM agents WHERE user_id = $1 ORDER BY created_at DESC`,
+		`SELECT id, user_id, name, token_hash, created_at FROM agents WHERE user_id = $1 ORDER BY created_at DESC`,
 		userID,
 	)
 	if err != nil {
@@ -341,9 +237,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id, userID string) error {
 func (s *Store) getAgentByID(ctx context.Context, id string) (*store.Agent, error) {
 	a := &store.Agent{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, name, token_hash, role_id, created_at FROM agents WHERE id = $1`,
+		`SELECT id, user_id, name, token_hash, created_at FROM agents WHERE id = $1`,
 		id,
-	).Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.RoleID, &a.CreatedAt)
+	).Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -391,23 +287,23 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 
 // ── Service Metadata ──────────────────────────────────────────────────────────
 
-func (s *Store) UpsertServiceMeta(ctx context.Context, userID, serviceID string, activatedAt time.Time) error {
+func (s *Store) UpsertServiceMeta(ctx context.Context, userID, serviceID, alias string, activatedAt time.Time) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO service_meta (id, user_id, service_id, activated_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (user_id, service_id) DO UPDATE SET
+		INSERT INTO service_meta (id, user_id, service_id, alias, activated_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (user_id, service_id, alias) DO UPDATE SET
 			activated_at = EXCLUDED.activated_at,
 			updated_at   = NOW()
-	`, uuid.New().String(), userID, serviceID, activatedAt)
+	`, uuid.New().String(), userID, serviceID, alias, activatedAt)
 	return err
 }
 
-func (s *Store) GetServiceMeta(ctx context.Context, userID, serviceID string) (*store.ServiceMeta, error) {
+func (s *Store) GetServiceMeta(ctx context.Context, userID, serviceID, alias string) (*store.ServiceMeta, error) {
 	m := &store.ServiceMeta{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, user_id, service_id, activated_at, updated_at FROM service_meta WHERE user_id = $1 AND service_id = $2`,
-		userID, serviceID,
-	).Scan(&m.ID, &m.UserID, &m.ServiceID, &m.ActivatedAt, &m.UpdatedAt)
+		`SELECT id, user_id, service_id, alias, activated_at, updated_at FROM service_meta WHERE user_id = $1 AND service_id = $2 AND alias = $3`,
+		userID, serviceID, alias,
+	).Scan(&m.ID, &m.UserID, &m.ServiceID, &m.Alias, &m.ActivatedAt, &m.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -416,7 +312,7 @@ func (s *Store) GetServiceMeta(ctx context.Context, userID, serviceID string) (*
 
 func (s *Store) ListServiceMetas(ctx context.Context, userID string) ([]*store.ServiceMeta, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, user_id, service_id, activated_at, updated_at FROM service_meta WHERE user_id = $1 ORDER BY service_id`,
+		`SELECT id, user_id, service_id, alias, activated_at, updated_at FROM service_meta WHERE user_id = $1 ORDER BY service_id, alias`,
 		userID,
 	)
 	if err != nil {
@@ -427,7 +323,7 @@ func (s *Store) ListServiceMetas(ctx context.Context, userID string) ([]*store.S
 	var metas []*store.ServiceMeta
 	for rows.Next() {
 		m := &store.ServiceMeta{}
-		if err := rows.Scan(&m.ID, &m.UserID, &m.ServiceID, &m.ActivatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.ServiceID, &m.Alias, &m.ActivatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		metas = append(metas, m)
@@ -435,12 +331,21 @@ func (s *Store) ListServiceMetas(ctx context.Context, userID string) ([]*store.S
 	return metas, rows.Err()
 }
 
-func (s *Store) DeleteServiceMeta(ctx context.Context, userID, serviceID string) error {
+func (s *Store) DeleteServiceMeta(ctx context.Context, userID, serviceID, alias string) error {
 	_, err := s.pool.Exec(ctx,
-		`DELETE FROM service_meta WHERE user_id = $1 AND service_id = $2`,
-		userID, serviceID,
+		`DELETE FROM service_meta WHERE user_id = $1 AND service_id = $2 AND alias = $3`,
+		userID, serviceID, alias,
 	)
 	return err
+}
+
+func (s *Store) CountServiceMetasByType(ctx context.Context, userID, serviceID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM service_meta WHERE user_id = $1 AND service_id = $2`,
+		userID, serviceID,
+	).Scan(&count)
+	return count, err
 }
 
 // ── Notification Configs ──────────────────────────────────────────────────────
@@ -939,23 +844,11 @@ func nilIfEmpty(b json.RawMessage) []byte {
 	return []byte(b)
 }
 
-func scanRoles(rows pgx.Rows) ([]*store.AgentRole, error) {
-	var roles []*store.AgentRole
-	for rows.Next() {
-		r := &store.AgentRole{}
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		roles = append(roles, r)
-	}
-	return roles, rows.Err()
-}
-
 func scanAgents(rows pgx.Rows) ([]*store.Agent, error) {
 	var agents []*store.Agent
 	for rows.Next() {
 		a := &store.Agent{}
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.RoleID, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.TokenHash, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

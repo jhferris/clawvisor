@@ -35,6 +35,7 @@ type ServicesHandler struct {
 type oauthStateEntry struct {
 	UserID       string
 	ServiceID    string
+	Alias        string // "default" when not specified
 	PendingReqID string // pending_request_id query param (may be empty)
 	ExpiresAt    time.Time
 }
@@ -65,13 +66,15 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Service meta records (for activated_at timestamps).
 	metas, _ := h.st.ListServiceMetas(r.Context(), user.ID)
-	metaMap := make(map[string]*store.ServiceMeta, len(metas))
+	// metaByKey maps "serviceID:alias" → meta.
+	metaByKey := make(map[string]*store.ServiceMeta, len(metas))
 	for _, m := range metas {
-		metaMap[m.ServiceID] = m
+		metaByKey[m.ServiceID+":"+m.Alias] = m
 	}
 
 	type serviceEntry struct {
 		ID                 string     `json:"id"`
+		Alias              string     `json:"alias,omitempty"`
 		OAuth              bool       `json:"oauth"`
 		RequiresActivation bool       `json:"requires_activation"`
 		Actions            []string   `json:"actions"`
@@ -82,25 +85,80 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 	services := make([]serviceEntry, 0)
 	for _, a := range h.adapterReg.All() {
 		credentialFree := a.ValidateCredential(nil) == nil
-		vKey := vaultKeyForService(a.ServiceID())
-		status := "not_activated"
-		var activatedAt *time.Time
-		if credentialFree || keySet[vKey] {
-			status = "activated"
-			if m, ok := metaMap[a.ServiceID()]; ok {
+
+		if credentialFree {
+			// Credential-free services (e.g. iMessage) have no alias concept.
+			services = append(services, serviceEntry{
+				ID:                 a.ServiceID(),
+				OAuth:              a.OAuthConfig() != nil,
+				RequiresActivation: false,
+				Actions:            a.SupportedActions(),
+				Status:             "activated",
+			})
+			continue
+		}
+
+		// Show each activated alias as a separate entry.
+		shown := false
+		for _, m := range metas {
+			if m.ServiceID != a.ServiceID() {
+				continue
+			}
+			vKey := vaultKeyForServiceAlias(a.ServiceID(), m.Alias)
+			if !keySet[vKey] {
+				continue
+			}
+			shown = true
+			alias := ""
+			if m.Alias != "default" {
+				alias = m.Alias
+			}
+			activatedAt := m.ActivatedAt
+			services = append(services, serviceEntry{
+				ID:                 a.ServiceID(),
+				Alias:              alias,
+				OAuth:              a.OAuthConfig() != nil,
+				RequiresActivation: true,
+				Actions:            a.SupportedActions(),
+				Status:             "activated",
+				ActivatedAt:        &activatedAt,
+			})
+		}
+
+		// Also check if the base vault key is activated but has no meta record.
+		baseKey := vaultKeyForService(a.ServiceID())
+		if !shown && keySet[baseKey] {
+			var activatedAt *time.Time
+			if m, ok := metaByKey[a.ServiceID()+":default"]; ok {
 				activatedAt = &m.ActivatedAt
 			}
+			services = append(services, serviceEntry{
+				ID:                 a.ServiceID(),
+				OAuth:              a.OAuthConfig() != nil,
+				RequiresActivation: true,
+				Actions:            a.SupportedActions(),
+				Status:             "activated",
+				ActivatedAt:        activatedAt,
+			})
+			shown = true
 		}
-		services = append(services, serviceEntry{
-			ID:                 a.ServiceID(),
-			OAuth:              a.OAuthConfig() != nil,
-			RequiresActivation: !credentialFree,
-			Actions:            a.SupportedActions(),
-			Status:             status,
-			ActivatedAt:        activatedAt,
-		})
+
+		if !shown {
+			services = append(services, serviceEntry{
+				ID:                 a.ServiceID(),
+				OAuth:              a.OAuthConfig() != nil,
+				RequiresActivation: true,
+				Actions:            a.SupportedActions(),
+				Status:             "not_activated",
+			})
+		}
 	}
-	sort.Slice(services, func(i, j int) bool { return services[i].ID < services[j].ID })
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].ID != services[j].ID {
+			return services[i].ID < services[j].ID
+		}
+		return services[i].Alias < services[j].Alias
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"services": services})
 }
 
@@ -136,10 +194,16 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	alias := r.URL.Query().Get("alias")
+	if alias == "" {
+		alias = "default"
+	}
+
 	stateToken := uuid.New().String()
 	h.oauthStates.Store(stateToken, oauthStateEntry{
 		UserID:       user.ID,
 		ServiceID:    serviceID,
+		Alias:        alias,
 		PendingReqID: r.URL.Query().Get("pending_request_id"),
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	})
@@ -150,7 +214,7 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 
 // OAuthStart generates an OAuth2 consent URL and redirects the user.
 //
-// GET /api/oauth/start?service=google.gmail[&pending_request_id=...]
+// GET /api/oauth/start?service=google.gmail[&alias=personal][&pending_request_id=...]
 // Auth: user JWT
 func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
@@ -177,10 +241,16 @@ func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	alias := r.URL.Query().Get("alias")
+	if alias == "" {
+		alias = "default"
+	}
+
 	stateToken := uuid.New().String()
 	h.oauthStates.Store(stateToken, oauthStateEntry{
 		UserID:       user.ID,
 		ServiceID:    serviceID,
+		Alias:        alias,
 		PendingReqID: r.URL.Query().Get("pending_request_id"),
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	})
@@ -235,14 +305,18 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	vKey := vaultKeyForService(entry.ServiceID)
+	alias := entry.Alias
+	if alias == "" {
+		alias = "default"
+	}
+	vKey := vaultKeyForServiceAlias(entry.ServiceID, alias)
 	if err := h.vault.Set(r.Context(), entry.UserID, vKey, credBytes); err != nil {
 		h.logger.Warn("vault set failed", "service", entry.ServiceID, "err", err)
 		oauthPopupClose(w, "Failed to store credential in vault.")
 		return
 	}
 
-	_ = h.st.UpsertServiceMeta(r.Context(), entry.UserID, entry.ServiceID, time.Now())
+	_ = h.st.UpsertServiceMeta(r.Context(), entry.UserID, entry.ServiceID, alias, time.Now())
 	h.logger.Info("service activated", "user", entry.UserID, "service", entry.ServiceID)
 
 	// Re-execute any pending request that was waiting for this activation.
@@ -310,13 +384,19 @@ func (h *ServicesHandler) Activate(w http.ResponseWriter, r *http.Request) {
 		// OAuth service: generate state token and return the consent URL as JSON.
 		var body struct {
 			PendingRequestID string `json:"pending_request_id"`
+			Alias            string `json:"alias"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body) // body is optional
+		alias := body.Alias
+		if alias == "" {
+			alias = "default"
+		}
 
 		stateToken := uuid.New().String()
 		h.oauthStates.Store(stateToken, oauthStateEntry{
 			UserID:       user.ID,
 			ServiceID:    serviceID,
+			Alias:        alias,
 			PendingReqID: body.PendingRequestID,
 			ExpiresAt:    time.Now().Add(10 * time.Minute),
 		})
@@ -359,6 +439,7 @@ func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request
 
 	var body struct {
 		Token string `json:"token"`
+		Alias string `json:"alias"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -366,6 +447,10 @@ func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request
 	if body.Token == "" {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "token is required")
 		return
+	}
+	alias := body.Alias
+	if alias == "" {
+		alias = "default"
 	}
 
 	// Build and validate the credential bytes.
@@ -379,14 +464,14 @@ func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	vKey := vaultKeyForService(serviceID)
+	vKey := vaultKeyForServiceAlias(serviceID, alias)
 	if err := h.vault.Set(r.Context(), user.ID, vKey, credBytes); err != nil {
 		h.logger.Warn("vault set failed (api key)", "service", serviceID, "err", err)
 		writeError(w, http.StatusInternalServerError, "VAULT_ERROR", "failed to store credential")
 		return
 	}
-	_ = h.st.UpsertServiceMeta(r.Context(), user.ID, serviceID, time.Now())
-	h.logger.Info("service activated via api key", "user", user.ID, "service", serviceID)
+	_ = h.st.UpsertServiceMeta(r.Context(), user.ID, serviceID, alias, time.Now())
+	h.logger.Info("service activated via api key", "user", user.ID, "service", serviceID, "alias", alias)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "activated", "service": serviceID})
 }
@@ -406,7 +491,7 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 	}
 
 	result, _, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-		userID, blob.Service, blob.Action, blob.Params, blob.ResponseFilters, nil)
+		userID, blob.Service, blob.Action, blob.Params, "", blob.ResponseFilters, nil)
 
 	outcome := "executed"
 	errMsg := ""

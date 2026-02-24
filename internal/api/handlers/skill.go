@@ -108,8 +108,12 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 		keySet[k] = true
 	}
 
+	// Load service metas for alias display.
+	metas, _ := h.st.ListServiceMetas(ctx, agent.UserID)
+
 	type catalogService struct {
-		id        string
+		id        string // display ID, e.g. "google.gmail" or "google.gmail:personal"
+		baseID    string // adapter service ID, e.g. "google.gmail"
 		actions   []string
 		activated bool
 	}
@@ -118,13 +122,51 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 	services := make([]catalogService, 0, len(allAdapters))
 	for _, a := range allAdapters {
 		credentialFree := a.ValidateCredential(nil) == nil
-		vKey := vaultKeyForService(a.ServiceID())
-		activated := credentialFree || keySet[vKey]
-		services = append(services, catalogService{
-			id:        a.ServiceID(),
-			actions:   a.SupportedActions(),
-			activated: activated,
-		})
+		if credentialFree {
+			services = append(services, catalogService{
+				id: a.ServiceID(), baseID: a.ServiceID(),
+				actions: a.SupportedActions(), activated: true,
+			})
+			continue
+		}
+
+		// Show each activated alias as a separate catalog entry.
+		shown := false
+		for _, m := range metas {
+			if m.ServiceID != a.ServiceID() {
+				continue
+			}
+			vKey := vaultKeyForServiceAlias(a.ServiceID(), m.Alias)
+			if !keySet[vKey] {
+				continue
+			}
+			shown = true
+			displayID := a.ServiceID()
+			if m.Alias != "default" {
+				displayID = a.ServiceID() + ":" + m.Alias
+			}
+			services = append(services, catalogService{
+				id: displayID, baseID: a.ServiceID(),
+				actions: a.SupportedActions(), activated: true,
+			})
+		}
+
+		// Fallback: check base vault key.
+		baseKey := vaultKeyForService(a.ServiceID())
+		if !shown && keySet[baseKey] {
+			services = append(services, catalogService{
+				id: a.ServiceID(), baseID: a.ServiceID(),
+				actions: a.SupportedActions(), activated: true,
+			})
+			shown = true
+		}
+
+		if !shown {
+			services = append(services, catalogService{
+				id: a.ServiceID(), baseID: a.ServiceID(),
+				actions: a.SupportedActions(), activated: false,
+			})
+		}
 	}
 	sort.Slice(services, func(i, j int) bool { return services[i].id < services[j].id })
 
@@ -141,13 +183,16 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 		anyActive = true
 		buf.WriteString(fmt.Sprintf("\n### %s\n\n", svc.id))
 		for _, action := range svc.actions {
-			// If a restriction matches this action, skip it.
+			// If a restriction matches this action (exact or base service), skip it.
 			restriction, _ := h.st.MatchRestriction(ctx, agent.UserID, svc.id, action)
+			if restriction == nil && svc.id != svc.baseID {
+				restriction, _ = h.st.MatchRestriction(ctx, agent.UserID, svc.baseID, action)
+			}
 			if restriction != nil {
 				continue
 			}
 
-			key := svc.id + ":" + action
+			key := svc.baseID + ":" + action
 			meta, hasMeta := actionMeta[key]
 
 			// All non-restricted actions require approval unless covered by a task.

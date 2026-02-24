@@ -96,6 +96,10 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "service and action are required")
 		return
 	}
+
+	// Parse alias from service field (e.g. "google.gmail:personal" → type="google.gmail", alias="personal").
+	serviceType, serviceAlias := parseServiceAlias(req.Service)
+
 	if req.RequestID == "" {
 		req.RequestID = uuid.New().String()
 	} else {
@@ -131,7 +135,12 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Step 1: Check restrictions ────────────────────────────────────────────
-	if restriction, err := h.store.MatchRestriction(ctx, agent.UserID, req.Service, req.Action); err == nil {
+	// Check both the full service (with alias) and the base service type.
+	restriction, _ := h.store.MatchRestriction(ctx, agent.UserID, req.Service, req.Action)
+	if restriction == nil && serviceAlias != "default" {
+		restriction, _ = h.store.MatchRestriction(ctx, agent.UserID, serviceType, req.Action)
+	}
+	if restriction != nil {
 		e := baseEntry("block", "blocked", nil)
 		e.DurationMS = int(time.Since(start).Milliseconds())
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
@@ -151,7 +160,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Step 2: Hardcoded approval check ─────────────────────────────────────
-	hardcoded := RequiresHardcodedApproval(req.Service, req.Action)
+	hardcoded := RequiresHardcodedApproval(serviceType, req.Action)
 
 	// ── Step 3: Task scope enforcement ───────────────────────────────────────
 	if req.TaskID != "" {
@@ -178,7 +187,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		match := CheckTaskScope(task, req.Service, req.Action)
+		match := CheckTaskScope(task, serviceType, serviceAlias, req.Action)
 
 		if !match.InScope {
 			_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
@@ -202,16 +211,17 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// In scope + auto_execute + not hardcoded → execute directly
 		if match.AutoExecute && !hardcoded {
 			taskIDPtr := &req.TaskID
-			responseFilters := getTaskActionFilters(task, req.Service, req.Action)
+			responseFilters := getTaskActionFilters(task, serviceType, serviceAlias, req.Action)
+			vKey := vaultKeyForServiceAlias(serviceType, serviceAlias)
 			result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-				agent.UserID, req.Service, req.Action, req.Params, responseFilters,
+				agent.UserID, serviceType, req.Action, req.Params, vKey, responseFilters,
 				h.llmFilterFn())
 			dur := int(time.Since(start).Milliseconds())
 
 			if execErr != nil {
 				if errors.Is(execErr, vault.ErrNotFound) {
 					// Vault credential missing — handle pending_activation inline.
-					adapter, adapterOK := h.adapterReg.Get(req.Service)
+					adapter, adapterOK := h.adapterReg.Get(serviceType)
 					if adapterOK && adapter.ValidateCredential(nil) != nil {
 						e := baseEntry("approve", "pending_activation", taskIDPtr)
 						e.DurationMS = dur
@@ -223,7 +233,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
 						blob := buildRequestBlob(req, agent, nil)
 						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-							h.baseURL, req.Service, req.RequestID)
+							h.baseURL, serviceType, req.RequestID)
 						denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
 						if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
 							req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
@@ -332,11 +342,11 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// This covers: no task_id, or task in-scope but not auto-execute, or hardcoded approval.
 
 	// Reject unknown services immediately.
-	approveAdapter, ok := h.adapterReg.Get(req.Service)
+	approveAdapter, ok := h.adapterReg.Get(serviceType)
 	if !ok {
 		e := baseEntry("approve", "error", nil)
 		e.DurationMS = int(time.Since(start).Milliseconds())
-		errMsg := fmt.Sprintf("unknown service %q", req.Service)
+		errMsg := fmt.Sprintf("unknown service %q", serviceType)
 		e.ErrorMsg = &errMsg
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 			h.logger.Warn("audit log failed", "err", logErr)
@@ -345,14 +355,14 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			"status":     "error",
 			"request_id": req.RequestID,
 			"audit_id":   auditID,
-			"error":      fmt.Sprintf("unknown service %q: not a supported service", req.Service),
+			"error":      fmt.Sprintf("unknown service %q: not a supported service", serviceType),
 			"code":       "UNKNOWN_SERVICE",
 		})
 		return
 	}
 
 	// Check if service needs activation.
-	vKey := vaultKeyForService(req.Service)
+	vKey := vaultKeyForServiceAlias(serviceType, serviceAlias)
 	if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) &&
 		approveAdapter.ValidateCredential(nil) != nil {
 		e := baseEntry("approve", "pending_activation", nil)
@@ -365,7 +375,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
 		blob := buildRequestBlob(req, agent, nil)
 		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-			h.baseURL, req.Service, req.RequestID)
+			h.baseURL, serviceType, req.RequestID)
 		denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
 		if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
 			req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
@@ -453,21 +463,27 @@ func writeGatewayStatusResponse(w http.ResponseWriter, e *store.AuditEntry) {
 
 // executeAdapterRequest fetches the credential from vault, calls the adapter,
 // and applies response filters. Shared between gateway and approvals handlers.
+// vaultKey overrides the default vault key when non-empty (used for aliased services).
 func executeAdapterRequest(
 	ctx context.Context,
 	v vault.Vault,
 	reg *adapters.Registry,
 	userID, service, action string,
 	params map[string]any,
+	vaultKey string,
 	responseFilters []filters.ResponseFilter,
 	semanticFn filters.SemanticApplyFn,
 ) (*adapters.Result, []filters.FilterRecord, error) {
-	adapter, ok := reg.Get(service)
+	serviceType, _ := parseServiceAlias(service)
+	adapter, ok := reg.Get(serviceType)
 	if !ok {
-		return nil, nil, fmt.Errorf("service %q is not supported", service)
+		return nil, nil, fmt.Errorf("service %q is not supported", serviceType)
 	}
 
-	vKey := vaultKeyForService(service)
+	vKey := vaultKey
+	if vKey == "" {
+		vKey = vaultKeyForService(serviceType)
+	}
 	cred, err := v.Get(ctx, userID, vKey)
 	if err != nil {
 		if errors.Is(err, vault.ErrNotFound) && adapter.ValidateCredential(nil) == nil {
@@ -608,11 +624,35 @@ func (h *GatewayHandler) saveAndNotifyActivation(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// parseServiceAlias splits "google.gmail:personal" → ("google.gmail", "personal").
+// No colon means alias "default".
+func parseServiceAlias(service string) (serviceType, alias string) {
+	if idx := strings.IndexByte(service, ':'); idx >= 0 {
+		return service[:idx], service[idx+1:]
+	}
+	return service, "default"
+}
+
+// vaultKeyForService returns the vault key for a service type (no alias).
+// Google services share the "google" base key.
 func vaultKeyForService(serviceID string) string {
 	if strings.HasPrefix(serviceID, "google.") {
 		return "google"
 	}
 	return serviceID
+}
+
+// vaultKeyForServiceAlias returns the vault key for a service type + alias.
+// "default" alias maps to the plain base key for backward compatibility.
+func vaultKeyForServiceAlias(serviceType, alias string) string {
+	base := serviceType
+	if strings.HasPrefix(serviceType, "google.") {
+		base = "google"
+	}
+	if alias == "" || alias == "default" {
+		return base
+	}
+	return base + ":" + alias
 }
 
 func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters []filters.ResponseFilter) *pendingRequestBlob {
@@ -650,10 +690,15 @@ func cloneParams(m map[string]any) map[string]any {
 }
 
 // getTaskActionFilters finds the matching TaskAction for service/action and
-// unmarshals its response_filters JSON.
-func getTaskActionFilters(task *store.Task, service, action string) []filters.ResponseFilter {
+// unmarshals its response_filters JSON. Checks both exact match (with alias)
+// and base service type (wildcard).
+func getTaskActionFilters(task *store.Task, serviceType, alias, action string) []filters.ResponseFilter {
+	fullService := serviceType
+	if alias != "" && alias != "default" {
+		fullService = serviceType + ":" + alias
+	}
 	for _, a := range task.AuthorizedActions {
-		if a.Service == service && (a.Action == action || a.Action == "*") {
+		if (a.Service == fullService || a.Service == serviceType) && (a.Action == action || a.Action == "*") {
 			if len(a.ResponseFilters) == 0 {
 				return nil
 			}

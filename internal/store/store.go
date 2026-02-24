@@ -23,14 +23,6 @@ type Store interface {
 	UpdateUserPassword(ctx context.Context, userID, newPasswordHash string) error
 	DeleteUser(ctx context.Context, userID string) error
 
-	// Agent roles
-	CreateRole(ctx context.Context, userID, name, description string) (*AgentRole, error)
-	UpdateRole(ctx context.Context, id, userID, name, description string) (*AgentRole, error)
-	GetRole(ctx context.Context, id, userID string) (*AgentRole, error)
-	GetRoleByName(ctx context.Context, name, userID string) (*AgentRole, error)
-	ListRoles(ctx context.Context, userID string) ([]*AgentRole, error)
-	DeleteRole(ctx context.Context, id, userID string) error
-
 	// Restrictions
 	CreateRestriction(ctx context.Context, r *Restriction) (*Restriction, error)
 	DeleteRestriction(ctx context.Context, id, userID string) error
@@ -38,8 +30,7 @@ type Store interface {
 	MatchRestriction(ctx context.Context, userID, service, action string) (*Restriction, error)
 
 	// Agents
-	CreateAgent(ctx context.Context, userID, name, tokenHash string, roleID *string) (*Agent, error)
-	UpdateAgentRole(ctx context.Context, id, userID string, roleID *string) (*Agent, error)
+	CreateAgent(ctx context.Context, userID, name, tokenHash string) (*Agent, error)
 	GetAgentByToken(ctx context.Context, tokenHash string) (*Agent, error)
 	ListAgents(ctx context.Context, userID string) ([]*Agent, error)
 	DeleteAgent(ctx context.Context, id, userID string) error
@@ -50,10 +41,11 @@ type Store interface {
 	DeleteSession(ctx context.Context, tokenHash string) error
 
 	// Service credentials metadata (vault stores the actual bytes)
-	UpsertServiceMeta(ctx context.Context, userID, serviceID string, activatedAt time.Time) error
-	GetServiceMeta(ctx context.Context, userID, serviceID string) (*ServiceMeta, error)
+	UpsertServiceMeta(ctx context.Context, userID, serviceID, alias string, activatedAt time.Time) error
+	GetServiceMeta(ctx context.Context, userID, serviceID, alias string) (*ServiceMeta, error)
 	ListServiceMetas(ctx context.Context, userID string) ([]*ServiceMeta, error)
-	DeleteServiceMeta(ctx context.Context, userID, serviceID string) error
+	DeleteServiceMeta(ctx context.Context, userID, serviceID, alias string) error
+	CountServiceMetasByType(ctx context.Context, userID, serviceID string) (int, error)
 
 	// Notification configs
 	UpsertNotificationConfig(ctx context.Context, userID, channel string, config json.RawMessage) error
@@ -109,22 +101,12 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// AgentRole is an optional label assigned to one or more agents.
-type AgentRole struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
 // Agent is an AI agent that authenticates via a long-lived bearer token.
 type Agent struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	Name      string    `json:"name"`
 	TokenHash string    `json:"-"`
-	RoleID    *string   `json:"role_id"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -134,6 +116,7 @@ type ServiceMeta struct {
 	ID          string    `json:"id"`
 	UserID      string    `json:"user_id"`
 	ServiceID   string    `json:"service_id"`
+	Alias       string    `json:"alias"`
 	ActivatedAt time.Time `json:"activated_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

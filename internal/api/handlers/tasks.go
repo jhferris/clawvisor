@@ -669,9 +669,15 @@ type TaskScopeMatch struct {
 }
 
 // CheckTaskScope checks if service/action is in the task's authorized actions.
-func CheckTaskScope(task *store.Task, service, action string) TaskScopeMatch {
+// It matches both exact (with alias, e.g. "google.gmail:personal") and
+// base service type (e.g. "google.gmail" matches any alias).
+func CheckTaskScope(task *store.Task, serviceType, alias, action string) TaskScopeMatch {
+	fullService := serviceType
+	if alias != "" && alias != "default" {
+		fullService = serviceType + ":" + alias
+	}
 	for _, a := range task.AuthorizedActions {
-		if a.Service == service && (a.Action == action || a.Action == "*") {
+		if (a.Service == fullService || a.Service == serviceType) && (a.Action == action || a.Action == "*") {
 			return TaskScopeMatch{InScope: true, AutoExecute: a.AutoExecute}
 		}
 	}

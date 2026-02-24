@@ -126,25 +126,17 @@ export interface AuthResponse {
   refresh_token: string
 }
 
-export interface AgentRole {
-  id: string
-  user_id: string
-  name: string
-  description: string
-  created_at: string
-}
-
 export interface Agent {
   id: string
   user_id: string
   name: string
-  role_id: string | null
   created_at: string
   token?: string // only present on creation
 }
 
 export interface ServiceInfo {
   id: string
+  alias?: string
   oauth: boolean
   requires_activation?: boolean
   actions: string[]
@@ -259,32 +251,26 @@ export const api = {
     deleteMe: (password: string) =>
       del<void>('/api/me', { password }),
   },
-  roles: {
-    list: () => get<AgentRole[]>('/api/roles'),
-    create: (name: string, description?: string) =>
-      post<AgentRole>('/api/roles', { name, description: description ?? '' }),
-    update: (id: string, name: string, description?: string) =>
-      put<AgentRole>(`/api/roles/${id}`, { name, description: description ?? '' }),
-    delete: (id: string) => del<void>(`/api/roles/${id}`),
-  },
   agents: {
     list: () => get<Agent[]>('/api/agents'),
-    create: (name: string, roleId?: string) =>
-      post<Agent>('/api/agents', { name, role_id: roleId }),
-    updateRole: (id: string, roleId: string | null) =>
-      patch<Agent>(`/api/agents/${id}`, { role_id: roleId }),
+    create: (name: string) =>
+      post<Agent>('/api/agents', { name }),
     delete: (id: string) => del<void>(`/api/agents/${id}`),
   },
   services: {
     list: () => get<{ services: ServiceInfo[] }>('/api/services'),
     // Returns the OAuth consent URL via authenticated fetch (fixes missing-auth-header issue).
-    oauthGetUrl: (serviceID: string, pendingReqId?: string) =>
+    oauthGetUrl: (serviceID: string, pendingReqId?: string, alias?: string) =>
       get<{ url: string }>('/api/oauth/url', {
         service: serviceID,
         ...(pendingReqId ? { pending_request_id: pendingReqId } : {}),
+        ...(alias ? { alias } : {}),
       }),
-    activateWithKey: (serviceID: string, token: string) =>
-      post<{ status: string; service: string }>(`/api/services/${serviceID}/activate-key`, { token }),
+    activateWithKey: (serviceID: string, token: string, alias?: string) =>
+      post<{ status: string; service: string }>(`/api/services/${serviceID}/activate-key`, {
+        token,
+        ...(alias ? { alias } : {}),
+      }),
   },
   restrictions: {
     list: () => get<Restriction[]>('/api/restrictions'),
