@@ -76,7 +76,7 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 		Task:     config.TaskConfig{DefaultExpirySeconds: 3600},
 	}
 
-	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{})
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{}, nil)
 	if err != nil {
 		t.Fatalf("api.New: %v", err)
 	}
@@ -297,30 +297,22 @@ func (m *mockAdapter) ValidateCredential(b []byte) error {
 // ── Scenario builder ──────────────────────────────────────────────────────────
 
 // scenario groups the common objects needed for gateway tests:
-// a user session, a role, and an agent token.
+// a user session and an agent token.
 type scenario struct {
 	session    *testSession
-	RoleID     string
-	RoleName   string
 	AgentToken string
 	AgentID    string
 }
 
-// newScenario creates a user, a role named roleName, and an agent with that role.
-func newScenario(t *testing.T, env *testEnv, roleName string) *scenario {
+// newScenario creates a user and an agent. The roleName parameter is kept
+// for call-site compatibility but is unused (roles have been removed).
+func newScenario(t *testing.T, env *testEnv, _ string) *scenario {
 	t.Helper()
 	s := newSession(t, env)
 
-	// Create role
-	resp := s.do("POST", "/api/roles", map[string]any{
-		"name": roleName, "description": "test role",
-	})
-	roleBody := mustStatus(t, resp, http.StatusCreated)
-	roleID := str(t, roleBody, "id")
-
 	// Create agent
-	resp = s.do("POST", "/api/agents", map[string]any{
-		"name": "test-agent", "role_id": roleID,
+	resp := s.do("POST", "/api/agents", map[string]any{
+		"name": "test-agent",
 	})
 	agentBody := mustStatus(t, resp, http.StatusCreated)
 	agentToken := str(t, agentBody, "token")
@@ -328,8 +320,6 @@ func newScenario(t *testing.T, env *testEnv, roleName string) *scenario {
 
 	return &scenario{
 		session:    s,
-		RoleID:     roleID,
-		RoleName:   roleName,
 		AgentToken: agentToken,
 		AgentID:    agentID,
 	}

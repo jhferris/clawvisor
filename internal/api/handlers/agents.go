@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
@@ -21,7 +20,7 @@ func NewAgentsHandler(st store.Store) *AgentsHandler {
 //
 // POST /api/agents
 // Auth: user JWT
-// Body: {"name": "...", "role_id": "..." (optional)}
+// Body: {"name": "..."}
 func (h *AgentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	if user == nil {
@@ -30,8 +29,7 @@ func (h *AgentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name   string  `json:"name"`
-		RoleID *string `json:"role_id"`
+		Name string `json:"name"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -47,7 +45,7 @@ func (h *AgentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent, err := h.st.CreateAgent(r.Context(), user.ID, body.Name, hashToken(rawToken), body.RoleID)
+	agent, err := h.st.CreateAgent(r.Context(), user.ID, body.Name, hashToken(rawToken))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not create agent")
 		return
@@ -58,7 +56,6 @@ func (h *AgentsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"id":         agent.ID,
 		"user_id":    agent.UserID,
 		"name":       agent.Name,
-		"role_id":    agent.RoleID,
 		"created_at": agent.CreatedAt,
 		"token":      rawToken,
 	})
@@ -83,38 +80,6 @@ func (h *AgentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agents)
 }
 
-// UpdateRole changes the role assignment for an existing agent.
-//
-// PATCH /api/agents/{id}
-// Auth: user JWT
-// Body: {"role_id": "..." | null}
-func (h *AgentsHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-		return
-	}
-
-	id := r.PathValue("id")
-	var body struct {
-		RoleID *string `json:"role_id"` // null = remove role
-	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-
-	agent, err := h.st.UpdateAgentRole(r.Context(), id, user.ID, body.RoleID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "agent not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not update agent")
-		return
-	}
-	writeJSON(w, http.StatusOK, agent)
-}
-
 // Delete removes an agent by ID.
 //
 // DELETE /api/agents/{id}
@@ -128,7 +93,7 @@ func (h *AgentsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	if err := h.st.DeleteAgent(r.Context(), id, user.ID); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if err == store.ErrNotFound {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "agent not found")
 			return
 		}

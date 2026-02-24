@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 )
@@ -95,52 +94,6 @@ func TestNotifications_IsolatedByUser(t *testing.T) {
 	if len(configs) != 0 {
 		t.Errorf("isolation: user2 should see 0 configs, got %d", len(configs))
 	}
-}
-
-// ── Agents: UpdateRole ────────────────────────────────────────────────────────
-
-func TestAgents_UpdateRole(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	// Create a role
-	resp := s.do("POST", "/api/roles", map[string]any{"name": "engineer"})
-	roleBody := mustStatus(t, resp, http.StatusCreated)
-	roleID := str(t, roleBody, "id")
-
-	// Create an agent (no role)
-	resp = s.do("POST", "/api/agents", map[string]any{"name": "my-agent"})
-	agentBody := mustStatus(t, resp, http.StatusCreated)
-	agentID := str(t, agentBody, "id")
-	if agentBody["role_id"] != nil {
-		t.Errorf("new agent should have nil role_id")
-	}
-
-	// Assign role
-	resp = s.do("PATCH", fmt.Sprintf("/api/agents/%s", agentID), map[string]any{
-		"role_id": roleID,
-	})
-	updated := mustStatus(t, resp, http.StatusOK)
-	if str(t, updated, "role_id") != roleID {
-		t.Errorf("after update: role_id mismatch, got %v", updated["role_id"])
-	}
-
-	// Remove role
-	resp = s.do("PATCH", fmt.Sprintf("/api/agents/%s", agentID), map[string]any{
-		"role_id": nil,
-	})
-	cleared := mustStatus(t, resp, http.StatusOK)
-	if cleared["role_id"] != nil {
-		t.Errorf("after clear: role_id should be nil, got %v", cleared["role_id"])
-	}
-}
-
-func TestAgents_UpdateRole_NotFound(t *testing.T) {
-	env := newTestEnv(t)
-	s := newSession(t, env)
-
-	resp := s.do("PATCH", "/api/agents/nonexistent", map[string]any{"role_id": nil})
-	mustStatus(t, resp, http.StatusNotFound)
 }
 
 // ── User: UpdateMe (password change) ─────────────────────────────────────────
