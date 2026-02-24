@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -298,7 +299,7 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
-			_ = callback.DeliverResult(r.Context(), *task.CallbackURL, &callback.Payload{
+			_ = callback.DeliverResult(context.Background(), *task.CallbackURL, &callback.Payload{
 				RequestID: taskID,
 				Status:    "task_approved",
 				AuditID:   "",
@@ -354,7 +355,7 @@ func (h *TasksHandler) Deny(w http.ResponseWriter, r *http.Request) {
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
-			_ = callback.DeliverResult(r.Context(), *task.CallbackURL, &callback.Payload{
+			_ = callback.DeliverResult(context.Background(), *task.CallbackURL, &callback.Payload{
 				RequestID: taskID,
 				Status:    "denied",
 				AuditID:   "",
@@ -546,7 +547,7 @@ func (h *TasksHandler) ExpandApprove(w http.ResponseWriter, r *http.Request) {
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
-			_ = callback.DeliverResult(r.Context(), *task.CallbackURL, &callback.Payload{
+			_ = callback.DeliverResult(context.Background(), *task.CallbackURL, &callback.Payload{
 				RequestID: taskID,
 				Status:    "scope_expanded",
 				AuditID:   "",
@@ -616,7 +617,7 @@ func (h *TasksHandler) ExpandDeny(w http.ResponseWriter, r *http.Request) {
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
-			_ = callback.DeliverResult(r.Context(), *task.CallbackURL, &callback.Payload{
+			_ = callback.DeliverResult(context.Background(), *task.CallbackURL, &callback.Payload{
 				RequestID: taskID,
 				Status:    "scope_expansion_denied",
 				AuditID:   "",

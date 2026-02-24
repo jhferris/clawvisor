@@ -12,6 +12,7 @@
 package imessage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/oauth2"
 
@@ -214,28 +216,30 @@ func (a *IMessageAdapter) searchMessages(ctx context.Context, params map[string]
 			placeholders[i] = "?"
 			args = append(args, id)
 		}
-		args = append(args, "%"+query+"%", sinceApple, maxResults)
+		likePattern := "%" + query + "%"
+		args = append(args, likePattern, likePattern, sinceApple, maxResults)
 		sqlQuery = fmt.Sprintf(`
-			SELECT m.ROWID, m.text, m.is_from_me, m.date, h.id, c.chat_identifier
+			SELECT m.ROWID, m.text, m.is_from_me, m.date, h.id, c.chat_identifier, m.attributedBody
 			FROM message m
 			JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 			JOIN chat c ON c.ROWID = cmj.chat_id
 			LEFT JOIN handle h ON h.ROWID = m.handle_id
 			WHERE h.id IN (%s)
-			  AND m.text LIKE ?
+			  AND (m.text LIKE ? OR m.attributedBody LIKE ?)
 			  AND m.date > ?
 			  AND m.is_from_me = 0
 			ORDER BY m.date DESC
 			LIMIT ?`, strings.Join(placeholders, ","))
 	} else {
-		args = []any{"%" + query + "%", sinceApple, maxResults}
+		likePattern := "%" + query + "%"
+		args = []any{likePattern, likePattern, sinceApple, maxResults}
 		sqlQuery = `
-			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier
+			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier, m.attributedBody
 			FROM message m
 			JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 			JOIN chat c ON c.ROWID = cmj.chat_id
 			LEFT JOIN handle h ON h.ROWID = m.handle_id
-			WHERE m.text LIKE ?
+			WHERE (m.text LIKE ? OR m.attributedBody LIKE ?)
 			  AND m.date > ?
 			ORDER BY m.date DESC
 			LIMIT ?`
@@ -282,7 +286,12 @@ func (a *IMessageAdapter) listThreads(ctx context.Context, params map[string]any
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT c.chat_identifier, c.display_name,
-		       MAX(m.text) as last_text,
+		       (SELECT m2.text FROM message m2
+		        JOIN chat_message_join cmj2 ON cmj2.message_id = m2.ROWID
+		        WHERE cmj2.chat_id = c.ROWID ORDER BY m2.date DESC LIMIT 1) as last_text,
+		       (SELECT m2.attributedBody FROM message m2
+		        JOIN chat_message_join cmj2 ON cmj2.message_id = m2.ROWID
+		        WHERE cmj2.chat_id = c.ROWID ORDER BY m2.date DESC LIMIT 1) as last_attr_body,
 		       MAX(m.date) as last_date,
 		       COUNT(DISTINCT ch.handle_id) as participant_count
 		FROM chat c
@@ -303,9 +312,10 @@ func (a *IMessageAdapter) listThreads(ctx context.Context, params map[string]any
 	for rows.Next() {
 		var threadID, displayName string
 		var lastText sql.NullString
+		var lastAttrBody []byte
 		var lastDateNS int64
 		var participantCount int
-		if err := rows.Scan(&threadID, &displayName, &lastText, &lastDateNS, &participantCount); err != nil {
+		if err := rows.Scan(&threadID, &displayName, &lastText, &lastAttrBody, &lastDateNS, &participantCount); err != nil {
 			continue
 		}
 		lastAt := coredataEpoch.Add(time.Duration(lastDateNS))
@@ -315,7 +325,13 @@ func (a *IMessageAdapter) listThreads(ctx context.Context, params map[string]any
 		}
 		snippet := ""
 		if lastText.Valid {
-			snippet = format.SanitizeText(lastText.String, format.MaxSnippetLen)
+			snippet = strings.TrimSpace(lastText.String)
+		}
+		if snippet == "" {
+			snippet = extractTextFromAttributedBody(lastAttrBody)
+		}
+		if snippet != "" {
+			snippet = format.SanitizeText(snippet, format.MaxSnippetLen)
 		}
 		items = append(items, threadItem{
 			ThreadID:           threadID,
@@ -391,7 +407,7 @@ func (a *IMessageAdapter) getThread(ctx context.Context, params map[string]any) 
 		}
 		args = append(args, sinceApple, maxResults)
 		sqlQuery = fmt.Sprintf(`
-			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier
+			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier, m.attributedBody
 			FROM message m
 			JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 			JOIN chat c ON c.ROWID = cmj.chat_id
@@ -404,7 +420,7 @@ func (a *IMessageAdapter) getThread(ctx context.Context, params map[string]any) 
 	} else {
 		args = []any{threadID, sinceApple, maxResults}
 		sqlQuery = `
-			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier
+			SELECT m.ROWID, m.text, m.is_from_me, m.date, COALESCE(h.id, ''), c.chat_identifier, m.attributedBody
 			FROM message m
 			JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 			JOIN chat c ON c.ROWID = cmj.chat_id
@@ -501,12 +517,13 @@ end tell`, identifier, text)
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 type rawMessage struct {
-	rowID      int64
-	text       sql.NullString
-	isFromMe   bool
-	dateNS     int64
-	handleID   string
-	chatID     string
+	rowID          int64
+	text           sql.NullString
+	attributedBody []byte
+	isFromMe       bool
+	dateNS         int64
+	handleID       string
+	chatID         string
 }
 
 func (a *IMessageAdapter) scanMessages(rows *sql.Rows) []rawMessage {
@@ -514,9 +531,11 @@ func (a *IMessageAdapter) scanMessages(rows *sql.Rows) []rawMessage {
 	for rows.Next() {
 		var m rawMessage
 		var isFromMeInt int
-		if err := rows.Scan(&m.rowID, &m.text, &isFromMeInt, &m.dateNS, &m.handleID, &m.chatID); err != nil {
+		var attrBody []byte
+		if err := rows.Scan(&m.rowID, &m.text, &isFromMeInt, &m.dateNS, &m.handleID, &m.chatID, &attrBody); err != nil {
 			continue
 		}
+		m.attributedBody = attrBody
 		m.isFromMe = isFromMeInt != 0
 		msgs = append(msgs, m)
 	}
@@ -530,6 +549,9 @@ func (a *IMessageAdapter) formatMessages(msgs []rawMessage, nameMap map[string]s
 		text := ""
 		if m.text.Valid {
 			text = strings.TrimSpace(m.text.String)
+		}
+		if text == "" {
+			text = extractTextFromAttributedBody(m.attributedBody)
 		}
 		if text == "" {
 			text = "[attachment]"
@@ -776,6 +798,75 @@ func paramInt(params map[string]any, key string) (int, bool) {
 func emptyCredential() []byte {
 	b, _ := json.Marshal(map[string]string{"type": "local"})
 	return b
+}
+
+// extractTextFromAttributedBody extracts plain text from the attributedBody
+// BLOB column in chat.db. This column stores an NSAttributedString in Apple's
+// typedstream format. In macOS 16+ the text column is often NULL and the
+// actual message content is only in attributedBody.
+//
+// The typedstream layout for a text message is roughly:
+//
+//	[header "streamtyped" + version] [class hierarchy]
+//	[0x2B '+' string marker] [length] [UTF-8 string bytes] [attribute data...]
+//
+// We locate the NSString class declaration, then scan forward for the '+'
+// (0x2B) string marker followed by a length-prefixed UTF-8 string.
+func extractTextFromAttributedBody(data []byte) string {
+	if len(data) < 30 {
+		return ""
+	}
+
+	// Find the NSString class name — the string data follows its declaration.
+	idx := bytes.Index(data, []byte("NSString"))
+	if idx < 0 {
+		return ""
+	}
+
+	// Scan past class hierarchy for the '+' (0x2B) string marker followed
+	// by a length-prefixed UTF-8 string.
+	for i := idx + len("NSString"); i < len(data)-1; i++ {
+		if data[i] != 0x2B {
+			continue
+		}
+
+		length, skip := readTypedStreamLength(data[i+1:])
+		if length <= 0 || i+1+skip+length > len(data) {
+			continue
+		}
+
+		candidate := data[i+1+skip : i+1+skip+length]
+		if utf8.Valid(candidate) {
+			s := strings.TrimSpace(string(candidate))
+			if s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// readTypedStreamLength reads a length value from Apple's typedstream format.
+// Short lengths (< 128) are a single byte. For longer strings the first byte
+// has the high bit set and the low 7 bits indicate how many following bytes
+// encode the length in big-endian order.
+func readTypedStreamLength(data []byte) (int, int) {
+	if len(data) == 0 {
+		return 0, 0
+	}
+	b := data[0]
+	if b < 0x80 {
+		return int(b), 1
+	}
+	n := int(b & 0x7F)
+	if n == 0 || n > 4 || n+1 > len(data) {
+		return 0, 0
+	}
+	length := 0
+	for j := 1; j <= n; j++ {
+		length = length<<8 | int(data[j])
+	}
+	return length, n + 1
 }
 
 func truncate(s string, max int) string {
