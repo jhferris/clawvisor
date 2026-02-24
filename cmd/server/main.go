@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/stdlib"
 
@@ -153,8 +156,73 @@ func run(logger *slog.Logger) error {
 		logger.Info("LLM safety checker enabled", "model", cfg.LLM.Safety.Model)
 	}
 
+	// ── Magic link auth (local mode) ────────────────────────────────────────
+	var magicStore *auth.MagicTokenStore
+	if cfg.Server.IsLocal() {
+		magicStore = auth.NewMagicTokenStore()
+
+		// Ensure a default local user exists.
+		const localEmail = "admin@local"
+		_, err := st.GetUserByEmail(ctx, localEmail)
+		if err != nil {
+			// User doesn't exist — create one with a random password (never displayed).
+			randPw := make([]byte, 32)
+			if _, err := cryptorand.Read(randPw); err != nil {
+				return fmt.Errorf("generating random password: %w", err)
+			}
+			hash, err := auth.HashPassword(hex.EncodeToString(randPw))
+			if err != nil {
+				return fmt.Errorf("hashing local user password: %w", err)
+			}
+			if _, err := st.CreateUser(ctx, localEmail, hash); err != nil {
+				return fmt.Errorf("creating local user: %w", err)
+			}
+			logger.Info("created local user", "email", localEmail)
+		}
+
+		// Look up the user to get their ID.
+		localUser, err := st.GetUserByEmail(ctx, localEmail)
+		if err != nil {
+			return fmt.Errorf("loading local user: %w", err)
+		}
+
+		token, err := magicStore.Generate(localUser.ID)
+		if err != nil {
+			return fmt.Errorf("generating magic token: %w", err)
+		}
+
+		// Normalize the host for the URL shown to the user.
+		displayHost := cfg.Server.Host
+		if displayHost == "0.0.0.0" || displayHost == "127.0.0.1" || displayHost == "" {
+			displayHost = "localhost"
+		}
+		magicURL := fmt.Sprintf("http://%s:%d/auth/local?token=%s", displayHost, cfg.Server.Port, token)
+
+		fmt.Println()
+		fmt.Println("  Clawvisor dashboard")
+		fmt.Printf("  %s\n", magicURL)
+		fmt.Println()
+		fmt.Println("  Open this link in your browser to sign in.")
+		fmt.Println("  Valid for 15 minutes. Single use.")
+		fmt.Println()
+
+		// Background cleanup goroutine.
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					magicStore.Cleanup()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	// ── HTTP Server ─────────────────────────────────────────────────────────
-	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, safetyChecker, cfg.LLM)
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, safetyChecker, cfg.LLM, magicStore)
 	if err != nil {
 		return err
 	}

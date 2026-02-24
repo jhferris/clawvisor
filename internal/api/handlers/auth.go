@@ -6,24 +6,27 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
+	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/store"
 )
 
 // AuthHandler handles user registration, login, token refresh, and logout.
 type AuthHandler struct {
-	jwtSvc *auth.JWTService
-	st     store.Store
-	cfg    config.AuthConfig
+	jwtSvc     *auth.JWTService
+	st         store.Store
+	cfg        config.AuthConfig
+	magicStore *auth.MagicTokenStore // nil when magic link auth is disabled
+	baseURL    string
 }
 
-func NewAuthHandler(jwtSvc *auth.JWTService, st store.Store, cfg config.AuthConfig) *AuthHandler {
-	return &AuthHandler{jwtSvc: jwtSvc, st: st, cfg: cfg}
+func NewAuthHandler(jwtSvc *auth.JWTService, st store.Store, cfg config.AuthConfig, magicStore *auth.MagicTokenStore, baseURL string) *AuthHandler {
+	return &AuthHandler{jwtSvc: jwtSvc, st: st, cfg: cfg, magicStore: magicStore, baseURL: baseURL}
 }
 
 type authResponse struct {
@@ -278,6 +281,62 @@ func (h *AuthHandler) DeleteMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleMagicLink validates a magic link token and bootstraps a browser session.
+// It writes a small HTML page that stores the refresh token in localStorage and
+// redirects to the dashboard. The SPA's existing session restore logic picks it up.
+//
+// GET /auth/local?token=...
+func (h *AuthHandler) HandleMagicLink(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		h.magicLinkError(w, "Missing token parameter.")
+		return
+	}
+	if h.magicStore == nil {
+		h.magicLinkError(w, "Magic link auth is not enabled.")
+		return
+	}
+
+	userID, err := h.magicStore.Validate(token)
+	if err != nil {
+		h.magicLinkError(w, "Link expired or already used. Restart the server for a new one.")
+		return
+	}
+
+	user, err := h.st.GetUserByID(r.Context(), userID)
+	if err != nil {
+		h.magicLinkError(w, "User not found.")
+		return
+	}
+
+	resp, err := h.issueTokens(r, user)
+	if err != nil {
+		h.magicLinkError(w, "Could not create session.")
+		return
+	}
+
+	// Write a small HTML page that stores tokens and redirects to the dashboard.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>Signing in…</title></head><body>
+<p>Signing in…</p>
+<script>
+localStorage.setItem('clawvisor_refresh_token', %q);
+window.location.href = '/dashboard';
+</script>
+</body></html>`, resp.RefreshToken)
+}
+
+func (h *AuthHandler) magicLinkError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>Auth Error</title></head><body>
+<h2>Authentication Failed</h2>
+<p>%s</p>
+</body></html>`, msg)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

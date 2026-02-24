@@ -266,6 +266,11 @@ func (a AuthConfig) RefreshTokenDuration() (time.Duration, error) {
 	return time.ParseDuration(a.RefreshTokenTTL)
 }
 
+// IsLocal returns true when the server is bound to a loopback or wildcard address.
+func (s ServerConfig) IsLocal() bool {
+	return s.Host == "" || s.Host == "localhost" || s.Host == "127.0.0.1" || s.Host == "0.0.0.0"
+}
+
 // Addr returns the server listen address.
 func (s ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)

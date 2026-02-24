@@ -34,11 +34,14 @@ type Server struct {
 	logger     *slog.Logger
 	http       *http.Server
 
+	magicStore *auth.MagicTokenStore
+
 	// approvalsCleaner is used to stop the background goroutine.
 	approvalsHandler *handlers.ApprovalsHandler
 }
 
 // New creates a Server and registers all routes.
+// magicStore may be nil when magic link auth is not enabled.
 func New(
 	cfg *config.Config,
 	st store.Store,
@@ -48,6 +51,7 @@ func New(
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
 	llmCfg config.LLMConfig,
+	magicStore *auth.MagicTokenStore,
 ) (*Server, error) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -62,6 +66,7 @@ func New(
 		notifier:   notifier,
 		safety:     safetyChecker,
 		llmCfg:     llmCfg,
+		magicStore: magicStore,
 		logger:     logger,
 	}
 
@@ -91,9 +96,8 @@ func (s *Server) routes() http.Handler {
 	baseURL := fmt.Sprintf("http://%s:%d", baseHost, s.cfg.Server.Port)
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth)
+	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth, s.magicStore, baseURL)
 	healthHandler := handlers.NewHealthHandler(s.store, s.vault)
-	rolesHandler := handlers.NewRolesHandler(s.store)
 	restrictionsHandler := handlers.NewRestrictionsHandler(s.store)
 	agentsHandler := handlers.NewAgentsHandler(s.store)
 	auditHandler := handlers.NewAuditHandler(s.store)
@@ -126,17 +130,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
 	mux.HandleFunc("POST /api/auth/refresh", authHandler.Refresh)
 
+	// Magic link auth (no auth required; only registered when magicStore is set)
+	if s.magicStore != nil {
+		mux.HandleFunc("GET /auth/local", authHandler.HandleMagicLink)
+	}
+
 	// Auth (requires user JWT)
 	mux.Handle("POST /api/auth/logout", user(authHandler.Logout))
 	mux.Handle("GET /api/me", user(authHandler.Me))
 	mux.Handle("PUT /api/me", user(authHandler.UpdateMe))
 	mux.Handle("DELETE /api/me", user(authHandler.DeleteMe))
-
-	// Roles
-	mux.Handle("GET /api/roles", user(rolesHandler.List))
-	mux.Handle("POST /api/roles", user(rolesHandler.Create))
-	mux.Handle("PUT /api/roles/{id}", user(rolesHandler.Update))
-	mux.Handle("DELETE /api/roles/{id}", user(rolesHandler.Delete))
 
 	// Restrictions
 	mux.Handle("GET /api/restrictions", user(restrictionsHandler.List))
@@ -146,7 +149,6 @@ func (s *Server) routes() http.Handler {
 	// Agents (user JWT)
 	mux.Handle("GET /api/agents", user(agentsHandler.List))
 	mux.Handle("POST /api/agents", user(agentsHandler.Create))
-	mux.Handle("PATCH /api/agents/{id}", user(agentsHandler.UpdateRole))
 	mux.Handle("DELETE /api/agents/{id}", user(agentsHandler.Delete))
 
 	// Notifications (user JWT)
