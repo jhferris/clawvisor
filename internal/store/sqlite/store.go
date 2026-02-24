@@ -344,6 +344,29 @@ func (s *Store) ListPolicies(ctx context.Context, userID string, filter store.Po
 	return policies, rows.Err()
 }
 
+func (s *Store) ListAllPolicies(ctx context.Context) ([]*store.PolicyRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
+		FROM policies ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var policies []*store.PolicyRecord
+	for rows.Next() {
+		p := &store.PolicyRecord{}
+		var createdAt, updatedAt string
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Slug, &p.Name, &p.Description, &p.RoleID, &p.RulesYAML, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		p.CreatedAt = parseTime(createdAt)
+		p.UpdatedAt = parseTime(updatedAt)
+		policies = append(policies, p)
+	}
+	return policies, rows.Err()
+}
+
 // ── Agents ────────────────────────────────────────────────────────────────────
 
 func (s *Store) CreateAgent(ctx context.Context, userID, name, tokenHash string, roleID *string) (*store.Agent, error) {

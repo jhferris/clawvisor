@@ -38,6 +38,8 @@ type Store interface {
 	GetPolicy(ctx context.Context, id, userID string) (*PolicyRecord, error)
 	GetPolicyBySlug(ctx context.Context, slug, userID string) (*PolicyRecord, error)
 	ListPolicies(ctx context.Context, userID string, filter PolicyFilter) ([]*PolicyRecord, error)
+	// ListAllPolicies returns every policy across all users; used at startup to seed the registry.
+	ListAllPolicies(ctx context.Context) ([]*PolicyRecord, error)
 
 	// Agents
 	CreateAgent(ctx context.Context, userID, name, tokenHash string, roleID *string) (*Agent, error)

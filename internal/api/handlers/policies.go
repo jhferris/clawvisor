@@ -309,16 +309,21 @@ func (h *PoliciesHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load policies directly from DB for accurate dry-run evaluation.
+	// The in-memory registry is the hot path for the gateway; the evaluate endpoint
+	// is a dashboard tool and must reflect the current DB state exactly.
+	records, _ := h.store.ListPolicies(r.Context(), user.ID, store.PolicyFilter{})
+	compiledRules := h.compiledFromRecords(records, user.ID)
+
 	// The policy engine matches on role name, not UUID.
-	// AgentRoleID = role name (e.g. "researcher"), consistent with CompiledRule.RoleID.
 	req := policy.EvalRequest{
 		Service:     body.Service,
 		Action:      body.Action,
 		Params:      body.Params,
-		AgentRoleID: body.Role, // role name passed directly
+		AgentRoleID: body.Role,
 	}
 
-	decision := h.registry.Evaluate(user.ID, req)
+	decision := policy.Evaluate(req, compiledRules)
 	writeJSON(w, http.StatusOK, decision)
 }
 

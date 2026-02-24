@@ -289,6 +289,17 @@ func (s *Store) ListPolicies(ctx context.Context, userID string, filter store.Po
 	return scanPolicies(rows)
 }
 
+func (s *Store) ListAllPolicies(ctx context.Context) ([]*store.PolicyRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, slug, name, description, role_id, rules_yaml, created_at, updated_at
+		FROM policies ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPolicies(rows)
+}
+
 func scanPolicies(rows pgx.Rows) ([]*store.PolicyRecord, error) {
 	var policies []*store.PolicyRecord
 	for rows.Next() {

@@ -168,10 +168,30 @@ func run(logger *slog.Logger) error {
 	return srv.Run(ctx)
 }
 
-// loadPoliciesIntoRegistry compiles all users' policies into the registry at startup.
-// For now the registry starts empty and is updated incrementally on every policy write.
+// loadPoliciesIntoRegistry compiles all stored policies into the in-memory registry at startup.
+// After this, incremental updates (Create/Update/Delete policy) keep the registry in sync.
 func loadPoliciesIntoRegistry(ctx context.Context, st store.Store, reg *policy.Registry, logger *slog.Logger) error {
-	logger.Info("policy registry initialized (policies loaded on first access)")
+	records, err := st.ListAllPolicies(ctx)
+	if err != nil {
+		return fmt.Errorf("loadPoliciesIntoRegistry: %w", err)
+	}
+
+	// Group by user and load each user's set in bulk.
+	byUser := make(map[string][]*store.PolicyRecord)
+	for _, r := range records {
+		byUser[r.UserID] = append(byUser[r.UserID], r)
+	}
+	for userID, recs := range byUser {
+		var policies []policy.Policy
+		for _, rec := range recs {
+			p, parseErr := policy.Parse([]byte(rec.RulesYAML))
+			if parseErr == nil {
+				policies = append(policies, *p)
+			}
+		}
+		reg.Load(userID, policies)
+	}
+	logger.Info("policy registry loaded", "users", len(byUser), "policies", len(records))
 	return nil
 }
 
