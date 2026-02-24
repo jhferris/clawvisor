@@ -16,6 +16,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,13 +47,17 @@ func New() *IMessageAdapter {
 }
 
 // Available returns true if the adapter can operate on this host.
-// Requires macOS with chat.db present.
+// Requires macOS with chat.db readable (Full Disk Access must be granted).
 func (a *IMessageAdapter) Available() bool {
 	if runtime.GOOS != "darwin" {
 		return false
 	}
-	_, err := os.Stat(a.dbPath)
-	return err == nil
+	f, err := os.Open(a.dbPath)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
 }
 
 func (a *IMessageAdapter) ServiceID() string { return serviceID }
@@ -90,10 +95,11 @@ func (a *IMessageAdapter) Execute(ctx context.Context, req adapters.Request) (*a
 // CheckPermissions tries to open chat.db read-only.
 // Returns an error with human-readable guidance if access is denied.
 func (a *IMessageAdapter) CheckPermissions() error {
-	db, err := sql.Open("sqlite", "file:"+a.dbPath+"?mode=ro&immutable=1")
+	db, cleanup, err := a.openDB()
 	if err != nil {
 		return fmt.Errorf("cannot open chat.db: %w — grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access", err)
 	}
+	defer cleanup()
 	defer db.Close()
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("cannot read chat.db: %w — grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access", err)
@@ -101,8 +107,55 @@ func (a *IMessageAdapter) CheckPermissions() error {
 	return nil
 }
 
-func (a *IMessageAdapter) openDB() (*sql.DB, error) {
-	return sql.Open("sqlite", "file:"+a.dbPath+"?mode=ro&immutable=1")
+// openDB snapshots chat.db (+ WAL file) into a temp directory and opens it
+// read-only. This sidesteps the SQLITE_CANTOPEN / "out of memory" error that
+// occurs when modernc.org/sqlite tries to mmap the .db-shm shared-memory file
+// for a WAL-mode database owned by Messages.app.
+//
+// The caller must invoke the returned cleanup function when done.
+func (a *IMessageAdapter) openDB() (*sql.DB, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "cw-imsg-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("temp dir: %w", err)
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(tmpDir)
+	}
+
+	tmpDB := filepath.Join(tmpDir, "chat.db")
+	if err := copyFile(a.dbPath, tmpDB); err != nil {
+		cleanup()
+		if os.IsPermission(err) {
+			return nil, nil, fmt.Errorf("cannot read chat.db: %w — grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access", err)
+		}
+		return nil, nil, fmt.Errorf("copy chat.db: %w", err)
+	}
+	// Copy WAL file if present so the snapshot includes recent uncommitted writes.
+	if _, serr := os.Stat(a.dbPath + "-wal"); serr == nil {
+		_ = copyFile(a.dbPath+"-wal", tmpDB+"-wal")
+	}
+
+	db, err := sql.Open("sqlite", "file:"+tmpDB+"?mode=ro")
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return db, cleanup, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 // ── search_messages ───────────────────────────────────────────────────────────
@@ -132,10 +185,11 @@ func (a *IMessageAdapter) searchMessages(ctx context.Context, params map[string]
 		maxResults = v
 	}
 
-	db, err := a.openDB()
+	db, cleanup, err := a.openDB()
 	if err != nil {
 		return nil, fmt.Errorf("imessage: cannot open chat.db: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	since := time.Now().Add(-time.Duration(daysBack) * 24 * time.Hour)
@@ -219,10 +273,11 @@ func (a *IMessageAdapter) listThreads(ctx context.Context, params map[string]any
 		maxResults = v
 	}
 
-	db, err := a.openDB()
+	db, cleanup, err := a.openDB()
 	if err != nil {
 		return nil, fmt.Errorf("imessage: cannot open chat.db: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	rows, err := db.QueryContext(ctx, `
@@ -270,6 +325,23 @@ func (a *IMessageAdapter) listThreads(ctx context.Context, params map[string]any
 			ParticipantCount:   participantCount,
 		})
 	}
+
+	// Resolve group chat display names from Address Book participants.
+	var unresolvedIDs []string
+	for i := range items {
+		if items[i].DisplayName == items[i].ThreadID {
+			unresolvedIDs = append(unresolvedIDs, items[i].ThreadID)
+		}
+	}
+	if len(unresolvedIDs) > 0 {
+		resolved := a.resolveThreadDisplayNames(db, unresolvedIDs)
+		for i := range items {
+			if name, ok := resolved[items[i].ThreadID]; ok {
+				items[i].DisplayName = format.SanitizeText(name, format.MaxFieldLen)
+			}
+		}
+	}
+
 	return &adapters.Result{
 		Summary: format.Summary("%d recent conversation(s)", len(items)),
 		Data:    items,
@@ -293,10 +365,11 @@ func (a *IMessageAdapter) getThread(ctx context.Context, params map[string]any) 
 		daysBack = v
 	}
 
-	db, err := a.openDB()
+	db, cleanup, err := a.openDB()
 	if err != nil {
 		return nil, fmt.Errorf("imessage: cannot open chat.db: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	coredataEpoch := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -355,6 +428,10 @@ func (a *IMessageAdapter) getThread(ctx context.Context, params map[string]any) 
 	displayName := contact
 	if displayName == "" {
 		displayName = threadID
+		// Resolve group chat display name from participants.
+		if resolved := a.resolveThreadDisplayNames(db, []string{threadID}); resolved[threadID] != "" {
+			displayName = resolved[threadID]
+		}
 	}
 	result := map[string]any{
 		"thread_id": threadID,
@@ -375,6 +452,11 @@ func (a *IMessageAdapter) getThread(ctx context.Context, params map[string]any) 
 func (a *IMessageAdapter) sendMessage(ctx context.Context, params map[string]any) (*adapters.Result, error) {
 	to, _ := params["to"].(string)
 	text, _ := params["text"].(string)
+	if text == "" {
+		// Accept "body" as an alias — Gmail and GitHub use "body", so agents
+		// frequently send it for iMessage too.
+		text, _ = params["body"].(string)
+	}
 	if to == "" {
 		return nil, fmt.Errorf("imessage send_message: to is required")
 	}
@@ -390,8 +472,9 @@ func (a *IMessageAdapter) sendMessage(ctx context.Context, params map[string]any
 
 	// Resolve phone number / email from contact name if needed.
 	identifier := to
-	db, dbErr := a.openDB()
+	db, cleanup, dbErr := a.openDB()
 	if dbErr == nil {
+		defer cleanup()
 		defer db.Close()
 		identifiers, _ := a.resolveContactIdentifiers(db, to)
 		if len(identifiers) > 0 {
@@ -472,7 +555,6 @@ func (a *IMessageAdapter) formatMessages(msgs []rawMessage, nameMap map[string]s
 
 // buildNameMap resolves handle IDs to display names using the AddressBook DB.
 func (a *IMessageAdapter) buildNameMap(db *sql.DB, msgs []rawMessage) map[string]string {
-	nameMap := make(map[string]string)
 	// Collect unique non-me handle IDs.
 	ids := make(map[string]bool)
 	for _, m := range msgs {
@@ -480,7 +562,15 @@ func (a *IMessageAdapter) buildNameMap(db *sql.DB, msgs []rawMessage) map[string
 			ids[m.handleID] = true
 		}
 	}
-	if len(ids) == 0 {
+	return a.lookupHandleNames(ids)
+}
+
+// lookupHandleNames resolves a set of handle IDs (phone numbers or emails) to
+// display names via the macOS AddressBook database. Best-effort; returns an
+// empty map on any failure.
+func (a *IMessageAdapter) lookupHandleNames(handleIDs map[string]bool) map[string]string {
+	nameMap := make(map[string]string)
+	if len(handleIDs) == 0 {
 		return nameMap
 	}
 
@@ -497,7 +587,7 @@ func (a *IMessageAdapter) buildNameMap(db *sql.DB, msgs []rawMessage) map[string
 	}
 	defer abDB.Close()
 
-	for id := range ids {
+	for id := range handleIDs {
 		var firstName, lastName sql.NullString
 		err := abDB.QueryRow(`
 			SELECT p.ZFIRSTNAME, p.ZLASTNAME
@@ -529,6 +619,73 @@ func (a *IMessageAdapter) buildNameMap(db *sql.DB, msgs []rawMessage) map[string
 		}
 	}
 	return nameMap
+}
+
+// resolveThreadDisplayNames takes a chat.db handle and a list of thread IDs
+// whose display names are unresolved (still raw chat_identifier), queries their
+// participants, resolves names via the Address Book, and returns a map of
+// threadID → "Name1, Name2, ..." (capped at 4 names).
+func (a *IMessageAdapter) resolveThreadDisplayNames(db *sql.DB, threadIDs []string) map[string]string {
+	if len(threadIDs) == 0 {
+		return nil
+	}
+
+	// Batch-query participants for all unresolved threads.
+	placeholders := make([]string, len(threadIDs))
+	args := make([]any, len(threadIDs))
+	for i, id := range threadIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := db.Query(fmt.Sprintf(`
+		SELECT c.chat_identifier, h.id
+		FROM handle h
+		JOIN chat_handle_join chj ON chj.handle_id = h.ROWID
+		JOIN chat c ON c.ROWID = chj.chat_id
+		WHERE c.chat_identifier IN (%s)`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	// threadID → list of handle IDs; also collect all unique handles.
+	threadHandles := make(map[string][]string)
+	allHandles := make(map[string]bool)
+	for rows.Next() {
+		var chatID, handleID string
+		if err := rows.Scan(&chatID, &handleID); err != nil {
+			continue
+		}
+		threadHandles[chatID] = append(threadHandles[chatID], handleID)
+		allHandles[handleID] = true
+	}
+
+	// Resolve all handles to names in one pass.
+	nameMap := a.lookupHandleNames(allHandles)
+
+	// Build display name per thread.
+	result := make(map[string]string, len(threadIDs))
+	for _, tid := range threadIDs {
+		handles := threadHandles[tid]
+		if len(handles) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(handles))
+		for _, h := range handles {
+			if n, ok := nameMap[h]; ok {
+				names = append(names, n)
+			} else {
+				names = append(names, h)
+			}
+		}
+		const maxNames = 4
+		if len(names) > maxNames {
+			result[tid] = strings.Join(names[:maxNames], ", ") + fmt.Sprintf(" + %d more", len(names)-maxNames)
+		} else {
+			result[tid] = strings.Join(names, ", ")
+		}
+	}
+	return result
 }
 
 // resolveContactIdentifiers finds phone/email handles in chat.db matching a contact name.

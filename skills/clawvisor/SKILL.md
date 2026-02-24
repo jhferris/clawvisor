@@ -240,7 +240,7 @@ return the outcome if it has already been resolved.
 | `search_messages` | `query`, `contact` (opt), `days_back` (opt) | Search messages by content/sender |
 | `list_threads` | `max_results` (opt) | List recent conversation threads |
 | `get_thread` | `contact` or `thread_id`, `days_back` (opt) | Get messages from a conversation |
-| `send_message` | `to`, `text` | Send an iMessage (always requires approval) |
+| `send_message` | `to`, `text` (or `body`) | Send an iMessage (always requires approval) |
 
 **Note:** Only available on macOS with Messages.app configured. Requires Full Disk Access permission in System Settings → Privacy & Security. `send_message` always routes to approval regardless of policy.
 
