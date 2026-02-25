@@ -102,7 +102,11 @@ func (s *Server) routes() http.Handler {
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth, s.magicStore, baseURL)
-	healthHandler := handlers.NewHealthHandler(s.store, s.vault)
+	authMode := "password"
+	if s.magicStore != nil {
+		authMode = "magic_link"
+	}
+	healthHandler := handlers.NewHealthHandler(s.store, s.vault, authMode)
 	restrictionsHandler := handlers.NewRestrictionsHandler(s.store)
 	agentsHandler := handlers.NewAgentsHandler(s.store)
 	auditHandler := handlers.NewAuditHandler(s.store)
@@ -141,6 +145,7 @@ func (s *Server) routes() http.Handler {
 	// Health (no auth)
 	mux.HandleFunc("GET /health", healthHandler.Health)
 	mux.HandleFunc("GET /ready", healthHandler.Ready)
+	mux.HandleFunc("GET /api/config/public", healthHandler.ConfigPublic)
 
 	// Auth (no auth required)
 	mux.HandleFunc("POST /api/auth/register", authHandler.Register)

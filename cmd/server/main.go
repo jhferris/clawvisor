@@ -154,8 +154,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	// ── Magic link auth (local mode) ────────────────────────────────────────
+	// Auto-detect: magic_link when local, password otherwise.
+	// Explicit AUTH_MODE / config.yaml auth_mode overrides auto-detection.
 	var magicStore *auth.MagicTokenStore
-	if cfg.Server.IsLocal() {
+	useMagicLink := cfg.Server.IsLocal()
+	if cfg.Server.AuthMode == "password" {
+		useMagicLink = false
+	} else if cfg.Server.AuthMode == "magic_link" {
+		useMagicLink = true
+	}
+	if useMagicLink {
 		magicStore = auth.NewMagicTokenStore()
 
 		// Ensure a default local user exists.

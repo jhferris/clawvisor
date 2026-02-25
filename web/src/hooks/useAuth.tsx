@@ -7,6 +7,7 @@ interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
+  authMode: 'magic_link' | 'password' | null
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [authMode, setAuthMode] = useState<'magic_link' | 'password' | null>(null)
   // Prevents React StrictMode's intentional double-invoke from burning the
   // single-use refresh token twice on the initial session restore.
   const didInit = useRef(false)
@@ -26,23 +28,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (didInit.current) return
     didInit.current = true
 
+    // Fetch auth mode and refresh token in parallel.
+    const configPromise = api.config.public()
+      .then((cfg) => setAuthMode(cfg.auth_mode))
+      .catch(() => {}) // default stays null → treated like password mode
+
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
-    if (!storedRefresh) {
-      setIsLoading(false)
-      return
-    }
-    api.auth
-      .refresh(storedRefresh)
-      .then((resp) => {
-        setAccessToken(resp.access_token)
-        localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
-        setUser(resp.user)
-      })
-      .catch(() => {
-        localStorage.removeItem(REFRESH_TOKEN_KEY)
-        setAccessToken(null)
-      })
-      .finally(() => setIsLoading(false))
+    const authPromise = storedRefresh
+      ? api.auth
+          .refresh(storedRefresh)
+          .then((resp) => {
+            setAccessToken(resp.access_token)
+            localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
+            setUser(resp.user)
+          })
+          .catch(() => {
+            localStorage.removeItem(REFRESH_TOKEN_KEY)
+            setAccessToken(null)
+          })
+      : Promise.resolve()
+
+    Promise.all([configPromise, authPromise]).finally(() => setIsLoading(false))
   }, [])
 
   // Register a refresh callback so the API client can silently handle 401s on
@@ -91,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, authMode, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

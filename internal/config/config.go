@@ -30,7 +30,8 @@ type ServerConfig struct {
 	Port        int    `yaml:"port"`
 	Host        string `yaml:"host"`
 	FrontendDir string `yaml:"frontend_dir"`
-	PublicURL   string `yaml:"public_url"` // e.g. "http://192.168.4.247:5173" — used in Telegram notification links
+	PublicURL   string `yaml:"public_url"`  // e.g. "http://192.168.4.247:5173" — used in Telegram notification links
+	AuthMode    string `yaml:"auth_mode"`   // "magic_link", "password", or "" (auto-detect from IsLocal)
 }
 
 type DatabaseConfig struct {
@@ -200,6 +201,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("PUBLIC_URL"); v != "" {
 		cfg.Server.PublicURL = v
+	}
+	if v := os.Getenv("AUTH_MODE"); v != "" {
+		cfg.Server.AuthMode = v
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
 		cfg.Google.ClientID = v

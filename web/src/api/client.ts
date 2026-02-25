@@ -320,6 +320,9 @@ export const api = {
       post<NotificationConfig>(
         `/api/notifications/telegram/pair/${pairingId}/confirm`, { code }),
   },
+  config: {
+    public: () => get<{ auth_mode: 'magic_link' | 'password' }>('/api/config/public'),
+  },
   tasks: {
     list: () => get<{ tasks: Task[]; total: number }>('/api/tasks'),
     approve: (id: string) =>
