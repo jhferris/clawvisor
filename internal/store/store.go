@@ -216,6 +216,7 @@ type AuditFilter struct {
 	Service    string // filter by service
 	Outcome    string // filter by outcome
 	DataOrigin string // filter by data_origin
+	TaskID     string // filter by task_id
 	Limit      int    // 0 → default (50)
 	Offset     int
 }

@@ -34,6 +34,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		Service:    q.Get("service"),
 		Outcome:    q.Get("outcome"),
 		DataOrigin: q.Get("data_origin"),
+		TaskID:     q.Get("task_id"),
 		Limit:      parseIntQuery(q.Get("limit"), 50),
 		Offset:     parseIntQuery(q.Get("offset"), 0),
 	}

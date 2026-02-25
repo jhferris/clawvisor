@@ -158,6 +158,7 @@ export interface AuditEntry {
   user_id: string
   agent_id?: string
   request_id: string
+  task_id?: string
   timestamp: string
   service: string
   action: string
@@ -179,6 +180,7 @@ export interface AuditEntry {
 export interface AuditFilter {
   service?: string
   outcome?: string
+  task_id?: string
   limit?: number
   offset?: number
 }

@@ -570,6 +570,10 @@ func (s *Store) ListAuditEntries(ctx context.Context, userID string, filter stor
 		where += " AND data_origin = ?"
 		args = append(args, filter.DataOrigin)
 	}
+	if filter.TaskID != "" {
+		where += " AND task_id = ?"
+		args = append(args, filter.TaskID)
+	}
 
 	var total int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_log "+where, args...).Scan(&total); err != nil {

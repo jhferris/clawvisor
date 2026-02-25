@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, type Task, type TaskAction, type Agent } from '../api/client'
-import { formatDistanceToNow, differenceInSeconds } from 'date-fns'
-import { serviceName, actionName } from '../lib/services'
+import { api, type Task, type TaskAction, type Agent, type AuditEntry } from '../api/client'
+import { formatDistanceToNow, differenceInSeconds, format } from 'date-fns'
+import { serviceName, actionName, serviceBrand, formatServiceAction } from '../lib/services'
 
 const STATUS_STYLES: Record<string, string> = {
   pending_approval: 'bg-orange-100 text-orange-800',
@@ -88,9 +88,19 @@ function LifetimeBadge({ lifetime }: { lifetime?: string }) {
   )
 }
 
+const OUTCOME_STYLE: Record<string, string> = {
+  executed: 'bg-green-100 text-green-800',
+  blocked: 'bg-red-100 text-red-800',
+  pending: 'bg-yellow-100 text-yellow-800',
+  denied: 'bg-gray-100 text-gray-600',
+  error: 'bg-red-100 text-red-700',
+  timeout: 'bg-gray-100 text-gray-500',
+}
+
 function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
   const qc = useQueryClient()
   const [result, setResult] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   const approveMut = useMutation({
     mutationFn: () => api.tasks.approve(task.id),
@@ -132,15 +142,28 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
     },
   })
 
+  const { data: auditData, isLoading: auditLoading } = useQuery({
+    queryKey: ['audit', { task_id: task.id }],
+    queryFn: () => api.audit.list({ task_id: task.id, limit: 50 }),
+    enabled: expanded,
+  })
+
   const isPending = approveMut.isPending || denyMut.isPending || expandApproveMut.isPending || expandDenyMut.isPending || revokeMut.isPending
   const needsApproval = task.status === 'pending_approval'
   const needsExpansion = task.status === 'pending_scope_expansion'
   const isStanding = task.lifetime === 'standing'
 
+  const auditEntries = auditData?.entries ?? []
+
   return (
-    <div className={`border rounded-lg p-5 bg-white space-y-3 ${
+    <div className={`border rounded-lg bg-white ${
       needsApproval || needsExpansion ? 'border-orange-200' : ''
     }`}>
+      {/* Clickable header */}
+      <div
+        className="p-5 space-y-3 cursor-pointer"
+        onClick={() => setExpanded(e => !e)}
+      >
       {/* Header — purpose as hero */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -160,9 +183,12 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           {task.status === 'active' && isStanding && (
             <span className="text-xs text-purple-600 font-medium">No expiry</span>
           )}
-          {task.request_count > 0 && (
-            <div className="text-xs text-gray-400">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</div>
-          )}
+          <div className="flex items-center gap-2 justify-end">
+            {task.request_count > 0 && (
+              <span className="text-xs text-gray-400">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
+            )}
+            <span className="text-xs text-gray-300">{expanded ? '▲' : '▼'}</span>
+          </div>
         </div>
       </div>
 
@@ -186,15 +212,18 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           )}
         </div>
       )}
+      </div>{/* end clickable area */}
 
       {/* Result message */}
       {result && (
-        <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+        <div className="px-5 pb-3">
+          <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+        </div>
       )}
 
       {/* Action buttons */}
       {!result && needsApproval && (
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 px-5 pb-4">
           <button
             onClick={() => approveMut.mutate()}
             disabled={isPending}
@@ -213,7 +242,7 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
       )}
 
       {!result && needsExpansion && (
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 px-5 pb-4">
           <button
             onClick={() => expandApproveMut.mutate()}
             disabled={isPending}
@@ -233,7 +262,7 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
 
       {/* Revoke button for any active task */}
       {!result && task.status === 'active' && (
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 px-5 pb-4">
           <button
             onClick={() => revokeMut.mutate()}
             disabled={isPending}
@@ -243,7 +272,97 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           </button>
         </div>
       )}
+
+      {/* Expanded audit entries */}
+      {expanded && (
+        <div className="border-t px-5 py-4 space-y-2">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</div>
+          {auditLoading && <div className="text-xs text-gray-400">Loading...</div>}
+          {!auditLoading && auditEntries.length === 0 && (
+            <div className="text-xs text-gray-400">No actions recorded yet.</div>
+          )}
+          {auditEntries.length > 0 && (
+            <div className="bg-gray-50 border rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-100 text-xs text-gray-500 font-medium">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">Time</th>
+                    <th className="px-3 py-1.5 text-left">Service</th>
+                    <th className="px-3 py-1.5 text-left">Action</th>
+                    <th className="px-3 py-1.5 text-left">Outcome</th>
+                    <th className="px-3 py-1.5 text-left">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditEntries.map(e => (
+                    <TaskAuditRow key={e.id} entry={e} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
+  )
+}
+
+function TaskAuditRow({ entry }: { entry: AuditEntry }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <>
+      <tr
+        className="border-t hover:bg-white cursor-pointer text-xs"
+        onClick={ev => { ev.stopPropagation(); setExpanded(e => !e) }}
+      >
+        <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
+          {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
+        </td>
+        <td className="px-3 py-1.5">
+          <span className="inline-flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${serviceBrand(entry.service).dot}`} />
+            {serviceName(entry.service)}
+          </span>
+        </td>
+        <td className="px-3 py-1.5">{actionName(entry.action)}</td>
+        <td className="px-3 py-1.5">
+          <span className={`inline-block px-1.5 py-0.5 rounded-full text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-gray-100 text-gray-600'}`}>
+            {entry.outcome}
+          </span>
+        </td>
+        <td className="px-3 py-1.5 text-gray-400">{entry.duration_ms}ms</td>
+      </tr>
+      {expanded && (
+        <tr className="border-t bg-white">
+          <td colSpan={5} className="px-3 py-2">
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <div className="text-gray-500 font-medium mb-1">
+                  {formatServiceAction(entry.service, entry.action)}
+                </div>
+                <pre className="bg-gray-50 border rounded p-2 overflow-auto max-h-32 text-gray-700 text-[11px]">
+                  {JSON.stringify(entry.params_safe, null, 2)}
+                </pre>
+              </div>
+              <div className="space-y-1.5">
+                {entry.reason && (
+                  <div className="bg-blue-50 rounded p-1.5">
+                    <div className="text-blue-600 font-medium">Reason</div>
+                    <div className="text-gray-700">{entry.reason}</div>
+                  </div>
+                )}
+                {entry.error_msg && (
+                  <div><span className="text-gray-500">Error:</span> <span className="text-red-600">{entry.error_msg}</span></div>
+                )}
+                {entry.safety_flagged && (
+                  <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
