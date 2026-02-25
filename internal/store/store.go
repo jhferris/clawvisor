@@ -206,7 +206,6 @@ type PendingApproval struct {
 	AuditID       string          `json:"audit_id"`
 	RequestBlob   json.RawMessage `json:"request_blob"`
 	CallbackURL   *string         `json:"callback_url,omitempty"`
-	TelegramMsgID *string         `json:"telegram_msg_id,omitempty"`
 	ExpiresAt     time.Time       `json:"expires_at"`
 	CreatedAt     time.Time       `json:"created_at"`
 }

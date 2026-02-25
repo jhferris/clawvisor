@@ -110,6 +110,12 @@ func (n *Notifier) pollForCallbacks(ctx context.Context, ps *pollingSession) {
 func (n *Notifier) handleCallbackQuery(ctx context.Context, ps *pollingSession, cq *callbackQuery) {
 	logger := slog.Default()
 
+	// Verify the tap came from the expected chat.
+	if cq.From.ID != 0 && fmt.Sprintf("%d", cq.From.ID) != ps.chatID {
+		n.answerCallbackQuery(ctx, ps.botToken, cq.ID, "Not authorized.")
+		return
+	}
+
 	// Parse callback_data: "a:<shortID>" or "d:<shortID>"
 	data := cq.Data
 	if len(data) < 3 || data[1] != ':' {

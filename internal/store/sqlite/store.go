@@ -879,10 +879,10 @@ func (s *Store) SavePendingApproval(ctx context.Context, pa *store.PendingApprov
 		pa.ID = uuid.New().String()
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO pending_approvals (id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at)
-		VALUES (?,?,?,?,?,?,?,?)
+		INSERT INTO pending_approvals (id, user_id, request_id, audit_id, request_blob, callback_url, expires_at)
+		VALUES (?,?,?,?,?,?,?)
 	`, pa.ID, pa.UserID, pa.RequestID, pa.AuditID, string(pa.RequestBlob),
-		pa.CallbackURL, pa.TelegramMsgID, pa.ExpiresAt.UTC().Format(time.RFC3339))
+		pa.CallbackURL, pa.ExpiresAt.UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -890,11 +890,11 @@ func (s *Store) GetPendingApproval(ctx context.Context, requestID string) (*stor
 	pa := &store.PendingApproval{}
 	var requestBlob, expiresAt, createdAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, expires_at, created_at
 		FROM pending_approvals WHERE request_id = ?
 	`, requestID).Scan(
 		&pa.ID, &pa.UserID, &pa.RequestID, &pa.AuditID, &requestBlob,
-		&pa.CallbackURL, &pa.TelegramMsgID, &expiresAt, &createdAt)
+		&pa.CallbackURL, &expiresAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -915,7 +915,7 @@ func (s *Store) DeletePendingApproval(ctx context.Context, requestID string) err
 
 func (s *Store) ListPendingApprovals(ctx context.Context, userID string) ([]*store.PendingApproval, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, expires_at, created_at
 		FROM pending_approvals WHERE user_id = ? AND expires_at > datetime('now') ORDER BY created_at ASC`, userID)
 	if err != nil {
 		return nil, err
@@ -926,7 +926,7 @@ func (s *Store) ListPendingApprovals(ctx context.Context, userID string) ([]*sto
 
 func (s *Store) ListExpiredPendingApprovals(ctx context.Context) ([]*store.PendingApproval, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, telegram_msg_id, expires_at, created_at
+		SELECT id, user_id, request_id, audit_id, request_blob, callback_url, expires_at, created_at
 		FROM pending_approvals WHERE expires_at < datetime('now')`)
 	if err != nil {
 		return nil, err
@@ -942,7 +942,7 @@ func scanSQLitePendingApprovals(rows *sql.Rows) ([]*store.PendingApproval, error
 		var requestBlob, expiresAt, createdAt string
 		if err := rows.Scan(
 			&pa.ID, &pa.UserID, &pa.RequestID, &pa.AuditID, &requestBlob,
-			&pa.CallbackURL, &pa.TelegramMsgID, &expiresAt, &createdAt,
+			&pa.CallbackURL, &expiresAt, &createdAt,
 		); err != nil {
 			return nil, err
 		}
