@@ -21,6 +21,9 @@ web/dist/
 *.swp
 *.swo
 
+# Terraform (has its own git repo)
+terraform/
+
 # OS
 .DS_Store
 Thumbs.db

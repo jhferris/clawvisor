@@ -248,6 +248,12 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("GCP_PROJECT"); v != "" {
 		cfg.Vault.GCPProject = v
 	}
+	if v := os.Getenv("VAULT_BACKEND"); v != "" {
+		cfg.Vault.Backend = v
+	}
+	if v := os.Getenv("VAULT_KEY_FILE"); v != "" {
+		cfg.Vault.LocalKeyFile = v
+	}
 	if v := os.Getenv("PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
