@@ -235,7 +235,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
 				TaskPurpose: task.Purpose,
 				ExpectedUse: expectedUse,
-				Service:     serviceType,
+				Service:     req.Service,
 				Action:      req.Action,
 				Params:      req.Params,
 				Reason:      req.Reason,

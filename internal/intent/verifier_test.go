@@ -75,6 +75,24 @@ func TestBuildVerificationUserMessage_WithExpectedUse(t *testing.T) {
 	}
 }
 
+func TestBuildVerificationUserMessage_MultiAccountAlias(t *testing.T) {
+	req := VerifyRequest{
+		TaskPurpose: "Check both accounts' calendars",
+		ExpectedUse: "List upcoming events on personal calendar",
+		Service:     "google.calendar:personal",
+		Action:      "list_events",
+		Params:      map[string]any{"from": "2026-02-25", "to": "2026-03-04", "max_results": 5},
+		Reason:      "Listing upcoming events on the personal calendar",
+	}
+	msg := buildVerificationUserMessage(req)
+	if !contains(msg, "google.calendar:personal") {
+		t.Error("expected full service ID with alias in message")
+	}
+	if !contains(msg, "list_events") {
+		t.Error("expected action in message")
+	}
+}
+
 func TestBuildVerificationUserMessage_NoExpectedUse(t *testing.T) {
 	req := VerifyRequest{
 		TaskPurpose: "Check calendar",
