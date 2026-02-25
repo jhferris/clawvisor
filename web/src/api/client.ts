@@ -174,6 +174,15 @@ export interface AuditEntry {
   context_src?: string
   duration_ms: number
   filters_applied?: unknown
+  verification?: {
+    allow: boolean
+    param_scope: string
+    reason_coherence: string
+    explanation: string
+    model: string
+    latency_ms: number
+    cached: boolean
+  }
   error_msg?: string
 }
 
@@ -215,6 +224,7 @@ export interface TaskAction {
   action: string
   auto_execute: boolean
   response_filters?: unknown[]
+  expected_use?: string
 }
 
 export interface Task {

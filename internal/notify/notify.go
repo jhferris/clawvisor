@@ -17,6 +17,7 @@ type Notifier interface {
 	SendScopeExpansionRequest(ctx context.Context, req ScopeExpansionRequest) (messageID string, err error)
 	UpdateMessage(ctx context.Context, userID, messageID, text string) error
 	SendTestMessage(ctx context.Context, userID string) error
+	SendAlert(ctx context.Context, userID, text string) error
 }
 
 // ApprovalRequest carries the data needed to ask the user to approve or deny a gateway request.

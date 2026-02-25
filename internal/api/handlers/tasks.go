@@ -286,6 +286,7 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	} else {
 		expiresAt = time.Now().UTC().Add(time.Duration(task.ExpiresInSeconds) * time.Second)
 	}
+
 	if err := h.st.UpdateTaskApproved(ctx, taskID, expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not approve task")
 		return
@@ -830,8 +831,9 @@ func (h *TasksHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // TaskScopeMatch describes whether a service/action is in a task's authorized actions.
 type TaskScopeMatch struct {
-	InScope     bool
-	AutoExecute bool
+	InScope       bool
+	AutoExecute   bool
+	MatchedAction *store.TaskAction
 }
 
 // CheckTaskScope checks if service/action is in the task's authorized actions.
@@ -842,9 +844,10 @@ func CheckTaskScope(task *store.Task, serviceType, alias, action string) TaskSco
 	if alias != "" && alias != "default" {
 		fullService = serviceType + ":" + alias
 	}
-	for _, a := range task.AuthorizedActions {
+	for i := range task.AuthorizedActions {
+		a := &task.AuthorizedActions[i]
 		if (a.Service == fullService || a.Service == serviceType) && (a.Action == action || a.Action == "*") {
-			return TaskScopeMatch{InScope: true, AutoExecute: a.AutoExecute}
+			return TaskScopeMatch{InScope: true, AutoExecute: a.AutoExecute, MatchedAction: a}
 		}
 	}
 	return TaskScopeMatch{InScope: false}

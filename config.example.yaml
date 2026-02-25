@@ -23,8 +23,8 @@ approval:
   on_timeout: "fail"       # "fail" | "skip"
 
 # ── LLM configuration ────────────────────────────────────────────────────────
-# Three independent LLM slots. Each can use a different provider/model.
-# Env overrides: CLAWVISOR_LLM_{SAFETY,FILTERS,AUTHORING}_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL}
+# Four independent LLM slots. Each can use a different provider/model.
+# Env overrides: CLAWVISOR_LLM_{SAFETY,FILTERS,VERIFICATION,AUTHORING}_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL}
 llm:
 
   # Safety checker — runs after policy evaluation on every execute path.
@@ -48,6 +48,20 @@ llm:
     api_key: ""                   # from env: CLAWVISOR_LLM_FILTERS_API_KEY
     model: claude-haiku-4-5-20251001
     timeout_seconds: 10
+
+  # Intent verification — checks that gateway request params and reason are
+  # consistent with the approved task purpose and expected_use.
+  # Recommended: fast/cheap model (haiku).
+  # Env overrides: CLAWVISOR_LLM_VERIFICATION_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL,FAIL_CLOSED}
+  verification:
+    enabled: false
+    provider: anthropic
+    endpoint: https://api.anthropic.com/v1
+    api_key: ""                   # from env: CLAWVISOR_LLM_VERIFICATION_API_KEY
+    model: claude-haiku-4-5-20251001
+    timeout_seconds: 5
+    fail_closed: false           # false = allow on LLM error; true = block on error
+    cache_ttl_seconds: 60        # cache identical verdicts for 60s
 
   # Policy authoring — generates YAML from plain-English descriptions and
   # detects semantic conflicts between policies. Used only in the dashboard.

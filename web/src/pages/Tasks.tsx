@@ -91,6 +91,7 @@ function LifetimeBadge({ lifetime }: { lifetime?: string }) {
 const OUTCOME_STYLE: Record<string, string> = {
   executed: 'bg-green-100 text-green-800',
   blocked: 'bg-red-100 text-red-800',
+  restricted: 'bg-orange-100 text-orange-800',
   pending: 'bg-yellow-100 text-yellow-800',
   denied: 'bg-gray-100 text-gray-600',
   error: 'bg-red-100 text-red-700',
@@ -218,6 +219,21 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
       {result && (
         <div className="px-5 pb-3">
           <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+        </div>
+      )}
+
+      {/* Agent-declared expected use (read-only, shown when present) */}
+      {!result && needsApproval && task.authorized_actions.some(a => a.expected_use) && (
+        <div className="px-5 pb-2 space-y-1">
+          <div className="text-xs font-medium text-gray-500">Agent-declared expected use:</div>
+          {task.authorized_actions.filter(a => a.expected_use).map(a => (
+            <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-xs">
+              <span className="text-gray-500 w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
+                {serviceName(a.service)}: {actionName(a.action)}
+              </span>
+              <span className="text-gray-700 italic">{a.expected_use}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -356,6 +372,29 @@ function TaskAuditRow({ entry }: { entry: AuditEntry }) {
                 )}
                 {entry.safety_flagged && (
                   <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                )}
+                {entry.verification && (
+                  <div className="bg-orange-50 rounded p-1.5 space-y-1">
+                    <div className="text-orange-700 font-medium">Intent Verification</div>
+                    <div className="flex gap-2 flex-wrap">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        entry.verification.param_scope === 'ok' ? 'bg-green-100 text-green-700'
+                        : entry.verification.param_scope === 'violation' ? 'bg-red-100 text-red-700'
+                        : 'bg-gray-100 text-gray-500'
+                      }`}>params: {entry.verification.param_scope}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        entry.verification.reason_coherence === 'ok' ? 'bg-green-100 text-green-700'
+                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-red-100 text-red-700'
+                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-gray-100 text-gray-500'
+                      }`}>reason: {entry.verification.reason_coherence}</span>
+                      {entry.verification.cached && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-600">cached</span>
+                      )}
+                    </div>
+                    <div className="text-gray-600 text-[11px]">{entry.verification.explanation}</div>
+                    <div className="text-gray-400 text-[10px]">{entry.verification.model} · {entry.verification.latency_ms}ms</div>
+                  </div>
                 )}
               </div>
             </div>

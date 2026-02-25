@@ -14,6 +14,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
 	"github.com/ericlevine/clawvisor/internal/auth"
 	"github.com/ericlevine/clawvisor/internal/config"
+	"github.com/ericlevine/clawvisor/internal/intent"
 	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/safety"
 	"github.com/ericlevine/clawvisor/internal/store"
@@ -111,9 +112,15 @@ func (s *Server) routes() http.Handler {
 		pairer = p
 	}
 	notificationsHandler := handlers.NewNotificationsHandler(s.store, s.notifier, pairer)
+	// Construct intent verifier (noop if disabled).
+	var verifier intent.Verifier = intent.NoopVerifier{}
+	if s.llmCfg.Verification.Enabled {
+		verifier = intent.NewLLMVerifier(s.llmCfg.Verification)
+	}
+
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg,
-		s.notifier, s.safety, s.llmCfg, *s.cfg, s.logger, baseURL,
+		s.notifier, s.safety, verifier, s.llmCfg, *s.cfg, s.logger, baseURL,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)

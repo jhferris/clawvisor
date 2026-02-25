@@ -167,15 +167,17 @@ type AuditEntry struct {
 	ContextSrc     *string         `json:"context_src,omitempty"`
 	DurationMS     int             `json:"duration_ms"`
 	FiltersApplied json.RawMessage `json:"filters_applied,omitempty"`
+	Verification   json.RawMessage `json:"verification,omitempty"`
 	ErrorMsg       *string         `json:"error_msg,omitempty"`
 }
 
 // TaskAction represents a single authorized action within a task scope.
 type TaskAction struct {
-	Service        string          `json:"service"`
-	Action         string          `json:"action"`          // specific action or "*"
-	AutoExecute    bool            `json:"auto_execute"`
+	Service         string          `json:"service"`
+	Action          string          `json:"action"`          // specific action or "*"
+	AutoExecute     bool            `json:"auto_execute"`
 	ResponseFilters json.RawMessage `json:"response_filters,omitempty"`
+	ExpectedUse     string          `json:"expected_use,omitempty"`
 }
 
 // Task represents a task-scoped authorization.

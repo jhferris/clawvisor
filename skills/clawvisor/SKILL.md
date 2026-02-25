@@ -119,12 +119,23 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
   -d '{
     "purpose": "Review last 30 iMessage threads and classify reply status",
     "authorized_actions": [
-      {"service": "apple.imessage", "action": "list_threads", "auto_execute": true},
-      {"service": "apple.imessage", "action": "get_thread", "auto_execute": true}
+      {"service": "apple.imessage", "action": "list_threads", "auto_execute": true, "expected_use": "List recent iMessage threads to find ones needing replies"},
+      {"service": "apple.imessage", "action": "get_thread", "auto_execute": true, "expected_use": "Read individual thread messages to classify reply status"}
     ],
     "expires_in_seconds": 1800
   }'
 ```
+
+#### `expected_use` — declare your intent per action
+
+Each action in `authorized_actions` can include an `expected_use` string that
+describes how you intend to use that action. This is shown to the user when
+they review the task for approval, and — when intent verification is enabled —
+Clawvisor checks that your actual request parameters and per-request `reason`
+are consistent with your declared `expected_use` and the task's `purpose`.
+
+Always provide `expected_use` when you can. Be specific: "Fetch today's calendar
+events" is better than "Use the calendar API."
 
 All tasks start as `pending_approval` — the user is notified to approve the task
 scope before it becomes active.
@@ -141,8 +152,8 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
     "purpose": "Ongoing email triage",
     "lifetime": "standing",
     "authorized_actions": [
-      {"service": "google.gmail", "action": "list_messages", "auto_execute": true},
-      {"service": "google.gmail", "action": "get_message", "auto_execute": true}
+      {"service": "google.gmail", "action": "list_messages", "auto_execute": true, "expected_use": "List recent emails to identify ones needing attention"},
+      {"service": "google.gmail", "action": "get_message", "auto_execute": true, "expected_use": "Read individual emails to triage and summarize"}
     ]
   }'
 ```
@@ -211,6 +222,7 @@ Every response has a `status` field. Handle each case as follows:
 |---|---|---|
 | `executed` | Action completed successfully | Use `result.summary` and `result.data`. Report to the user. |
 | `blocked` | A restriction blocks this action | Tell the user: "I wasn't allowed to [action] — [reason]." Do **not** retry or attempt a workaround. |
+| `restricted` | Intent verification rejected the request | Your params or reason were inconsistent with the task's approved purpose. Tell the user: "My request was restricted — [reason from response]." Adjust your params or reason and retry with a new `request_id`. |
 | `pending` | Action is awaiting human approval | Tell the user: "I've requested approval for [action]. Check the Approvals panel in the Clawvisor dashboard to approve or deny it." Do **not** retry — wait for the callback. |
 | `pending_activation` | Service not yet connected | The response includes an `activate_url` field. Tell the user: "[Service] isn't activated yet. Activate it here: [activate_url]" so they can connect it directly. |
 | `error` (code `SERVICE_NOT_CONFIGURED`) | Same as `pending_activation` | Same as above — surface the `activate_url` from the response. |
@@ -273,6 +285,12 @@ The action was approved but the adapter failed (e.g. invalid params, upstream
 API error). The `error` field in the response has the details. Report it to
 the user — do not silently retry.
 
+**"My request was `restricted`"**
+Intent verification determined your request parameters or reason don't match
+the task's approved purpose. Review the `reason` in the response — it explains
+what was inconsistent. Adjust your params or provide a more specific reason,
+then retry with a new `request_id`.
+
 **"I was blocked and I don't know why"**
 The `reason` field in the response explains the restriction that matched. Pass
 it to the user verbatim — don't guess or try to work around it.
@@ -284,6 +302,7 @@ it to the user verbatim — don't guess or try to work around it.
 | Condition | Gateway `status` |
 |---|---|
 | Restriction matches | `blocked` |
-| Task in scope + `auto_execute` | `executed` |
+| Task in scope + `auto_execute` + verification passes | `executed` |
+| Task in scope + `auto_execute` + verification fails | `restricted` |
 | Task in scope + no `auto_execute` | `pending` (per-request approval) |
 | No task | `pending` (per-request approval) |

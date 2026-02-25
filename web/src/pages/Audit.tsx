@@ -4,11 +4,12 @@ import { api, type AuditEntry } from '../api/client'
 import { formatDistanceToNow, format } from 'date-fns'
 import { serviceName, actionName, serviceBrand, formatServiceAction } from '../lib/services'
 
-const OUTCOMES = ['', 'executed', 'blocked', 'pending', 'denied', 'error', 'timeout']
+const OUTCOMES = ['', 'executed', 'blocked', 'restricted', 'pending', 'denied', 'error', 'timeout']
 
 const OUTCOME_STYLE: Record<string, string> = {
   executed: 'bg-green-100 text-green-800',
   blocked: 'bg-red-100 text-red-800',
+  restricted: 'bg-orange-100 text-orange-800',
   pending: 'bg-yellow-100 text-yellow-800',
   denied: 'bg-gray-100 text-gray-600',
   error: 'bg-red-100 text-red-700',
@@ -42,7 +43,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
         </td>
         <td className="px-4 py-2 text-sm">{actionName(entry.action)}</td>
         <td className="px-4 py-2">
-          <span className={`text-xs px-1.5 py-0.5 rounded ${entry.decision === 'block' ? 'bg-red-50 text-red-600' : entry.decision === 'approve' ? 'bg-yellow-50 text-yellow-700' : 'bg-green-50 text-green-700'}`}>
+          <span className={`text-xs px-1.5 py-0.5 rounded ${entry.decision === 'block' ? 'bg-red-50 text-red-600' : entry.decision === 'approve' ? 'bg-yellow-50 text-yellow-700' : entry.decision === 'verify' ? 'bg-purple-50 text-purple-600' : 'bg-green-50 text-green-700'}`}>
             {entry.decision}
           </span>
         </td>
@@ -80,6 +81,32 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
                 )}
                 {entry.safety_flagged && (
                   <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                )}
+                {entry.verification && (
+                  <div className="bg-purple-50 rounded p-2 space-y-1">
+                    <div className="text-purple-700 font-medium mb-0.5">Intent verification</div>
+                    <div className="flex gap-2 flex-wrap">
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                        entry.verification.param_scope === 'ok' ? 'bg-green-100 text-green-700' :
+                        entry.verification.param_scope === 'violation' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-100 text-gray-500'
+                      }`}>
+                        params: {entry.verification.param_scope}
+                      </span>
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                        entry.verification.reason_coherence === 'ok' ? 'bg-green-100 text-green-700' :
+                        entry.verification.reason_coherence === 'incoherent' ? 'bg-red-100 text-red-700' :
+                        'bg-orange-100 text-orange-700'
+                      }`}>
+                        reason: {entry.verification.reason_coherence}
+                      </span>
+                      {entry.verification.cached && (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-500">cached</span>
+                      )}
+                    </div>
+                    <div className="text-gray-700">{entry.verification.explanation}</div>
+                    <div className="text-gray-400 text-[10px]">{entry.verification.model} &middot; {entry.verification.latency_ms}ms</div>
+                  </div>
                 )}
                 <div className="text-gray-400 font-mono">{entry.request_id}</div>
               </div>

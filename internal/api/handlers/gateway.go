@@ -19,6 +19,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/config"
 	"github.com/ericlevine/clawvisor/internal/filters"
 	"github.com/ericlevine/clawvisor/internal/gateway"
+	"github.com/ericlevine/clawvisor/internal/intent"
 	"github.com/ericlevine/clawvisor/internal/llm"
 	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/safety"
@@ -49,6 +50,7 @@ type GatewayHandler struct {
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier // may be nil if Telegram not configured
 	safety     safety.SafetyChecker
+	verifier   intent.Verifier
 	llmCfg     config.LLMConfig
 	cfg        config.Config
 	logger     *slog.Logger
@@ -61,6 +63,7 @@ func NewGatewayHandler(
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
 	safetyChecker safety.SafetyChecker,
+	verifier intent.Verifier,
 	llmCfg config.LLMConfig,
 	cfg config.Config,
 	logger *slog.Logger,
@@ -68,7 +71,8 @@ func NewGatewayHandler(
 ) *GatewayHandler {
 	return &GatewayHandler{
 		store: st, vault: v, adapterReg: adapterReg,
-		notifier: notifier, safety: safetyChecker, llmCfg: llmCfg, cfg: cfg, logger: logger, baseURL: baseURL,
+		notifier: notifier, safety: safetyChecker, verifier: verifier,
+		llmCfg: llmCfg, cfg: cfg, logger: logger, baseURL: baseURL,
 	}
 }
 
@@ -94,6 +98,10 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Service == "" || req.Action == "" {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "service and action are required")
+		return
+	}
+	if req.Reason == "" {
+		writeError(w, http.StatusBadRequest, "MISSING_REASON", "reason is required on every gateway request")
 		return
 	}
 
@@ -211,6 +219,52 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// In scope + auto_execute + not hardcoded → execute directly
 		if match.AutoExecute && !hardcoded {
 			taskIDPtr := &req.TaskID
+
+			// ── Intent verification ──────────────────────────────────────
+			var expectedUse string
+			if match.MatchedAction != nil {
+				expectedUse = match.MatchedAction.ExpectedUse
+			}
+			verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
+				TaskPurpose: task.Purpose,
+				ExpectedUse: expectedUse,
+				Service:     serviceType,
+				Action:      req.Action,
+				Params:      req.Params,
+				Reason:      req.Reason,
+				TaskID:      req.TaskID,
+			})
+			if verdict != nil && !verdict.Allow {
+				dur := int(time.Since(start).Milliseconds())
+				e := baseEntry("verify", "restricted", taskIDPtr)
+				e.DurationMS = dur
+				e.Verification = intent.MarshalVerdict(verdict)
+				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+					h.logger.Warn("audit log failed", "err", logErr)
+				}
+				// Alert on incoherent reason
+				if verdict.ReasonCoherence == "incoherent" && h.notifier != nil {
+					alertText := fmt.Sprintf(
+						"⚠️ <b>Clawvisor — Intent Alert</b>\n\n"+
+							"<b>Task:</b> %s\n"+
+							"<b>Agent reason:</b> %s\n"+
+							"<b>Verdict:</b> %s",
+						task.Purpose, req.Reason, verdict.Explanation)
+					if alertErr := h.notifier.SendAlert(ctx, agent.UserID, alertText); alertErr != nil {
+						h.logger.Warn("intent alert failed", "err", alertErr)
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"status":       "restricted",
+					"request_id":   req.RequestID,
+					"audit_id":     auditID,
+					"reason":       verdict.Explanation,
+					"verification": verdict,
+				})
+				return
+			}
+			// ── End intent verification ──────────────────────────────────
+
 			responseFilters := getTaskActionFilters(task, serviceType, serviceAlias, req.Action)
 			vKey := vaultKeyForServiceAlias(serviceType, serviceAlias)
 			result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
@@ -314,6 +368,9 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				if b, err := json.Marshal(filterRecs); err == nil {
 					e.FiltersApplied = b
 				}
+			}
+			if verdict != nil {
+				e.Verification = intent.MarshalVerdict(verdict)
 			}
 			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 				h.logger.Warn("audit log failed", "err", logErr)

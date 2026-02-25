@@ -314,6 +314,7 @@ func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 		"service":    "mock.cb-exec",
 		"action":     "run",
 		"params":     map[string]any{},
+		"reason":     "test callback",
 		"request_id": reqID,
 		"task_id":    taskID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
@@ -361,6 +362,7 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 		"service":    "mock.cb-approve",
 		"action":     "run",
 		"params":     map[string]any{},
+		"reason":     "test callback approve",
 		"request_id": reqID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
 	})
@@ -406,6 +408,7 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 		"service":    "mock.svc",
 		"action":     "run",
 		"params":     map[string]any{},
+		"reason":     "test callback deny",
 		"request_id": reqID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
 	})

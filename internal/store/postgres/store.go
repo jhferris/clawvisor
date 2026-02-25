@@ -407,12 +407,13 @@ func (s *Store) LogAudit(ctx context.Context, e *store.AuditEntry) error {
 			id, user_id, agent_id, request_id, task_id, timestamp, service, action,
 			params_safe, decision, outcome, policy_id, rule_id,
 			safety_flagged, safety_reason, reason, data_origin, context_src,
-			duration_ms, filters_applied, error_msg
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			duration_ms, filters_applied, verification, error_msg
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 	`, e.ID, e.UserID, e.AgentID, e.RequestID, e.TaskID, e.Timestamp,
 		e.Service, e.Action, []byte(paramsSafe), e.Decision, e.Outcome,
 		e.PolicyID, e.RuleID, e.SafetyFlagged, e.SafetyReason, e.Reason,
-		e.DataOrigin, e.ContextSrc, e.DurationMS, nilIfEmpty(e.FiltersApplied), e.ErrorMsg)
+		e.DataOrigin, e.ContextSrc, e.DurationMS, nilIfEmpty(e.FiltersApplied),
+		nilIfEmpty(e.Verification), e.ErrorMsg)
 	return err
 }
 
@@ -429,18 +430,18 @@ func (s *Store) UpdateAuditOutcome(ctx context.Context, id, outcome, errMsg stri
 
 func (s *Store) GetAuditEntry(ctx context.Context, id, userID string) (*store.AuditEntry, error) {
 	e := &store.AuditEntry{}
-	var paramsSafe, filtersApplied []byte
+	var paramsSafe, filtersApplied, verification []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, user_id, agent_id, request_id, task_id, timestamp, service, action,
 		       params_safe, decision, outcome, policy_id, rule_id,
 		       safety_flagged, safety_reason, reason, data_origin, context_src,
-		       duration_ms, filters_applied, error_msg
+		       duration_ms, filters_applied, verification, error_msg
 		FROM audit_log WHERE id = $1 AND user_id = $2
 	`, id, userID).Scan(
 		&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &e.TaskID, &e.Timestamp,
 		&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
 		&e.PolicyID, &e.RuleID, &e.SafetyFlagged, &e.SafetyReason, &e.Reason,
-		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg)
+		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &verification, &e.ErrorMsg)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -450,24 +451,27 @@ func (s *Store) GetAuditEntry(ctx context.Context, id, userID string) (*store.Au
 	e.ParamsSafe = json.RawMessage(paramsSafe)
 	if filtersApplied != nil {
 		e.FiltersApplied = json.RawMessage(filtersApplied)
+	}
+	if verification != nil {
+		e.Verification = json.RawMessage(verification)
 	}
 	return e, nil
 }
 
 func (s *Store) GetAuditEntryByRequestID(ctx context.Context, requestID, userID string) (*store.AuditEntry, error) {
 	e := &store.AuditEntry{}
-	var paramsSafe, filtersApplied []byte
+	var paramsSafe, filtersApplied, verification []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, user_id, agent_id, request_id, task_id, timestamp, service, action,
 		       params_safe, decision, outcome, policy_id, rule_id,
 		       safety_flagged, safety_reason, reason, data_origin, context_src,
-		       duration_ms, filters_applied, error_msg
+		       duration_ms, filters_applied, verification, error_msg
 		FROM audit_log WHERE request_id = $1 AND user_id = $2
 	`, requestID, userID).Scan(
 		&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &e.TaskID, &e.Timestamp,
 		&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
 		&e.PolicyID, &e.RuleID, &e.SafetyFlagged, &e.SafetyReason, &e.Reason,
-		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg)
+		&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &verification, &e.ErrorMsg)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
@@ -477,6 +481,9 @@ func (s *Store) GetAuditEntryByRequestID(ctx context.Context, requestID, userID 
 	e.ParamsSafe = json.RawMessage(paramsSafe)
 	if filtersApplied != nil {
 		e.FiltersApplied = json.RawMessage(filtersApplied)
+	}
+	if verification != nil {
+		e.Verification = json.RawMessage(verification)
 	}
 	return e, nil
 }
@@ -520,7 +527,7 @@ func (s *Store) ListAuditEntries(ctx context.Context, userID string, filter stor
 	dataQuery := `SELECT id, user_id, agent_id, request_id, task_id, timestamp, service, action,
 		params_safe, decision, outcome, policy_id, rule_id,
 		safety_flagged, safety_reason, reason, data_origin, context_src,
-		duration_ms, filters_applied, error_msg
+		duration_ms, filters_applied, verification, error_msg
 		FROM audit_log ` + where +
 		fmt.Sprintf(" ORDER BY timestamp DESC LIMIT $%d OFFSET $%d", i, i+1)
 	args = append(args, limit, filter.Offset)
@@ -839,18 +846,21 @@ func scanAuditEntries(rows pgx.Rows) ([]*store.AuditEntry, error) {
 	var entries []*store.AuditEntry
 	for rows.Next() {
 		e := &store.AuditEntry{}
-		var paramsSafe, filtersApplied []byte
+		var paramsSafe, filtersApplied, verification []byte
 		if err := rows.Scan(
 			&e.ID, &e.UserID, &e.AgentID, &e.RequestID, &e.TaskID, &e.Timestamp,
 			&e.Service, &e.Action, &paramsSafe, &e.Decision, &e.Outcome,
 			&e.PolicyID, &e.RuleID, &e.SafetyFlagged, &e.SafetyReason, &e.Reason,
-			&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &e.ErrorMsg,
+			&e.DataOrigin, &e.ContextSrc, &e.DurationMS, &filtersApplied, &verification, &e.ErrorMsg,
 		); err != nil {
 			return nil, err
 		}
 		e.ParamsSafe = json.RawMessage(paramsSafe)
 		if filtersApplied != nil {
 			e.FiltersApplied = json.RawMessage(filtersApplied)
+		}
+		if verification != nil {
+			e.Verification = json.RawMessage(verification)
 		}
 		entries = append(entries, e)
 	}

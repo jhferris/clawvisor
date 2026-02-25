@@ -68,11 +68,19 @@ type LLMProviderConfig struct {
 	SkipReadonly   bool   `yaml:"skip_readonly"` // Safety only: skip check for read actions
 }
 
+// VerificationConfig holds settings for intent verification.
+type VerificationConfig struct {
+	LLMProviderConfig `yaml:",inline"`
+	FailClosed        bool `yaml:"fail_closed"`
+	CacheTTLSeconds   int  `yaml:"cache_ttl_seconds"`
+}
+
 // LLMConfig groups all LLM provider configurations.
 type LLMConfig struct {
-	Safety   LLMProviderConfig `yaml:"safety"`   // Post-policy safety checker (runtime)
-	Filters  LLMProviderConfig `yaml:"filters"`  // Semantic response filters (runtime)
-	Authoring LLMProviderConfig `yaml:"authoring"` // Policy authoring assistant (interactive only)
+	Safety       LLMProviderConfig `yaml:"safety"`       // Post-policy safety checker (runtime)
+	Filters      LLMProviderConfig `yaml:"filters"`      // Semantic response filters (runtime)
+	Authoring    LLMProviderConfig `yaml:"authoring"`    // Policy authoring assistant (interactive only)
+	Verification VerificationConfig `yaml:"verification"` // Intent verification (runtime)
 }
 
 type MCPConfig struct {
@@ -134,6 +142,17 @@ func Default() *Config {
 				Endpoint:       "https://api.anthropic.com/v1",
 				Model:          "claude-haiku-4-5-20251001",
 				TimeoutSeconds: 30,
+			},
+			Verification: VerificationConfig{
+				LLMProviderConfig: LLMProviderConfig{
+					Enabled:        false,
+					Provider:       "anthropic",
+					Endpoint:       "https://api.anthropic.com/v1",
+					Model:          "claude-haiku-4-5-20251001",
+					TimeoutSeconds: 5,
+				},
+				FailClosed:      false,
+				CacheTTLSeconds: 60,
 			},
 		},
 		MCP: MCPConfig{
@@ -228,6 +247,26 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("CLAWVISOR_LLM_FILTERS_MODEL"); v != "" {
 		cfg.LLM.Filters.Model = v
+	}
+
+	// LLM Verification overrides
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_ENABLED"); v != "" {
+		cfg.LLM.Verification.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_PROVIDER"); v != "" {
+		cfg.LLM.Verification.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_ENDPOINT"); v != "" {
+		cfg.LLM.Verification.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_API_KEY"); v != "" {
+		cfg.LLM.Verification.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_MODEL"); v != "" {
+		cfg.LLM.Verification.Model = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_FAIL_CLOSED"); v != "" {
+		cfg.LLM.Verification.FailClosed = v == "true" || v == "1"
 	}
 
 	// LLM Authoring overrides

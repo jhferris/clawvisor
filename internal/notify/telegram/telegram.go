@@ -206,6 +206,17 @@ func (n *Notifier) UpdateMessage(ctx context.Context, userID, messageID, text st
 	return n.editMessage(ctx, botToken, chatID, messageID, text)
 }
 
+func (n *Notifier) SendAlert(ctx context.Context, userID, text string) error {
+	botToken, chatID, err := n.userConfig(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if _, err := n.sendMessage(ctx, botToken, chatID, text, nil); err != nil {
+		return fmt.Errorf("telegram: send alert: %w", err)
+	}
+	return nil
+}
+
 func (n *Notifier) SendTestMessage(ctx context.Context, userID string) error {
 	botToken, chatID, err := n.userConfig(ctx, userID)
 	if err != nil {
