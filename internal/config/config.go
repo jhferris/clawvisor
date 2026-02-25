@@ -17,8 +17,8 @@ type Config struct {
 	Approval ApprovalConfig `yaml:"approval"`
 	Task     TaskConfig     `yaml:"task"`
 	LLM      LLMConfig      `yaml:"llm"`
-	MCP    MCPConfig    `yaml:"mcp"`
-	Google GoogleConfig `yaml:"google"`
+	MCP      MCPConfig      `yaml:"mcp"`
+	Services ServicesConfig `yaml:"services"`
 }
 
 // TaskConfig holds settings for task-scoped authorization.
@@ -89,11 +89,28 @@ type MCPConfig struct {
 	ApprovalTimeout int `yaml:"approval_timeout"` // Reserved for Phase 8: MCP tool call approval timeout in seconds (default 240s)
 }
 
-// GoogleConfig holds OAuth2 credentials for all Google adapters.
-type GoogleConfig struct {
+// ServicesConfig groups all adapter/service-specific settings.
+type ServicesConfig struct {
+	Google   GoogleServicesConfig   `yaml:"google"`
+	GitHub   GitHubServicesConfig   `yaml:"github"`
+	IMessage IMessageServicesConfig `yaml:"imessage"`
+}
+
+// GoogleServicesConfig holds OAuth2 credentials for all Google adapters.
+type GoogleServicesConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
 	RedirectURL  string `yaml:"redirect_url"`
+}
+
+// GitHubServicesConfig holds settings for the GitHub adapter.
+type GitHubServicesConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// IMessageServicesConfig holds settings for the iMessage adapter.
+type IMessageServicesConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 func Default() *Config {
@@ -160,6 +177,10 @@ func Default() *Config {
 		MCP: MCPConfig{
 			ApprovalTimeout: 240,
 		},
+		Services: ServicesConfig{
+			GitHub:   GitHubServicesConfig{Enabled: true},
+			IMessage: IMessageServicesConfig{Enabled: true},
+		},
 	}
 }
 
@@ -207,13 +228,19 @@ func Load(path string) (*Config, error) {
 		cfg.Server.AuthMode = v
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
-		cfg.Google.ClientID = v
+		cfg.Services.Google.ClientID = v
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
-		cfg.Google.ClientSecret = v
+		cfg.Services.Google.ClientSecret = v
 	}
 	if v := os.Getenv("GOOGLE_REDIRECT_URL"); v != "" {
-		cfg.Google.RedirectURL = v
+		cfg.Services.Google.RedirectURL = v
+	}
+	if v := os.Getenv("GITHUB_ENABLED"); v != "" {
+		cfg.Services.GitHub.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("IMESSAGE_ENABLED"); v != "" {
+		cfg.Services.IMessage.Enabled = v == "true" || v == "1"
 	}
 
 	// LLM Safety overrides

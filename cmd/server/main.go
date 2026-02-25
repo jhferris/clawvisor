@@ -104,8 +104,8 @@ func run(logger *slog.Logger) error {
 
 	// ── Adapter Registry ─────────────────────────────────────────────────────
 	adapterReg := adapters.NewRegistry()
-	if cfg.Google.ClientID != "" {
-		redirectURL := cfg.Google.RedirectURL
+	if cfg.Services.Google.ClientID != "" {
+		redirectURL := cfg.Services.Google.RedirectURL
 		if redirectURL == "" {
 			// Normalize the host for the OAuth redirect URL. When the server binds to
 			// 0.0.0.0 or 127.0.0.1, use "localhost" instead — Google Cloud Console
@@ -118,26 +118,34 @@ func run(logger *slog.Logger) error {
 			redirectURL = fmt.Sprintf("http://%s:%d/api/oauth/callback", host, cfg.Server.Port)
 		}
 		// Register all Google adapters — they share the same OAuth credentials (vault key "google").
-		adapterReg.Register(gmailadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
-		adapterReg.Register(calendaradapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
-		adapterReg.Register(driveadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
-		adapterReg.Register(contactsadapter.New(cfg.Google.ClientID, cfg.Google.ClientSecret, redirectURL))
+		adapterReg.Register(gmailadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
+		adapterReg.Register(calendaradapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
+		adapterReg.Register(driveadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
+		adapterReg.Register(contactsadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
 		logger.Info("google adapters registered (gmail, calendar, drive, contacts)")
 	} else {
 		logger.Info("google adapters not registered (GOOGLE_CLIENT_ID not set)")
 	}
 
-	// GitHub adapter — always registered; activated per-user via API key.
-	adapterReg.Register(githubadapter.New())
-	logger.Info("github adapter registered")
-
-	// iMessage adapter — only registered if available (macOS with chat.db).
-	imsg := imessageadapter.New()
-	if imsg.Available() {
-		adapterReg.Register(imsg)
-		logger.Info("imessage adapter registered")
+	// GitHub adapter — registered unless explicitly disabled via config.
+	if cfg.Services.GitHub.Enabled {
+		adapterReg.Register(githubadapter.New())
+		logger.Info("github adapter registered")
 	} else {
-		logger.Info("imessage adapter not available (requires macOS with Messages.app configured)")
+		logger.Info("github adapter disabled via config")
+	}
+
+	// iMessage adapter — registered if enabled in config and available (macOS with chat.db).
+	if cfg.Services.IMessage.Enabled {
+		imsg := imessageadapter.New()
+		if imsg.Available() {
+			adapterReg.Register(imsg)
+			logger.Info("imessage adapter registered")
+		} else {
+			logger.Info("imessage adapter not available (requires macOS with Messages.app configured)")
+		}
+	} else {
+		logger.Info("imessage adapter disabled via config")
 	}
 
 	// ── Notifier ─────────────────────────────────────────────────────────────
