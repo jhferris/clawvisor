@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"time"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/gateway"
@@ -14,6 +15,8 @@ type Notifier interface {
 	SendActivationRequest(ctx context.Context, req ActivationRequest) error
 	SendTaskApprovalRequest(ctx context.Context, req TaskApprovalRequest) (messageID string, err error)
 	SendScopeExpansionRequest(ctx context.Context, req ScopeExpansionRequest) (messageID string, err error)
+	UpdateMessage(ctx context.Context, userID, messageID, text string) error
+	SendTestMessage(ctx context.Context, userID string) error
 }
 
 // ApprovalRequest carries the data needed to ask the user to approve or deny a gateway request.
@@ -71,6 +74,23 @@ type ScopeExpansionRequest struct {
 	Reason     string
 	ApproveURL string
 	DenyURL    string
+}
+
+// PairingSession represents an in-progress Telegram bot pairing.
+type PairingSession struct {
+	ID          string    `json:"pairing_id"`
+	UserID      string    `json:"-"`
+	BotUsername string    `json:"bot_username"`
+	Status      string    `json:"status"` // polling | ready | confirmed | expired
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// TelegramPairer manages the Telegram bot pairing flow.
+type TelegramPairer interface {
+	StartPairing(ctx context.Context, userID, botToken string) (*PairingSession, error)
+	PairingStatus(pairingID string) (*PairingSession, error)
+	ConfirmPairing(ctx context.Context, pairingID, code string) error
+	CancelPairing(pairingID string)
 }
 
 // Ensure we import gateway without unused import errors in callers.

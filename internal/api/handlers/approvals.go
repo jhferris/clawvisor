@@ -11,6 +11,7 @@ import (
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
 	"github.com/ericlevine/clawvisor/internal/callback"
+	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/store"
 	"github.com/ericlevine/clawvisor/internal/vault"
 )
@@ -20,11 +21,12 @@ type ApprovalsHandler struct {
 	st         store.Store
 	vault      vault.Vault
 	adapterReg *adapters.Registry
+	notifier   notify.Notifier // may be nil
 	logger     *slog.Logger
 }
 
-func NewApprovalsHandler(st store.Store, v vault.Vault, adapterReg *adapters.Registry, logger *slog.Logger) *ApprovalsHandler {
-	return &ApprovalsHandler{st: st, vault: v, adapterReg: adapterReg, logger: logger}
+func NewApprovalsHandler(st store.Store, v vault.Vault, adapterReg *adapters.Registry, notifier notify.Notifier, logger *slog.Logger) *ApprovalsHandler {
+	return &ApprovalsHandler{st: st, vault: v, adapterReg: adapterReg, notifier: notifier, logger: logger}
 }
 
 // List returns pending approvals for the authenticated user.
@@ -104,6 +106,9 @@ func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	_ = h.st.UpdateAuditOutcome(r.Context(), pa.AuditID, outcome, errMsg, dur)
 	_ = h.st.DeletePendingApproval(r.Context(), requestID)
 
+	// Update the Telegram message to reflect the outcome.
+	h.updateTelegramMsg(r.Context(), pa, "✅ <b>Approved</b> — request executed.")
+
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		var cbResult *adapters.Result
 		if execErr == nil {
@@ -173,6 +178,9 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 	_ = h.st.UpdateAuditOutcome(r.Context(), pa.AuditID, "denied", "", 0)
 	_ = h.st.DeletePendingApproval(r.Context(), requestID)
 
+	// Update the Telegram message to reflect the denial.
+	h.updateTelegramMsg(r.Context(), pa, "❌ <b>Denied</b> — request rejected.")
+
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		tok := denyBlob.CallbackKey
 		go func() {
@@ -214,6 +222,10 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 	}
 	for _, pa := range expired {
 		_ = h.st.UpdateAuditOutcome(ctx, pa.AuditID, "timeout", "", 0)
+
+		// Update the Telegram message before deleting the pending approval.
+		h.updateTelegramMsg(ctx, pa, "⏰ <b>Timed out</b> — approval window expired.")
+
 		_ = h.st.DeletePendingApproval(ctx, pa.RequestID)
 
 		if pa.CallbackURL != nil && *pa.CallbackURL != "" {
@@ -243,5 +255,16 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 			}, "")
 		}
 		h.logger.Info("task expired", "task_id", task.ID)
+	}
+}
+
+// updateTelegramMsg updates the Telegram message for a pending approval if
+// both the notifier and a message ID are available.
+func (h *ApprovalsHandler) updateTelegramMsg(ctx context.Context, pa *store.PendingApproval, text string) {
+	if h.notifier == nil || pa.TelegramMsgID == nil || *pa.TelegramMsgID == "" {
+		return
+	}
+	if err := h.notifier.UpdateMessage(ctx, pa.UserID, *pa.TelegramMsgID, text); err != nil {
+		h.logger.Warn("telegram message update failed", "err", err, "request_id", pa.RequestID)
 	}
 }

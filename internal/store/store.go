@@ -50,6 +50,7 @@ type Store interface {
 	// Notification configs
 	UpsertNotificationConfig(ctx context.Context, userID, channel string, config json.RawMessage) error
 	GetNotificationConfig(ctx context.Context, userID, channel string) (*NotificationConfig, error)
+	DeleteNotificationConfig(ctx context.Context, userID, channel string) error
 
 	// Audit log
 	LogAudit(ctx context.Context, entry *AuditEntry) error

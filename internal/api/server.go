@@ -101,14 +101,19 @@ func (s *Server) routes() http.Handler {
 	restrictionsHandler := handlers.NewRestrictionsHandler(s.store)
 	agentsHandler := handlers.NewAgentsHandler(s.store)
 	auditHandler := handlers.NewAuditHandler(s.store)
-	notificationsHandler := handlers.NewNotificationsHandler(s.store)
+	// The Telegram notifier also implements TelegramPairer for the pairing flow.
+	var pairer notify.TelegramPairer
+	if p, ok := s.notifier.(notify.TelegramPairer); ok {
+		pairer = p
+	}
+	notificationsHandler := handlers.NewNotificationsHandler(s.store, s.notifier, pairer)
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg,
 		s.notifier, s.safety, s.llmCfg, *s.cfg, s.logger, baseURL,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)
-	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.logger)
+	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.notifier, s.logger)
 	s.approvalsHandler = approvalsHandler
 	tasksHandler := handlers.NewTasksHandler(s.store,
 		s.notifier, *s.cfg, s.logger, baseURL)
@@ -155,6 +160,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/notifications", user(notificationsHandler.List))
 	mux.Handle("PUT /api/notifications/telegram", user(notificationsHandler.UpsertTelegram))
 	mux.Handle("DELETE /api/notifications/telegram", user(notificationsHandler.DeleteTelegram))
+	mux.Handle("POST /api/notifications/telegram/test", user(notificationsHandler.TestTelegram))
+	mux.Handle("POST /api/notifications/telegram/pair", user(notificationsHandler.StartPairing))
+	mux.Handle("GET /api/notifications/telegram/pair/{pairing_id}", user(notificationsHandler.PairingStatus))
+	mux.Handle("POST /api/notifications/telegram/pair/{pairing_id}/confirm", user(notificationsHandler.ConfirmPairing))
 
 	// Gateway (agent token)
 	mux.Handle("POST /api/gateway/request", agent(gatewayHandler.HandleRequest))

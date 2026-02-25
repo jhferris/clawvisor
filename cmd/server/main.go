@@ -141,13 +141,10 @@ func run(logger *slog.Logger) error {
 	}
 
 	// ── Notifier ─────────────────────────────────────────────────────────────
-	var notifier notify.Notifier
-	if cfg.Telegram.BotToken != "" {
-		notifier = telegramnotify.New(cfg.Telegram.BotToken, st)
-		logger.Info("telegram notifier enabled")
-	} else {
-		logger.Info("telegram notifier disabled (TELEGRAM_BOT_TOKEN not set)")
-	}
+	// Per-user bot tokens are stored in notification_configs. The notifier
+	// is always created; it reads credentials from the store on each call.
+	var notifier notify.Notifier = telegramnotify.New(st)
+	logger.Info("telegram notifier enabled (per-user bot tokens)")
 
 	// ── Safety Checker ───────────────────────────────────────────────────────
 	var safetyChecker safety.SafetyChecker = safety.NoopChecker{}

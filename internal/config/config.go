@@ -17,9 +17,8 @@ type Config struct {
 	Approval ApprovalConfig `yaml:"approval"`
 	Task     TaskConfig     `yaml:"task"`
 	LLM      LLMConfig      `yaml:"llm"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	Telegram TelegramConfig `yaml:"telegram"`
-	Google   GoogleConfig   `yaml:"google"`
+	MCP    MCPConfig    `yaml:"mcp"`
+	Google GoogleConfig `yaml:"google"`
 }
 
 // TaskConfig holds settings for task-scoped authorization.
@@ -77,12 +76,6 @@ type LLMConfig struct {
 
 type MCPConfig struct {
 	ApprovalTimeout int `yaml:"approval_timeout"`
-}
-
-// TelegramConfig holds the Telegram bot token used for approval notifications.
-// The per-user chat ID is stored in notification_configs (channel="telegram").
-type TelegramConfig struct {
-	BotToken string `yaml:"bot_token"`
 }
 
 // GoogleConfig holds OAuth2 credentials for all Google adapters.
@@ -184,9 +177,6 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SERVER_HOST"); v != "" {
 		cfg.Server.Host = v
-	}
-	if v := os.Getenv("TELEGRAM_BOT_TOKEN"); v != "" {
-		cfg.Telegram.BotToken = v
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
 		cfg.Google.ClientID = v

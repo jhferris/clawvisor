@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, type Task, type Agent } from '../api/client'
 import { serviceName, actionName } from '../lib/services'
 
@@ -117,6 +117,45 @@ function PendingTaskCard({ task, agentName }: { task: Task; agentName: string })
 }
 
 export default function Overview({ pendingCount }: Props) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qc = useQueryClient()
+  const [deepLinkResult, setDeepLinkResult] = useState<string | null>(null)
+
+  const deepApprove = useMutation({
+    mutationFn: (requestId: string) => api.approvals.approve(requestId),
+    onSuccess: (_data, requestId) => {
+      setDeepLinkResult(`Request ${requestId.slice(0, 8)}... approved.`)
+      qc.invalidateQueries({ queryKey: ['approvals'] })
+    },
+    onError: (err: Error) => setDeepLinkResult(`Approve failed: ${err.message}`),
+  })
+
+  const deepDeny = useMutation({
+    mutationFn: (requestId: string) => api.approvals.deny(requestId),
+    onSuccess: (_data, requestId) => {
+      setDeepLinkResult(`Request ${requestId.slice(0, 8)}... denied.`)
+      qc.invalidateQueries({ queryKey: ['approvals'] })
+    },
+    onError: (err: Error) => setDeepLinkResult(`Deny failed: ${err.message}`),
+  })
+
+  // Handle deep link actions from Telegram buttons
+  useEffect(() => {
+    const action = searchParams.get('action')
+    const requestId = searchParams.get('request_id')
+    if (!action || !requestId) return
+
+    // Clear params immediately to prevent re-triggering
+    setSearchParams({}, { replace: true })
+
+    if (action === 'approve') {
+      deepApprove.mutate(requestId)
+    } else if (action === 'deny') {
+      deepDeny.mutate(requestId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const { data: services } = useQuery({
     queryKey: ['services'],
     queryFn: () => api.services.list(),
@@ -151,6 +190,14 @@ export default function Overview({ pendingCount }: Props) {
   return (
     <div className="p-8 space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
+
+      {/* Deep link result banner */}
+      {deepLinkResult && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-3 flex items-center justify-between">
+          <span className="text-blue-800 text-sm">{deepLinkResult}</span>
+          <button onClick={() => setDeepLinkResult(null)} className="text-blue-500 text-xs hover:underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Attention area */}
       {hasAnythingPending ? (

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { api, type Task, type TaskAction, type Agent } from '../api/client'
 import { formatDistanceToNow, differenceInSeconds } from 'date-fns'
 import { serviceName, actionName } from '../lib/services'
@@ -258,6 +259,47 @@ const STATUS_FILTER_OPTIONS = [
 
 export default function Tasks() {
   const [filter, setFilter] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const qc = useQueryClient()
+  const [deepLinkResult, setDeepLinkResult] = useState<string | null>(null)
+
+  const deepApprove = useMutation({
+    mutationFn: (taskId: string) => api.tasks.approve(taskId),
+    onSuccess: () => { setDeepLinkResult('Task approved.'); qc.invalidateQueries({ queryKey: ['tasks'] }) },
+    onError: (err: Error) => setDeepLinkResult(`Approve failed: ${err.message}`),
+  })
+  const deepDeny = useMutation({
+    mutationFn: (taskId: string) => api.tasks.deny(taskId),
+    onSuccess: () => { setDeepLinkResult('Task denied.'); qc.invalidateQueries({ queryKey: ['tasks'] }) },
+    onError: (err: Error) => setDeepLinkResult(`Deny failed: ${err.message}`),
+  })
+  const deepExpandApprove = useMutation({
+    mutationFn: (taskId: string) => api.tasks.expandApprove(taskId),
+    onSuccess: () => { setDeepLinkResult('Scope expansion approved.'); qc.invalidateQueries({ queryKey: ['tasks'] }) },
+    onError: (err: Error) => setDeepLinkResult(`Expansion approve failed: ${err.message}`),
+  })
+  const deepExpandDeny = useMutation({
+    mutationFn: (taskId: string) => api.tasks.expandDeny(taskId),
+    onSuccess: () => { setDeepLinkResult('Scope expansion denied.'); qc.invalidateQueries({ queryKey: ['tasks'] }) },
+    onError: (err: Error) => setDeepLinkResult(`Expansion deny failed: ${err.message}`),
+  })
+
+  // Handle deep link actions from Telegram buttons
+  useEffect(() => {
+    const action = searchParams.get('action')
+    const taskId = searchParams.get('task_id')
+    if (!action || !taskId) return
+
+    setSearchParams({}, { replace: true })
+
+    switch (action) {
+      case 'approve': deepApprove.mutate(taskId); break
+      case 'deny': deepDeny.mutate(taskId); break
+      case 'expand_approve': deepExpandApprove.mutate(taskId); break
+      case 'expand_deny': deepExpandDeny.mutate(taskId); break
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['tasks'],
@@ -317,6 +359,14 @@ export default function Tasks() {
           Refresh
         </button>
       </div>
+
+      {/* Deep link result banner */}
+      {deepLinkResult && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-3 flex items-center justify-between">
+          <span className="text-blue-800 text-sm">{deepLinkResult}</span>
+          <button onClick={() => setDeepLinkResult(null)} className="text-blue-500 text-xs hover:underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">

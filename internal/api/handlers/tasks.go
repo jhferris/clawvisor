@@ -135,8 +135,8 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Send notification.
 	if h.notifier != nil {
-		approveURL := fmt.Sprintf("%s/api/tasks/%s/approve", h.baseURL, task.ID)
-		denyURL := fmt.Sprintf("%s/api/tasks/%s/deny", h.baseURL, task.ID)
+		approveURL := fmt.Sprintf("%s/dashboard/tasks?action=approve&task_id=%s", h.baseURL, task.ID)
+		denyURL := fmt.Sprintf("%s/dashboard/tasks?action=deny&task_id=%s", h.baseURL, task.ID)
 		expiresInStr := fmt.Sprintf("%d minutes", expiresIn/60)
 		if lifetime == "standing" {
 			expiresInStr = "standing (no expiry)"
@@ -481,8 +481,8 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 
 	// Send notification.
 	if h.notifier != nil {
-		approveURL := fmt.Sprintf("%s/api/tasks/%s/expand/approve", h.baseURL, taskID)
-		denyURL := fmt.Sprintf("%s/api/tasks/%s/expand/deny", h.baseURL, taskID)
+		approveURL := fmt.Sprintf("%s/dashboard/tasks?action=expand_approve&task_id=%s", h.baseURL, taskID)
+		denyURL := fmt.Sprintf("%s/dashboard/tasks?action=expand_deny&task_id=%s", h.baseURL, taskID)
 
 		_, _ = h.notifier.SendScopeExpansionRequest(ctx, notify.ScopeExpansionRequest{
 			TaskID:     taskID,

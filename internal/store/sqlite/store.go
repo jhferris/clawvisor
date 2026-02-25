@@ -428,6 +428,21 @@ func (s *Store) GetNotificationConfig(ctx context.Context, userID, channel strin
 	return nc, nil
 }
 
+func (s *Store) DeleteNotificationConfig(ctx context.Context, userID, channel string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM notification_configs WHERE user_id = ? AND channel = ?`,
+		userID, channel,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 // ── Audit Log ─────────────────────────────────────────────────────────────────
 
 func (s *Store) LogAudit(ctx context.Context, e *store.AuditEntry) error {

@@ -378,6 +378,20 @@ func (s *Store) GetNotificationConfig(ctx context.Context, userID, channel strin
 	return nc, nil
 }
 
+func (s *Store) DeleteNotificationConfig(ctx context.Context, userID, channel string) error {
+	res, err := s.pool.Exec(ctx,
+		`DELETE FROM notification_configs WHERE user_id = $1 AND channel = $2`,
+		userID, channel,
+	)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 // ── Audit Log ─────────────────────────────────────────────────────────────────
 
 func (s *Store) LogAudit(ctx context.Context, e *store.AuditEntry) error {

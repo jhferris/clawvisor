@@ -1,6 +1,6 @@
 // Package telegram implements notify.Notifier using the Telegram Bot API.
-// Each Clawvisor instance has one bot token (from config). Per-user chat IDs
-// are stored in notification_configs (channel = "telegram", config = {"chat_id":"..."}).
+// Each user stores their own bot_token and chat_id in notification_configs
+// (channel = "telegram", config = {"bot_token":"...", "chat_id":"..."}).
 package telegram
 
 import (
@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericlevine/clawvisor/internal/notify"
@@ -22,24 +23,25 @@ import (
 
 // Notifier sends Telegram messages for approval and service-activation requests.
 type Notifier struct {
-	token  string
-	store  store.Store
-	client *http.Client
+	store         store.Store
+	client        *http.Client
+	pairingClient *http.Client // longer timeout for long-poll getUpdates
+	pairings      sync.Map     // pairing ID → *pairingSession
 }
 
-// New creates a Telegram Notifier. token is the Bot API token.
-func New(token string, st store.Store) *Notifier {
+// New creates a Telegram Notifier that reads per-user bot tokens from the store.
+func New(st store.Store) *Notifier {
 	return &Notifier{
-		token:  token,
-		store:  st,
-		client: &http.Client{Timeout: 10 * time.Second},
+		store:         st,
+		client:        &http.Client{Timeout: 10 * time.Second},
+		pairingClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
 // ── notify.Notifier implementation ───────────────────────────────────────────
 
 func (n *Notifier) SendApprovalRequest(ctx context.Context, req notify.ApprovalRequest) (string, error) {
-	chatID, err := n.chatID(ctx, req.UserID)
+	botToken, chatID, err := n.userConfig(ctx, req.UserID)
 	if err != nil {
 		return "", err
 	}
@@ -50,7 +52,7 @@ func (n *Notifier) SendApprovalRequest(ctx context.Context, req notify.ApprovalR
 		{Text: "❌ Deny", URL: req.DenyURL},
 	}})
 
-	msgID, err := n.sendMessage(ctx, chatID, text, keyboard)
+	msgID, err := n.sendMessage(ctx, botToken, chatID, text, keyboard)
 	if err != nil {
 		return "", fmt.Errorf("telegram: send approval request: %w", err)
 	}
@@ -58,7 +60,7 @@ func (n *Notifier) SendApprovalRequest(ctx context.Context, req notify.ApprovalR
 }
 
 func (n *Notifier) SendActivationRequest(ctx context.Context, req notify.ActivationRequest) error {
-	chatID, err := n.chatID(ctx, req.UserID)
+	botToken, chatID, err := n.userConfig(ctx, req.UserID)
 	if err != nil {
 		return err
 	}
@@ -69,21 +71,21 @@ func (n *Notifier) SendActivationRequest(ctx context.Context, req notify.Activat
 			"<b>Requested action:</b> %s",
 		html.EscapeString(req.AgentName),
 		html.EscapeString(req.Service),
-		html.EscapeString(req.AgentName),
+		html.EscapeString(req.Service),
 	)
 	keyboard := inlineKeyboard([][]inlineButton{{
 		{Text: "🔗 Activate " + req.Service, URL: req.ActivateURL},
 		{Text: "❌ Deny", URL: req.DenyURL},
 	}})
 
-	if _, err := n.sendMessage(ctx, chatID, text, keyboard); err != nil {
+	if _, err := n.sendMessage(ctx, botToken, chatID, text, keyboard); err != nil {
 		return fmt.Errorf("telegram: send activation request: %w", err)
 	}
 	return nil
 }
 
 func (n *Notifier) SendTaskApprovalRequest(ctx context.Context, req notify.TaskApprovalRequest) (string, error) {
-	chatID, err := n.chatID(ctx, req.UserID)
+	botToken, chatID, err := n.userConfig(ctx, req.UserID)
 	if err != nil {
 		return "", err
 	}
@@ -94,7 +96,7 @@ func (n *Notifier) SendTaskApprovalRequest(ctx context.Context, req notify.TaskA
 		{Text: "❌ Deny Task", URL: req.DenyURL},
 	}})
 
-	msgID, err := n.sendMessage(ctx, chatID, text, keyboard)
+	msgID, err := n.sendMessage(ctx, botToken, chatID, text, keyboard)
 	if err != nil {
 		return "", fmt.Errorf("telegram: send task approval request: %w", err)
 	}
@@ -102,7 +104,7 @@ func (n *Notifier) SendTaskApprovalRequest(ctx context.Context, req notify.TaskA
 }
 
 func (n *Notifier) SendScopeExpansionRequest(ctx context.Context, req notify.ScopeExpansionRequest) (string, error) {
-	chatID, err := n.chatID(ctx, req.UserID)
+	botToken, chatID, err := n.userConfig(ctx, req.UserID)
 	if err != nil {
 		return "", err
 	}
@@ -113,11 +115,31 @@ func (n *Notifier) SendScopeExpansionRequest(ctx context.Context, req notify.Sco
 		{Text: "❌ Deny Expansion", URL: req.DenyURL},
 	}})
 
-	msgID, err := n.sendMessage(ctx, chatID, text, keyboard)
+	msgID, err := n.sendMessage(ctx, botToken, chatID, text, keyboard)
 	if err != nil {
 		return "", fmt.Errorf("telegram: send scope expansion request: %w", err)
 	}
 	return msgID, nil
+}
+
+func (n *Notifier) UpdateMessage(ctx context.Context, userID, messageID, text string) error {
+	botToken, chatID, err := n.userConfig(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return n.editMessage(ctx, botToken, chatID, messageID, text)
+}
+
+func (n *Notifier) SendTestMessage(ctx context.Context, userID string) error {
+	botToken, chatID, err := n.userConfig(ctx, userID)
+	if err != nil {
+		return err
+	}
+	text := "✅ <b>Clawvisor — Test Message</b>\n\nYour Telegram notifications are working!"
+	if _, err := n.sendMessage(ctx, botToken, chatID, text, nil); err != nil {
+		return fmt.Errorf("telegram: send test message: %w", err)
+	}
+	return nil
 }
 
 // ── Message formatting ────────────────────────────────────────────────────────
@@ -239,19 +261,21 @@ func inlineKeyboard(rows [][]inlineButton) any {
 }
 
 // sendMessage calls the Telegram sendMessage API and returns the message ID as a string.
-func (n *Notifier) sendMessage(ctx context.Context, chatID, text string, replyMarkup any) (string, error) {
+func (n *Notifier) sendMessage(ctx context.Context, botToken, chatID, text string, replyMarkup any) (string, error) {
 	payload := map[string]any{
-		"chat_id":      chatID,
-		"text":         text,
-		"parse_mode":   "HTML",
-		"reply_markup": replyMarkup,
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	if replyMarkup != nil {
+		payload["reply_markup"] = replyMarkup
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", n.token)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -281,27 +305,73 @@ func (n *Notifier) sendMessage(ctx context.Context, chatID, text string, replyMa
 	return fmt.Sprintf("%d", tResp.Result.MessageID), nil
 }
 
+// editMessage calls the Telegram editMessageText API to update a sent message
+// and remove its inline keyboard.
+func (n *Notifier) editMessage(ctx context.Context, botToken, chatID, messageID, text string) error {
+	payload := map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"text":       text,
+		"parse_mode": "HTML",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", botToken)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var tResp struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(respBody, &tResp); err != nil {
+		return fmt.Errorf("telegram editMessageText response: %w", err)
+	}
+	if !tResp.OK {
+		return fmt.Errorf("telegram editMessageText error: %s", tResp.Description)
+	}
+	return nil
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // telegramCfg is the JSON structure stored in notification_configs for channel="telegram".
 type telegramCfg struct {
-	ChatID string `json:"chat_id"`
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
 }
 
-func (n *Notifier) chatID(ctx context.Context, userID string) (string, error) {
+// userConfig fetches the per-user bot_token and chat_id from the store.
+func (n *Notifier) userConfig(ctx context.Context, userID string) (botToken, chatID string, err error) {
 	nc, err := n.store.GetNotificationConfig(ctx, userID, "telegram")
 	if errors.Is(err, store.ErrNotFound) {
-		return "", fmt.Errorf("telegram: user %s has no Telegram notification configured", userID)
+		return "", "", fmt.Errorf("telegram: user %s has no Telegram notification configured", userID)
 	}
 	if err != nil {
-		return "", fmt.Errorf("telegram: fetching config for user %s: %w", userID, err)
+		return "", "", fmt.Errorf("telegram: fetching config for user %s: %w", userID, err)
 	}
 	var cfg telegramCfg
 	if err := json.Unmarshal(nc.Config, &cfg); err != nil {
-		return "", fmt.Errorf("telegram: invalid config for user %s: %w", userID, err)
+		return "", "", fmt.Errorf("telegram: invalid config for user %s: %w", userID, err)
+	}
+	if cfg.BotToken == "" {
+		return "", "", fmt.Errorf("telegram: user %s config missing bot_token", userID)
 	}
 	if cfg.ChatID == "" {
-		return "", fmt.Errorf("telegram: user %s config missing chat_id", userID)
+		return "", "", fmt.Errorf("telegram: user %s config missing chat_id", userID)
 	}
-	return cfg.ChatID, nil
+	return cfg.BotToken, cfg.ChatID, nil
 }

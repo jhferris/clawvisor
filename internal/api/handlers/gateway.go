@@ -234,7 +234,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 						blob := buildRequestBlob(req, agent, nil)
 						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 							h.baseURL, serviceType, req.RequestID)
-						denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
+						denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
 						if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
 							req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
 							activateURL, denyURL); notifyErr != nil {
@@ -376,7 +376,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		blob := buildRequestBlob(req, agent, nil)
 		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 			h.baseURL, serviceType, req.RequestID)
-		denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, req.RequestID)
+		denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
 		if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
 			req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
 			activateURL, denyURL); notifyErr != nil {
@@ -551,8 +551,8 @@ func (h *GatewayHandler) routeToApproval(
 	}
 
 	expiresIn := fmt.Sprintf("%d minutes", int(time.Until(expiresAt).Minutes()))
-	approveURL := fmt.Sprintf("%s/api/approvals/%s/approve", h.baseURL, blob.RequestID)
-	denyURL := fmt.Sprintf("%s/api/approvals/%s/deny", h.baseURL, blob.RequestID)
+	approveURL := fmt.Sprintf("%s/dashboard?action=approve&request_id=%s", h.baseURL, blob.RequestID)
+	denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, blob.RequestID)
 
 	reason := policyReason
 	if safetyFlagged && safetyReason != "" {

@@ -5,16 +5,19 @@ import (
 	"net/http"
 
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
+	"github.com/ericlevine/clawvisor/internal/notify"
 	"github.com/ericlevine/clawvisor/internal/store"
 )
 
 // NotificationsHandler manages per-user notification channel configuration.
 type NotificationsHandler struct {
-	st store.Store
+	st       store.Store
+	notifier notify.Notifier        // may be nil
+	pairer   notify.TelegramPairer  // may be nil
 }
 
-func NewNotificationsHandler(st store.Store) *NotificationsHandler {
-	return &NotificationsHandler{st: st}
+func NewNotificationsHandler(st store.Store, notifier notify.Notifier, pairer notify.TelegramPairer) *NotificationsHandler {
+	return &NotificationsHandler{st: st, notifier: notifier, pairer: pairer}
 }
 
 // List returns all notification configs for the authenticated user.
@@ -105,11 +108,163 @@ func (h *NotificationsHandler) DeleteTelegram(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Upsert with empty config signals "disabled"; we can't delete a row cleanly
-	// without a DeleteNotificationConfig store method, so store empty JSON instead.
-	if err := h.st.UpsertNotificationConfig(r.Context(), user.ID, "telegram", json.RawMessage(`{}`)); err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not clear notification config")
+	if err := h.st.DeleteNotificationConfig(r.Context(), user.ID, "telegram"); err != nil {
+		if err == store.ErrNotFound {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not delete notification config")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// TestTelegram sends a test message using the user's saved config.
+//
+// POST /api/notifications/telegram/test
+// Auth: user JWT
+func (h *NotificationsHandler) TestTelegram(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	if h.notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "NOTIFIER_UNAVAILABLE", "notification service not available")
+		return
+	}
+
+	if err := h.notifier.SendTestMessage(r.Context(), user.ID); err != nil {
+		writeError(w, http.StatusBadRequest, "TEST_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+// StartPairing begins a Telegram bot pairing flow.
+//
+// POST /api/notifications/telegram/pair
+// Auth: user JWT
+// Body: {"bot_token": "..."}
+func (h *NotificationsHandler) StartPairing(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	if h.pairer == nil {
+		writeError(w, http.StatusServiceUnavailable, "PAIRER_UNAVAILABLE", "pairing service not available")
+		return
+	}
+
+	var body struct {
+		BotToken string `json:"bot_token"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.BotToken == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "bot_token is required")
+		return
+	}
+
+	session, err := h.pairer.StartPairing(r.Context(), user.ID, body.BotToken)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "PAIRING_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+// PairingStatus returns the current state of a pairing session.
+//
+// GET /api/notifications/telegram/pair/{pairing_id}
+// Auth: user JWT
+func (h *NotificationsHandler) PairingStatus(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	if h.pairer == nil {
+		writeError(w, http.StatusServiceUnavailable, "PAIRER_UNAVAILABLE", "pairing service not available")
+		return
+	}
+
+	pairingID := r.PathValue("pairing_id")
+	if pairingID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "pairing_id is required")
+		return
+	}
+
+	session, err := h.pairer.PairingStatus(pairingID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	if session.UserID != user.ID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "pairing session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
+// ConfirmPairing validates the pairing code and saves the Telegram config.
+//
+// POST /api/notifications/telegram/pair/{pairing_id}/confirm
+// Auth: user JWT
+// Body: {"code": "..."}
+func (h *NotificationsHandler) ConfirmPairing(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+	if h.pairer == nil {
+		writeError(w, http.StatusServiceUnavailable, "PAIRER_UNAVAILABLE", "pairing service not available")
+		return
+	}
+
+	pairingID := r.PathValue("pairing_id")
+	if pairingID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "pairing_id is required")
+		return
+	}
+
+	// Verify ownership before confirming.
+	session, err := h.pairer.PairingStatus(pairingID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	if session.UserID != user.ID {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "pairing session not found")
+		return
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Code == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "code is required")
+		return
+	}
+
+	if err := h.pairer.ConfirmPairing(r.Context(), pairingID, body.Code); err != nil {
+		writeError(w, http.StatusBadRequest, "CONFIRM_FAILED", err.Error())
+		return
+	}
+
+	// Return the saved config.
+	cfg, err := h.st.GetNotificationConfig(r.Context(), user.ID, "telegram")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
 }

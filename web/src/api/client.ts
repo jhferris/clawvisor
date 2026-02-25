@@ -297,6 +297,16 @@ export const api = {
     upsertTelegram: (botToken: string, chatId: string) =>
       put<NotificationConfig>('/api/notifications/telegram', { bot_token: botToken, chat_id: chatId }),
     deleteTelegram: () => del<void>('/api/notifications/telegram'),
+    testTelegram: () => post<{ status: string }>('/api/notifications/telegram/test', {}),
+    startPairing: (botToken: string) =>
+      post<{ pairing_id: string; bot_username: string; status: string; expires_at: string }>(
+        '/api/notifications/telegram/pair', { bot_token: botToken }),
+    pairingStatus: (pairingId: string) =>
+      get<{ pairing_id: string; bot_username: string; status: string; expires_at: string }>(
+        `/api/notifications/telegram/pair/${pairingId}`),
+    confirmPairing: (pairingId: string, code: string) =>
+      post<NotificationConfig>(
+        `/api/notifications/telegram/pair/${pairingId}/confirm`, { code }),
   },
   tasks: {
     list: () => get<{ tasks: Task[]; total: number }>('/api/tasks'),
