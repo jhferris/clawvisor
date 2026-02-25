@@ -10,24 +10,21 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/adapters/format"
+	"github.com/ericlevine/clawvisor/internal/adapters/google/credential"
 )
 
 const serviceID = "google.gmail"
 
-// storedCredential is the JSON structure saved (encrypted) in the vault under key "google".
-type storedCredential struct {
-	Type         string    `json:"type"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	Scopes       []string  `json:"scopes"`
+// gmailScopes are the OAuth scopes required by the Gmail adapter.
+var gmailScopes = []string{
+	"https://www.googleapis.com/auth/gmail.readonly",
+	"https://www.googleapis.com/auth/gmail.send",
 }
 
 // GmailAdapter implements adapters.Adapter for Gmail.
@@ -51,49 +48,24 @@ func (a *GmailAdapter) SupportedActions() []string {
 	return []string{"list_messages", "get_message", "send_message"}
 }
 
-// allGoogleScopes is the unified scope set requested for all Google services.
-// All Google adapters (Gmail, Calendar, Drive, Contacts) request the same scope set
-// so a single OAuth consent grants access to all of them.
-var allGoogleScopes = []string{
-	"https://www.googleapis.com/auth/gmail.readonly",
-	"https://www.googleapis.com/auth/gmail.send",
-	"https://www.googleapis.com/auth/calendar.readonly",
-	"https://www.googleapis.com/auth/calendar.events",
-	"https://www.googleapis.com/auth/drive.readonly",
-	"https://www.googleapis.com/auth/drive.file",
-	"https://www.googleapis.com/auth/contacts.readonly",
-}
+func (a *GmailAdapter) RequiredScopes() []string { return gmailScopes }
 
 func (a *GmailAdapter) OAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		RedirectURL:  a.redirectURL,
-		Scopes:       allGoogleScopes,
+		Scopes:       gmailScopes,
 		Endpoint:     google.Endpoint,
 	}
 }
 
 func (a *GmailAdapter) CredentialFromToken(token *oauth2.Token) ([]byte, error) {
-	cred := storedCredential{
-		Type:         "oauth2",
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		Scopes:       allGoogleScopes,
-	}
-	return json.Marshal(cred)
+	return credential.FromToken(token, gmailScopes)
 }
 
 func (a *GmailAdapter) ValidateCredential(credBytes []byte) error {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return fmt.Errorf("gmail: invalid credential: %w", err)
-	}
-	if cred.RefreshToken == "" && cred.AccessToken == "" {
-		return fmt.Errorf("gmail: credential missing tokens")
-	}
-	return nil
+	return credential.Validate(credBytes)
 }
 
 // Execute runs a Gmail action. Credential is injected by the gateway.
@@ -118,21 +90,11 @@ func (a *GmailAdapter) Execute(ctx context.Context, req adapters.Request) (*adap
 // ── HTTP client from stored credential ───────────────────────────────────────
 
 func (a *GmailAdapter) httpClient(ctx context.Context, credBytes []byte) (*http.Client, error) {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return nil, fmt.Errorf("gmail: parsing credential: %w", err)
+	cred, err := credential.Parse(credBytes)
+	if err != nil {
+		return nil, fmt.Errorf("gmail: %w", err)
 	}
-
-	token := &oauth2.Token{
-		AccessToken:  cred.AccessToken,
-		RefreshToken: cred.RefreshToken,
-		Expiry:       cred.Expiry,
-		TokenType:    "Bearer",
-	}
-
-	cfg := a.OAuthConfig()
-	// Token source auto-refreshes when the token is expired.
-	ts := cfg.TokenSource(ctx, token)
+	ts := a.OAuthConfig().TokenSource(ctx, cred.ToOAuth2Token())
 	return oauth2.NewClient(ctx, ts), nil
 }
 

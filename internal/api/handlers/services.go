@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
+	"github.com/ericlevine/clawvisor/internal/adapters/google/credential"
 	"github.com/ericlevine/clawvisor/internal/api/middleware"
 	"github.com/ericlevine/clawvisor/internal/callback"
 	"github.com/ericlevine/clawvisor/internal/store"
@@ -37,6 +39,7 @@ type oauthStateEntry struct {
 	ServiceID    string
 	Alias        string // "default" when not specified
 	PendingReqID string // pending_request_id query param (may be empty)
+	Scopes       []string  // merged scopes for this OAuth flow
 	ExpiresAt    time.Time
 }
 
@@ -126,8 +129,12 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Also check if the base vault key is activated but has no meta record.
+		// Skip this fallback for Google services that share a vault key — presence
+		// of vault key "google" does not mean all Google services are activated;
+		// only those with a service_meta record are.
 		baseKey := vaultKeyForService(a.ServiceID())
-		if !shown && keySet[baseKey] {
+		usesSharedKey := baseKey != a.ServiceID()
+		if !shown && !usesSharedKey && keySet[baseKey] {
 			var activatedAt *time.Time
 			if m, ok := metaByKey[a.ServiceID()+":default"]; ok {
 				activatedAt = &m.ActivatedAt
@@ -166,9 +173,13 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 // The client fetches this endpoint (with Authorization header) and then navigates
 // to the returned URL — e.g. window.open(url, '_blank').
 //
+// If the user already has credentials with all required scopes for this service,
+// the response is {"already_authorized": true, "service": "..."} and no OAuth
+// flow is needed.
+//
 // GET /api/oauth/url?service=google.gmail[&pending_request_id=...]
 // Auth: user JWT
-// Response: {"url": "https://accounts.google.com/..."}
+// Response: {"url": "https://accounts.google.com/..."} or {"already_authorized": true, ...}
 func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	if user == nil {
@@ -199,16 +210,29 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 		alias = "default"
 	}
 
+	mergedScopes, alreadyAuthorized := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
+	if alreadyAuthorized {
+		// Scopes already granted — just ensure service_meta exists and return.
+		_ = h.st.UpsertServiceMeta(r.Context(), user.ID, serviceID, alias, time.Now())
+		writeJSON(w, http.StatusOK, map[string]any{
+			"already_authorized": true,
+			"service":            serviceID,
+		})
+		return
+	}
+
 	stateToken := uuid.New().String()
 	h.oauthStates.Store(stateToken, oauthStateEntry{
 		UserID:       user.ID,
 		ServiceID:    serviceID,
 		Alias:        alias,
 		PendingReqID: r.URL.Query().Get("pending_request_id"),
+		Scopes:       mergedScopes,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	})
 
-	authURL := oauthCfg.AuthCodeURL(stateToken)
+	oauthCfg.Scopes = mergedScopes
+	authURL := oauthAuthURL(oauthCfg, stateToken, alias)
 	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 }
 
@@ -246,16 +270,20 @@ func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
 		alias = "default"
 	}
 
+	mergedScopes, _ := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
+
 	stateToken := uuid.New().String()
 	h.oauthStates.Store(stateToken, oauthStateEntry{
 		UserID:       user.ID,
 		ServiceID:    serviceID,
 		Alias:        alias,
 		PendingReqID: r.URL.Query().Get("pending_request_id"),
+		Scopes:       mergedScopes,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	})
 
-	authURL := oauthCfg.AuthCodeURL(stateToken)
+	oauthCfg.Scopes = mergedScopes
+	authURL := oauthAuthURL(oauthCfg, stateToken, alias)
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
@@ -291,6 +319,10 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	oauthCfg := adapter.OAuthConfig()
+	// Use the merged scopes stored during URL generation.
+	if len(entry.Scopes) > 0 {
+		oauthCfg.Scopes = entry.Scopes
+	}
 	token, err := oauthCfg.Exchange(r.Context(), code)
 	if err != nil {
 		h.logger.Warn("oauth token exchange failed", "service", entry.ServiceID, "err", err)
@@ -298,17 +330,30 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	credBytes, err := adapter.CredentialFromToken(token)
+	// Use the merged scopes from the state entry for the credential.
+	scopes := entry.Scopes
+	if len(scopes) == 0 {
+		scopes = adapter.RequiredScopes()
+	}
+
+	// Preserve existing refresh token if Google didn't issue a new one on re-consent.
+	alias := entry.Alias
+	if alias == "" {
+		alias = "default"
+	}
+	if token.RefreshToken == "" {
+		if existing := h.loadExistingRefreshToken(r.Context(), entry.UserID, entry.ServiceID, alias); existing != "" {
+			token.RefreshToken = existing
+		}
+	}
+
+	credBytes, err := credential.FromToken(token, scopes)
 	if err != nil {
 		h.logger.Warn("credential from token failed", "service", entry.ServiceID, "err", err)
 		oauthPopupClose(w, "Failed to process credential.")
 		return
 	}
 
-	alias := entry.Alias
-	if alias == "" {
-		alias = "default"
-	}
 	vKey := vaultKeyForServiceAlias(entry.ServiceID, alias)
 	if err := h.vault.Set(r.Context(), entry.UserID, vKey, credBytes); err != nil {
 		h.logger.Warn("vault set failed", "service", entry.ServiceID, "err", err)
@@ -392,15 +437,28 @@ func (h *ServicesHandler) Activate(w http.ResponseWriter, r *http.Request) {
 			alias = "default"
 		}
 
+		mergedScopes, alreadyAuthorized := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
+		if alreadyAuthorized {
+			_ = h.st.UpsertServiceMeta(r.Context(), user.ID, serviceID, alias, time.Now())
+			writeJSON(w, http.StatusOK, map[string]any{
+				"already_authorized": true,
+				"service":            serviceID,
+			})
+			return
+		}
+
 		stateToken := uuid.New().String()
 		h.oauthStates.Store(stateToken, oauthStateEntry{
 			UserID:       user.ID,
 			ServiceID:    serviceID,
 			Alias:        alias,
 			PendingReqID: body.PendingRequestID,
+			Scopes:       mergedScopes,
 			ExpiresAt:    time.Now().Add(10 * time.Minute),
 		})
-		authURL := adapter.OAuthConfig().AuthCodeURL(stateToken)
+		oauthCfg := adapter.OAuthConfig()
+		oauthCfg.Scopes = mergedScopes
+		authURL := oauthAuthURL(oauthCfg, stateToken, alias)
 		writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 		return
 	}
@@ -476,6 +534,65 @@ func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]string{"status": "activated", "service": serviceID})
 }
 
+// Deactivate removes the credential and service_meta for a service + alias.
+//
+// POST /api/services/{serviceID}/deactivate
+// Auth: user JWT
+// Body: {"alias": "..."} (optional; defaults to "default")
+func (h *ServicesHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	serviceID := r.PathValue("serviceID")
+	if serviceID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "serviceID is required")
+		return
+	}
+
+	var body struct {
+		Alias string `json:"alias"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // body is optional
+	alias := body.Alias
+	if alias == "" {
+		alias = "default"
+	}
+
+	// Remove the service_meta record first.
+	_ = h.st.DeleteServiceMeta(r.Context(), user.ID, serviceID, alias)
+
+	// Google services share the vault key "google" (or "google:<alias>").
+	// If other services still reference the same vault key, strip the
+	// deactivated service's scopes from the stored credential instead of
+	// deleting it. This ensures resolveOAuthScopes will re-request consent
+	// if the service is re-activated later.
+	vKey := vaultKeyForServiceAlias(serviceID, alias)
+	metas, _ := h.st.ListServiceMetas(r.Context(), user.ID)
+	otherUsesKey := false
+	for _, m := range metas {
+		if vaultKeyForServiceAlias(m.ServiceID, m.Alias) == vKey {
+			otherUsesKey = true
+			break
+		}
+	}
+	if otherUsesKey {
+		// Strip the deactivated service's scopes from the shared credential.
+		adapter, ok := h.adapterReg.Get(serviceID)
+		if ok {
+			h.removeAdapterScopes(r.Context(), user.ID, vKey, adapter)
+		}
+	} else {
+		_ = h.vault.Delete(r.Context(), user.ID, vKey)
+	}
+
+	h.logger.Info("service deactivated", "user", user.ID, "service", serviceID, "alias", alias)
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deactivated", "service": serviceID})
+}
+
 // reactivatePendingRequest re-executes a pending request after service activation.
 func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, requestID string) {
 	pa, err := h.st.GetPendingApproval(ctx, requestID)
@@ -519,3 +636,106 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 	h.logger.Info("pending request re-executed after activation",
 		"request_id", requestID, "outcome", outcome)
 }
+
+// resolveOAuthScopes checks whether the user already has a credential with
+// sufficient scopes for the requested service. If so, alreadyAuthorized is true.
+// Otherwise, it returns the merged set of existing + required scopes.
+func (h *ServicesHandler) resolveOAuthScopes(
+	ctx context.Context,
+	userID, serviceID, alias string,
+	adapter adapters.Adapter,
+) (mergedScopes []string, alreadyAuthorized bool) {
+	requiredScopes := adapter.RequiredScopes()
+	if len(requiredScopes) == 0 {
+		// Non-Google adapter or no scopes declared — use the adapter's default.
+		return adapter.OAuthConfig().Scopes, false
+	}
+
+	// Check for existing credential in the vault.
+	vKey := vaultKeyForServiceAlias(serviceID, alias)
+	existingBytes, err := h.vault.Get(ctx, userID, vKey)
+	if err != nil || len(existingBytes) == 0 {
+		// No existing credential — just use this adapter's scopes.
+		return requiredScopes, false
+	}
+
+	existingCred, err := credential.Parse(existingBytes)
+	if err != nil {
+		// Invalid credential — treat as no credential.
+		return requiredScopes, false
+	}
+
+	// If existing credential already has all required scopes, no OAuth needed.
+	if credential.HasAllScopes(existingCred.Scopes, requiredScopes) {
+		return existingCred.Scopes, true
+	}
+
+	// Merge existing + new scopes for incremental consent.
+	return credential.MergeScopes(existingCred.Scopes, requiredScopes), false
+}
+
+// oauthAuthURL builds the OAuth2 authorization URL. For non-default aliases
+// (multi-account), it adds prompt=select_account so the user can choose a
+// different Google account.
+func oauthAuthURL(cfg *oauth2.Config, stateToken, alias string) string {
+	opts := []oauth2.AuthCodeOption{
+		oauth2.SetAuthURLParam("include_granted_scopes", "true"),
+	}
+	if alias != "" && alias != "default" {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "select_account"))
+	}
+	return cfg.AuthCodeURL(stateToken, opts...)
+}
+
+// loadExistingRefreshToken retrieves the refresh token from an existing vault
+// credential, if any. Google may not re-issue a refresh token on re-consent.
+func (h *ServicesHandler) loadExistingRefreshToken(ctx context.Context, userID, serviceID, alias string) string {
+	vKey := vaultKeyForServiceAlias(serviceID, alias)
+	existingBytes, err := h.vault.Get(ctx, userID, vKey)
+	if err != nil || len(existingBytes) == 0 {
+		return ""
+	}
+	cred, err := credential.Parse(existingBytes)
+	if err != nil {
+		return ""
+	}
+	return cred.RefreshToken
+}
+
+// removeAdapterScopes strips the adapter's RequiredScopes from the stored
+// vault credential. Called during deactivation when other services still
+// share the same vault key — prevents resolveOAuthScopes from returning
+// already_authorized for a service the user explicitly deactivated.
+func (h *ServicesHandler) removeAdapterScopes(ctx context.Context, userID, vKey string, adapter adapters.Adapter) {
+	scopes := adapter.RequiredScopes()
+	if len(scopes) == 0 {
+		return
+	}
+	existingBytes, err := h.vault.Get(ctx, userID, vKey)
+	if err != nil || len(existingBytes) == 0 {
+		return
+	}
+	cred, err := credential.Parse(existingBytes)
+	if err != nil {
+		return
+	}
+
+	remove := make(map[string]bool, len(scopes))
+	for _, s := range scopes {
+		remove[s] = true
+	}
+	filtered := make([]string, 0, len(cred.Scopes))
+	for _, s := range cred.Scopes {
+		if !remove[s] {
+			filtered = append(filtered, s)
+		}
+	}
+	cred.Scopes = filtered
+
+	updated, err := json.Marshal(cred)
+	if err != nil {
+		return
+	}
+	_ = h.vault.Set(ctx, userID, vKey, updated)
+}
+

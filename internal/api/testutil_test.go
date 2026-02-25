@@ -281,6 +281,7 @@ func (m *mockAdapter) Execute(_ context.Context, _ adapters.Request) (*adapters.
 }
 
 func (m *mockAdapter) OAuthConfig() *oauth2.Config { return nil }
+func (m *mockAdapter) RequiredScopes() []string     { return nil }
 
 func (m *mockAdapter) CredentialFromToken(_ *oauth2.Token) ([]byte, error) {
 	return []byte("mock-cred"), nil

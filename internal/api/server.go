@@ -193,6 +193,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/oauth/callback", servicesHandler.OAuthCallback) // no auth: browser redirect
 	mux.Handle("POST /api/services/{serviceID}/activate", user(servicesHandler.Activate))
 	mux.Handle("POST /api/services/{serviceID}/activate-key", user(servicesHandler.ActivateWithKey))
+	mux.Handle("POST /api/services/{serviceID}/deactivate", user(servicesHandler.Deactivate))
 
 	// Skill catalog (agent token)
 	mux.Handle("GET /api/skill/catalog", agent(skillHandler.Catalog))

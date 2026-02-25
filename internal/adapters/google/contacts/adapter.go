@@ -9,32 +9,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/adapters/format"
+	"github.com/ericlevine/clawvisor/internal/adapters/google/credential"
 )
 
 const serviceID = "google.contacts"
 
-type storedCredential struct {
-	Type         string    `json:"type"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	Scopes       []string  `json:"scopes"`
-}
-
-var allGoogleScopes = []string{
-	"https://www.googleapis.com/auth/gmail.readonly",
-	"https://www.googleapis.com/auth/gmail.send",
-	"https://www.googleapis.com/auth/calendar.readonly",
-	"https://www.googleapis.com/auth/calendar.events",
-	"https://www.googleapis.com/auth/drive.readonly",
-	"https://www.googleapis.com/auth/drive.file",
+// contactsScopes are the OAuth scopes required by the Contacts adapter.
+var contactsScopes = []string{
 	"https://www.googleapis.com/auth/contacts.readonly",
 }
 
@@ -56,36 +43,24 @@ func (a *ContactsAdapter) SupportedActions() []string {
 	return []string{"list_contacts", "get_contact", "search_contacts"}
 }
 
+func (a *ContactsAdapter) RequiredScopes() []string { return contactsScopes }
+
 func (a *ContactsAdapter) OAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		RedirectURL:  a.redirectURL,
-		Scopes:       allGoogleScopes,
+		Scopes:       contactsScopes,
 		Endpoint:     google.Endpoint,
 	}
 }
 
 func (a *ContactsAdapter) CredentialFromToken(token *oauth2.Token) ([]byte, error) {
-	cred := storedCredential{
-		Type:         "oauth2",
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		Scopes:       allGoogleScopes,
-	}
-	return json.Marshal(cred)
+	return credential.FromToken(token, contactsScopes)
 }
 
 func (a *ContactsAdapter) ValidateCredential(credBytes []byte) error {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return fmt.Errorf("contacts: invalid credential: %w", err)
-	}
-	if cred.RefreshToken == "" && cred.AccessToken == "" {
-		return fmt.Errorf("contacts: credential missing tokens")
-	}
-	return nil
+	return credential.Validate(credBytes)
 }
 
 func (a *ContactsAdapter) Execute(ctx context.Context, req adapters.Request) (*adapters.Result, error) {
@@ -147,17 +122,11 @@ func (a *ContactsAdapter) IsInContacts(ctx context.Context, cred []byte, email s
 }
 
 func (a *ContactsAdapter) httpClient(ctx context.Context, credBytes []byte) (*http.Client, error) {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return nil, fmt.Errorf("contacts: parsing credential: %w", err)
+	cred, err := credential.Parse(credBytes)
+	if err != nil {
+		return nil, fmt.Errorf("contacts: %w", err)
 	}
-	token := &oauth2.Token{
-		AccessToken:  cred.AccessToken,
-		RefreshToken: cred.RefreshToken,
-		Expiry:       cred.Expiry,
-		TokenType:    "Bearer",
-	}
-	ts := a.OAuthConfig().TokenSource(ctx, token)
+	ts := a.OAuthConfig().TokenSource(ctx, cred.ToOAuth2Token())
 	return oauth2.NewClient(ctx, ts), nil
 }
 

@@ -71,6 +71,9 @@ func (a *IMessageAdapter) SupportedActions() []string {
 // OAuthConfig returns nil — iMessage uses local file access, no OAuth.
 func (a *IMessageAdapter) OAuthConfig() *oauth2.Config { return nil }
 
+// RequiredScopes returns nil — iMessage uses local file access, not OAuth scopes.
+func (a *IMessageAdapter) RequiredScopes() []string { return nil }
+
 // CredentialFromToken is unused for local services.
 func (a *IMessageAdapter) CredentialFromToken(_ *oauth2.Token) ([]byte, error) {
 	return nil, fmt.Errorf("imessage: no token exchange — local service")

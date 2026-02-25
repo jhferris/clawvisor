@@ -44,6 +44,9 @@ func (a *GitHubAdapter) SupportedActions() []string {
 // OAuthConfig returns nil — GitHub uses API keys, not OAuth.
 func (a *GitHubAdapter) OAuthConfig() *oauth2.Config { return nil }
 
+// RequiredScopes returns nil — GitHub uses API keys, not OAuth scopes.
+func (a *GitHubAdapter) RequiredScopes() []string { return nil }
+
 // CredentialFromToken is unused for API-key services.
 func (a *GitHubAdapter) CredentialFromToken(_ *oauth2.Token) ([]byte, error) {
 	return nil, fmt.Errorf("github: OAuth token exchange not supported — use API key activation")

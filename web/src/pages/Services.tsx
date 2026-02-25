@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ServiceInfo } from '../api/client'
 import { formatDistanceToNow } from 'date-fns'
-import { serviceName, actionName, serviceBrand, serviceDescription } from '../lib/services'
+import { serviceName, actionName, serviceDescription } from '../lib/services'
 
-// ── Active Service Card ──────────────────────────────────────────────────────
+// ── Active Service Row ───────────────────────────────────────────────────────
 
-function ActiveServiceCard({ svc }: { svc: ServiceInfo }) {
+function ActiveServiceRow({ svc }: { svc: ServiceInfo }) {
   const qc = useQueryClient()
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
@@ -18,9 +18,15 @@ function ActiveServiceCard({ svc }: { svc: ServiceInfo }) {
   async function handleReauth() {
     setError(null)
     try {
-      const { url } = await api.services.oauthGetUrl(svc.id, undefined, alias)
-      const popup = window.open(url, '_blank', 'width=600,height=700')
-      if (!popup) window.location.href = url
+      const resp = await api.services.oauthGetUrl(svc.id, undefined, alias)
+      if (resp.already_authorized) {
+        qc.invalidateQueries({ queryKey: ['services'] })
+        return
+      }
+      if (resp.url) {
+        const popup = window.open(resp.url, '_blank', 'width=600,height=700')
+        if (!popup) window.location.href = resp.url
+      }
     } catch (e: any) {
       setError(e.message ?? 'Failed to start OAuth flow')
     }
@@ -44,78 +50,84 @@ function ActiveServiceCard({ svc }: { svc: ServiceInfo }) {
 
   async function handleDeactivate() {
     if (!confirm(`Deactivate ${serviceName(svc.id, svc.alias)}? Your agents will lose access.`)) return
-    qc.invalidateQueries({ queryKey: ['services'] })
+    setError(null)
+    try {
+      await api.services.deactivate(svc.id, alias)
+      qc.invalidateQueries({ queryKey: ['services'] })
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to deactivate service')
+    }
   }
 
-  const brand = serviceBrand(svc.id)
-
   return (
-    <div className={`bg-white border rounded-lg p-5 space-y-3 border-l-4 ${brand.border}`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="font-semibold text-gray-900">{serviceName(svc.id, svc.alias)}</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {svc.id}{svc.alias && svc.alias !== 'default' ? `:${svc.alias}` : ''}
-          </p>
+    <div>
+      <div className="flex items-center gap-4 px-4 py-3">
+        {/* Name + meta */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-gray-900 text-sm truncate">{serviceName(svc.id, svc.alias)}</span>
+            <span className="text-xs text-gray-400 shrink-0">
+              {svc.id}{svc.alias && svc.alias !== 'default' ? `:${svc.alias}` : ''}
+            </span>
+          </div>
           <p className="text-xs text-gray-400 mt-0.5">{svc.actions.map(a => actionName(a)).join(' · ')}</p>
         </div>
-        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">Active</span>
-      </div>
 
-      {svc.activated_at && (
-        <p className="text-xs text-gray-400">
-          Activated {formatDistanceToNow(new Date(svc.activated_at), { addSuffix: true })}
-        </p>
-      )}
+        {/* Activated time */}
+        {svc.activated_at && (
+          <span className="text-xs text-gray-400 shrink-0 hidden sm:block">
+            {formatDistanceToNow(new Date(svc.activated_at), { addSuffix: true })}
+          </span>
+        )}
 
-      {error && <p className="text-xs text-red-500">{error}</p>}
-
-      {svc.requires_activation !== false && (
-        <div className="pt-1 space-y-2">
-          <div className="flex gap-2">
+        {/* Actions */}
+        {svc.requires_activation !== false && (
+          <div className="flex gap-1.5 shrink-0">
             {svc.oauth ? (
               <button
                 onClick={handleReauth}
-                className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                className="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
               >
                 Re-authorize
               </button>
             ) : (
               <button
                 onClick={() => { setShowKeyInput(v => !v); setError(null) }}
-                className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                className="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
               >
                 Update token
               </button>
             )}
             <button
               onClick={handleDeactivate}
-              className="text-xs px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
+              className="text-xs px-2.5 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
             >
               Deactivate
             </button>
           </div>
+        )}
+      </div>
 
-          {showKeyInput && (
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKeyInput}
-                onChange={e => setApiKeyInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
-                placeholder="Paste your token…"
-                className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                autoFocus
-              />
-              <button
-                onClick={handleSaveKey}
-                disabled={saving || !apiKeyInput.trim()}
-                className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          )}
+      {error && <p className="text-xs text-red-500 px-4 pb-2">{error}</p>}
+
+      {showKeyInput && (
+        <div className="flex gap-2 px-4 pb-3">
+          <input
+            type="password"
+            value={apiKeyInput}
+            onChange={e => setApiKeyInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+            placeholder="Paste your token…"
+            className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            autoFocus
+          />
+          <button
+            onClick={handleSaveKey}
+            disabled={saving || !apiKeyInput.trim()}
+            className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         </div>
       )}
     </div>
@@ -192,9 +204,16 @@ function AddServiceModal({
   async function handleActivateOAuth(serviceId: string, alias?: string) {
     setError(null)
     try {
-      const { url } = await api.services.oauthGetUrl(serviceId, undefined, alias)
-      const popup = window.open(url, '_blank', 'width=600,height=700')
-      if (!popup) window.location.href = url
+      const resp = await api.services.oauthGetUrl(serviceId, undefined, alias)
+      if (resp.already_authorized) {
+        qc.invalidateQueries({ queryKey: ['services'] })
+        onClose()
+        return
+      }
+      if (resp.url) {
+        const popup = window.open(resp.url, '_blank', 'width=600,height=700')
+        if (!popup) window.location.href = resp.url
+      }
     } catch (e: any) {
       setError(e.message ?? 'Failed to start OAuth flow')
     }
@@ -218,19 +237,7 @@ function AddServiceModal({
     }
   }
 
-  function startActivation(st: ServiceType, alias?: string) {
-    setError(null)
-    setAliasInputFor(null)
-    setAliasValue('')
-    if (st.oauth) {
-      handleActivateOAuth(st.baseId, alias)
-    } else {
-      setKeyInputFor(st.baseId)
-      setKeyAlias(alias)
-    }
-  }
-
-  function startAddAccount(st: ServiceType) {
+  function showAliasPrompt(st: ServiceType) {
     setError(null)
     setKeyInputFor(null)
     setKeyValue('')
@@ -239,13 +246,16 @@ function AddServiceModal({
   }
 
   function confirmAlias(st: ServiceType) {
-    const alias = aliasValue.trim()
-    if (!alias) return
+    const alias = aliasValue.trim() || undefined
     setAliasInputFor(null)
-    startActivation(st, alias)
+    setError(null)
+    if (st.oauth) {
+      handleActivateOAuth(st.baseId, alias)
+    } else {
+      setKeyInputFor(st.baseId)
+      setKeyAlias(alias)
+    }
   }
-
-  const brand = serviceBrand
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -270,11 +280,10 @@ function AddServiceModal({
           {error && <p className="text-xs text-red-500">{error}</p>}
 
           {serviceTypes.map(st => {
-            const b = brand(st.baseId)
             const isActivated = st.activatedCount > 0
             const desc = serviceDescription(st.baseId)
             return (
-              <div key={st.baseId} className={`border rounded-lg p-4 space-y-2 border-l-4 ${b.border}`}>
+              <div key={st.baseId} className="border rounded-lg p-4 space-y-2">
                 <div>
                   <h3 className="font-semibold text-gray-900">{serviceName(st.baseId)}</h3>
                   {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
@@ -283,31 +292,33 @@ function AddServiceModal({
                   </p>
                 </div>
 
-                {/* Alias input */}
+                {/* Label input */}
                 {aliasInputFor === st.baseId && (
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={aliasValue}
-                      onChange={e => setAliasValue(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && confirmAlias(st)}
-                      placeholder="Account name (e.g. personal)"
-                      className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => confirmAlias(st)}
-                      disabled={!aliasValue.trim()}
-                      className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      Continue
-                    </button>
-                    <button
-                      onClick={() => setAliasInputFor(null)}
-                      className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-gray-500">Label this connection (leave blank for default):</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={aliasValue}
+                        onChange={e => setAliasValue(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && confirmAlias(st)}
+                        placeholder="e.g. personal, work"
+                        className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => confirmAlias(st)}
+                        className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Continue
+                      </button>
+                      <button
+                        onClick={() => setAliasInputFor(null)}
+                        className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -339,26 +350,17 @@ function AddServiceModal({
                   </div>
                 )}
 
-                {/* Action buttons (hide when inline inputs are active for this service) */}
+                {/* Action button (hide when inline inputs are active for this service) */}
                 {aliasInputFor !== st.baseId && keyInputFor !== st.baseId && (
-                  <div className="flex gap-2">
-                    {!isActivated && (
-                      <button
-                        onClick={() => startActivation(st)}
-                        className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        Activate
-                      </button>
-                    )}
-                    {isActivated && (
-                      <button
-                        onClick={() => startAddAccount(st)}
-                        className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                      >
-                        + Add account
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    onClick={() => showAliasPrompt(st)}
+                    className={`text-xs px-3 py-1.5 rounded ${isActivated
+                      ? 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    {isActivated ? '+ Add account' : 'Activate'}
+                  </button>
                 )}
               </div>
             )
@@ -422,9 +424,9 @@ export default function Services() {
         </p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="bg-white border rounded-lg divide-y">
         {activeServices.map(svc => (
-          <ActiveServiceCard key={`${svc.id}:${svc.alias ?? 'default'}`} svc={svc} />
+          <ActiveServiceRow key={`${svc.id}:${svc.alias ?? 'default'}`} svc={svc} />
         ))}
       </div>
 

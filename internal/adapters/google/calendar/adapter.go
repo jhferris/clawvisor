@@ -16,30 +16,15 @@ import (
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/adapters/format"
+	"github.com/ericlevine/clawvisor/internal/adapters/google/credential"
 )
 
 const serviceID = "google.calendar"
 
-// storedCredential is the JSON structure saved (encrypted) in the vault under key "google".
-// Shared across all Google adapters.
-type storedCredential struct {
-	Type         string    `json:"type"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	Scopes       []string  `json:"scopes"`
-}
-
-// allGoogleScopes is the unified scope set for all Google services.
-// All Google adapters request the same scopes for a single OAuth consent.
-var allGoogleScopes = []string{
-	"https://www.googleapis.com/auth/gmail.readonly",
-	"https://www.googleapis.com/auth/gmail.send",
+// calendarScopes are the OAuth scopes required by the Calendar adapter.
+var calendarScopes = []string{
 	"https://www.googleapis.com/auth/calendar.readonly",
 	"https://www.googleapis.com/auth/calendar.events",
-	"https://www.googleapis.com/auth/drive.readonly",
-	"https://www.googleapis.com/auth/drive.file",
-	"https://www.googleapis.com/auth/contacts.readonly",
 }
 
 // CalendarAdapter implements adapters.Adapter for Google Calendar.
@@ -59,36 +44,24 @@ func (a *CalendarAdapter) SupportedActions() []string {
 	return []string{"list_events", "get_event", "create_event", "update_event", "delete_event", "list_calendars"}
 }
 
+func (a *CalendarAdapter) RequiredScopes() []string { return calendarScopes }
+
 func (a *CalendarAdapter) OAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		RedirectURL:  a.redirectURL,
-		Scopes:       allGoogleScopes,
+		Scopes:       calendarScopes,
 		Endpoint:     google.Endpoint,
 	}
 }
 
 func (a *CalendarAdapter) CredentialFromToken(token *oauth2.Token) ([]byte, error) {
-	cred := storedCredential{
-		Type:         "oauth2",
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		Scopes:       allGoogleScopes,
-	}
-	return json.Marshal(cred)
+	return credential.FromToken(token, calendarScopes)
 }
 
 func (a *CalendarAdapter) ValidateCredential(credBytes []byte) error {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return fmt.Errorf("calendar: invalid credential: %w", err)
-	}
-	if cred.RefreshToken == "" && cred.AccessToken == "" {
-		return fmt.Errorf("calendar: credential missing tokens")
-	}
-	return nil
+	return credential.Validate(credBytes)
 }
 
 func (a *CalendarAdapter) Execute(ctx context.Context, req adapters.Request) (*adapters.Result, error) {
@@ -115,17 +88,11 @@ func (a *CalendarAdapter) Execute(ctx context.Context, req adapters.Request) (*a
 }
 
 func (a *CalendarAdapter) httpClient(ctx context.Context, credBytes []byte) (*http.Client, error) {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return nil, fmt.Errorf("calendar: parsing credential: %w", err)
+	cred, err := credential.Parse(credBytes)
+	if err != nil {
+		return nil, fmt.Errorf("calendar: %w", err)
 	}
-	token := &oauth2.Token{
-		AccessToken:  cred.AccessToken,
-		RefreshToken: cred.RefreshToken,
-		Expiry:       cred.Expiry,
-		TokenType:    "Bearer",
-	}
-	ts := a.OAuthConfig().TokenSource(ctx, token)
+	ts := a.OAuthConfig().TokenSource(ctx, cred.ToOAuth2Token())
 	return oauth2.NewClient(ctx, ts), nil
 }
 

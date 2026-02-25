@@ -44,6 +44,9 @@ type Adapter interface {
 	CredentialFromToken(token *oauth2.Token) ([]byte, error)
 	// ValidateCredential checks whether stored credential bytes are parseable/valid.
 	ValidateCredential(credBytes []byte) error
+	// RequiredScopes returns the OAuth scopes this adapter needs.
+	// Returns nil for non-OAuth or non-Google adapters.
+	RequiredScopes() []string
 }
 
 // ServiceInfo is returned by the service catalog endpoint.

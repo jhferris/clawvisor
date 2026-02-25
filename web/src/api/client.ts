@@ -272,8 +272,9 @@ export const api = {
   services: {
     list: () => get<{ services: ServiceInfo[] }>('/api/services'),
     // Returns the OAuth consent URL via authenticated fetch (fixes missing-auth-header issue).
+    // If the user already has all required scopes, returns {already_authorized: true} instead.
     oauthGetUrl: (serviceID: string, pendingReqId?: string, alias?: string) =>
-      get<{ url: string }>('/api/oauth/url', {
+      get<{ url?: string; already_authorized?: boolean; service?: string }>('/api/oauth/url', {
         service: serviceID,
         ...(pendingReqId ? { pending_request_id: pendingReqId } : {}),
         ...(alias ? { alias } : {}),
@@ -281,6 +282,10 @@ export const api = {
     activateWithKey: (serviceID: string, token: string, alias?: string) =>
       post<{ status: string; service: string }>(`/api/services/${serviceID}/activate-key`, {
         token,
+        ...(alias ? { alias } : {}),
+      }),
+    deactivate: (serviceID: string, alias?: string) =>
+      post<{ status: string; service: string }>(`/api/services/${serviceID}/deactivate`, {
         ...(alias ? { alias } : {}),
       }),
   },

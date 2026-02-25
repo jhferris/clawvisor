@@ -10,33 +10,21 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
 	"github.com/ericlevine/clawvisor/internal/adapters/format"
+	"github.com/ericlevine/clawvisor/internal/adapters/google/credential"
 )
 
 const serviceID = "google.drive"
 
-type storedCredential struct {
-	Type         string    `json:"type"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	Scopes       []string  `json:"scopes"`
-}
-
-var allGoogleScopes = []string{
-	"https://www.googleapis.com/auth/gmail.readonly",
-	"https://www.googleapis.com/auth/gmail.send",
-	"https://www.googleapis.com/auth/calendar.readonly",
-	"https://www.googleapis.com/auth/calendar.events",
+// driveScopes are the OAuth scopes required by the Drive adapter.
+var driveScopes = []string{
 	"https://www.googleapis.com/auth/drive.readonly",
 	"https://www.googleapis.com/auth/drive.file",
-	"https://www.googleapis.com/auth/contacts.readonly",
 }
 
 // DriveAdapter implements adapters.Adapter for Google Drive.
@@ -56,36 +44,24 @@ func (a *DriveAdapter) SupportedActions() []string {
 	return []string{"list_files", "get_file", "create_file", "update_file", "search_files"}
 }
 
+func (a *DriveAdapter) RequiredScopes() []string { return driveScopes }
+
 func (a *DriveAdapter) OAuthConfig() *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     a.clientID,
 		ClientSecret: a.clientSecret,
 		RedirectURL:  a.redirectURL,
-		Scopes:       allGoogleScopes,
+		Scopes:       driveScopes,
 		Endpoint:     google.Endpoint,
 	}
 }
 
 func (a *DriveAdapter) CredentialFromToken(token *oauth2.Token) ([]byte, error) {
-	cred := storedCredential{
-		Type:         "oauth2",
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		Scopes:       allGoogleScopes,
-	}
-	return json.Marshal(cred)
+	return credential.FromToken(token, driveScopes)
 }
 
 func (a *DriveAdapter) ValidateCredential(credBytes []byte) error {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return fmt.Errorf("drive: invalid credential: %w", err)
-	}
-	if cred.RefreshToken == "" && cred.AccessToken == "" {
-		return fmt.Errorf("drive: credential missing tokens")
-	}
-	return nil
+	return credential.Validate(credBytes)
 }
 
 func (a *DriveAdapter) Execute(ctx context.Context, req adapters.Request) (*adapters.Result, error) {
@@ -110,17 +86,11 @@ func (a *DriveAdapter) Execute(ctx context.Context, req adapters.Request) (*adap
 }
 
 func (a *DriveAdapter) httpClient(ctx context.Context, credBytes []byte) (*http.Client, error) {
-	var cred storedCredential
-	if err := json.Unmarshal(credBytes, &cred); err != nil {
-		return nil, fmt.Errorf("drive: parsing credential: %w", err)
+	cred, err := credential.Parse(credBytes)
+	if err != nil {
+		return nil, fmt.Errorf("drive: %w", err)
 	}
-	token := &oauth2.Token{
-		AccessToken:  cred.AccessToken,
-		RefreshToken: cred.RefreshToken,
-		Expiry:       cred.Expiry,
-		TokenType:    "Bearer",
-	}
-	ts := a.OAuthConfig().TokenSource(ctx, token)
+	ts := a.OAuthConfig().TokenSource(ctx, cred.ToOAuth2Token())
 	return oauth2.NewClient(ctx, ts), nil
 }
 
