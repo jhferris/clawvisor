@@ -91,6 +91,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
+	rawToken := middleware.AgentRawToken(ctx)
 
 	var req gateway.Request
 	if !decodeJSON(w, r, &req) {
@@ -103,6 +104,12 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	if req.Reason == "" {
 		writeError(w, http.StatusBadRequest, "MISSING_REASON", "reason is required on every gateway request")
 		return
+	}
+	if req.Context.CallbackURL != "" {
+		if err := callback.ValidateCallbackURL(req.Context.CallbackURL); err != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_CALLBACK_URL", err.Error())
+			return
+		}
 	}
 
 	// Parse alias from service field (e.g. "google.gmail:personal" → type="google.gmail", alias="personal").
@@ -285,7 +292,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 							h.logger.Warn("audit log failed", "err", logErr)
 						}
 						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-						blob := buildRequestBlob(req, agent, nil)
+						blob := buildRequestBlob(req, agent, rawToken, nil)
 						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 							h.baseURL, serviceType, req.RequestID)
 						denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -313,11 +320,11 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
 				if req.Context.CallbackURL != "" {
-					tokenHash := agent.TokenHash
+					cbKey := rawToken
 					go func() {
 						_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
 							RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
-						}, tokenHash)
+						}, cbKey)
 					}()
 				}
 				writeJSON(w, http.StatusOK, map[string]any{
@@ -346,7 +353,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
 				expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-				blob := buildRequestBlob(req, agent, responseFilters)
+				blob := buildRequestBlob(req, agent, rawToken, responseFilters)
 				if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
 					req.Context.CallbackURL, expiresAt, "Safety: "+safetyResult.Reason,
 					true, safetyResult.Reason); routeErr != nil {
@@ -376,11 +383,11 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
 			if req.Context.CallbackURL != "" {
-				tokenHash := agent.TokenHash
+				cbKey := rawToken
 				go func() {
 					_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
 						RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
-					}, tokenHash)
+					}, cbKey)
 				}()
 			}
 			writeJSON(w, http.StatusOK, map[string]any{
@@ -430,7 +437,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
 		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-		blob := buildRequestBlob(req, agent, nil)
+		blob := buildRequestBlob(req, agent, rawToken, nil)
 		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 			h.baseURL, serviceType, req.RequestID)
 		denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -460,7 +467,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("audit log failed", "err", logErr)
 	}
 	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-	blob := buildRequestBlob(req, agent, nil)
+	blob := buildRequestBlob(req, agent, rawToken, nil)
 	reason := ""
 	if hardcoded {
 		reason = "iMessage send_message always requires human approval"
@@ -712,7 +719,7 @@ func vaultKeyForServiceAlias(serviceType, alias string) string {
 	return base + ":" + alias
 }
 
-func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters []filters.ResponseFilter) *pendingRequestBlob {
+func buildRequestBlob(req gateway.Request, agent *store.Agent, rawToken string, responseFilters []filters.ResponseFilter) *pendingRequestBlob {
 	return &pendingRequestBlob{
 		Service:         req.Service,
 		Action:          req.Action,
@@ -723,7 +730,7 @@ func buildRequestBlob(req gateway.Request, agent *store.Agent, responseFilters [
 		RequestID:       req.RequestID,
 		Reason:          req.Reason,
 		CallbackURL:     req.Context.CallbackURL,
-		CallbackKey:     agent.TokenHash,
+		CallbackKey:     rawToken,
 		ResponseFilters: responseFilters,
 	}
 }

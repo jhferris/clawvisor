@@ -54,7 +54,7 @@ type AuthConfig struct {
 
 type ApprovalConfig struct {
 	Timeout   int    `yaml:"timeout"`
-	OnTimeout string `yaml:"on_timeout"`
+	OnTimeout string `yaml:"on_timeout"` // Reserved for Phase 9: behavior when approval times out ("fail" or "allow")
 }
 
 // LLMProviderConfig holds settings for one LLM provider endpoint.
@@ -84,8 +84,9 @@ type LLMConfig struct {
 	Verification VerificationConfig `yaml:"verification"` // Intent verification (runtime)
 }
 
+// MCPConfig holds settings for the MCP server (Phase 8).
 type MCPConfig struct {
-	ApprovalTimeout int `yaml:"approval_timeout"`
+	ApprovalTimeout int `yaml:"approval_timeout"` // Reserved for Phase 8: MCP tool call approval timeout in seconds (default 240s)
 }
 
 // GoogleConfig holds OAuth2 credentials for all Google adapters.

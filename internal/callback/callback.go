@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/ericlevine/clawvisor/internal/adapters"
@@ -26,6 +28,66 @@ type Payload struct {
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
+// ValidateCallbackURL checks that a callback URL is safe to send requests to.
+// It rejects private, link-local, and metadata IP ranges to prevent SSRF.
+// Loopback addresses (127.0.0.0/8, ::1) are allowed for local development.
+func ValidateCallbackURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid callback URL: %w", err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("callback URL scheme must be https (got %q)", u.Scheme)
+	}
+
+	hostname := u.Hostname()
+
+	// Resolve to IPs and check each one.
+	ips, err := net.LookupHost(hostname)
+	if err != nil {
+		return fmt.Errorf("callback URL: cannot resolve host %q: %w", hostname, err)
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if isSSRFTarget(ip) {
+			return fmt.Errorf("callback URL resolves to private/reserved IP %s", ipStr)
+		}
+	}
+	return nil
+}
+
+// ssrfRanges are CIDR blocks that must not be targeted by callbacks.
+// Loopback (127.0.0.0/8, ::1) is intentionally excluded — it's needed for
+// local development and the agent's own callback server.
+var ssrfRanges = func() []*net.IPNet {
+	cidrs := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16", // link-local / cloud metadata
+		"fc00::/7",
+		"fe80::/10",
+	}
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		_, n, _ := net.ParseCIDR(cidr)
+		nets = append(nets, n)
+	}
+	return nets
+}()
+
+func isSSRFTarget(ip net.IP) bool {
+	for _, n := range ssrfRanges {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // DeliverResult POSTs a result payload to the given callback URL.
 // signingKey is the raw agent bearer token; if non-empty an HMAC-SHA256 signature
 // of the body is added as X-Clawvisor-Signature: sha256=<hex>.
@@ -33,6 +95,10 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, signingKey string) error {
 	if callbackURL == "" {
 		return nil
+	}
+
+	if err := ValidateCallbackURL(callbackURL); err != nil {
+		return fmt.Errorf("callback: %w", err)
 	}
 
 	body, err := json.Marshal(payload)

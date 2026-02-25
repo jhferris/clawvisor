@@ -7,6 +7,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -41,6 +42,14 @@ type oauthStateEntry struct {
 	PendingReqID string // pending_request_id query param (may be empty)
 	Scopes       []string  // merged scopes for this OAuth flow
 	ExpiresAt    time.Time
+}
+
+// validAliasRe matches safe alias values: alphanumeric, underscores, hyphens.
+var validAliasRe = regexp.MustCompile(`^[a-zA-Z0-9_-]*$`)
+
+// validAlias returns true if s is a safe service alias (empty is OK, maps to "default").
+func validAlias(s string) bool {
+	return validAliasRe.MatchString(s)
 }
 
 func NewServicesHandler(st store.Store, v vault.Vault, adapterReg *adapters.Registry, logger *slog.Logger, baseURL string) *ServicesHandler {
@@ -181,6 +190,8 @@ func (h *ServicesHandler) List(w http.ResponseWriter, r *http.Request) {
 // Auth: user JWT
 // Response: {"url": "https://accounts.google.com/..."} or {"already_authorized": true, ...}
 func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
+	h.sweepExpiredOAuthStates()
+
 	user := middleware.UserFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
@@ -208,6 +219,10 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 	alias := r.URL.Query().Get("alias")
 	if alias == "" {
 		alias = "default"
+	}
+	if !validAlias(alias) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "alias contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+		return
 	}
 
 	mergedScopes, alreadyAuthorized := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
@@ -241,6 +256,8 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 // GET /api/oauth/start?service=google.gmail[&alias=personal][&pending_request_id=...]
 // Auth: user JWT
 func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
+	h.sweepExpiredOAuthStates()
+
 	user := middleware.UserFromContext(r.Context())
 	if user == nil {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
@@ -268,6 +285,10 @@ func (h *ServicesHandler) OAuthStart(w http.ResponseWriter, r *http.Request) {
 	alias := r.URL.Query().Get("alias")
 	if alias == "" {
 		alias = "default"
+	}
+	if !validAlias(alias) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "alias contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+		return
 	}
 
 	mergedScopes, _ := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
@@ -436,6 +457,10 @@ func (h *ServicesHandler) Activate(w http.ResponseWriter, r *http.Request) {
 		if alias == "" {
 			alias = "default"
 		}
+		if !validAlias(alias) {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "alias contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+			return
+		}
 
 		mergedScopes, alreadyAuthorized := h.resolveOAuthScopes(r.Context(), user.ID, serviceID, alias, adapter)
 		if alreadyAuthorized {
@@ -510,6 +535,10 @@ func (h *ServicesHandler) ActivateWithKey(w http.ResponseWriter, r *http.Request
 	if alias == "" {
 		alias = "default"
 	}
+	if !validAlias(alias) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "alias contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+		return
+	}
 
 	// Build and validate the credential bytes.
 	credBytes, err := json.Marshal(map[string]string{"type": "api_key", "token": body.Token})
@@ -559,6 +588,10 @@ func (h *ServicesHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 	alias := body.Alias
 	if alias == "" {
 		alias = "default"
+	}
+	if !validAlias(alias) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "alias contains invalid characters (allowed: a-z, A-Z, 0-9, _, -)")
+		return
 	}
 
 	// Remove the service_meta record first.
@@ -672,6 +705,19 @@ func (h *ServicesHandler) resolveOAuthScopes(
 
 	// Merge existing + new scopes for incremental consent.
 	return credential.MergeScopes(existingCred.Scopes, requiredScopes), false
+}
+
+// sweepExpiredOAuthStates removes OAuth state entries older than 10 minutes.
+// Called lazily on each new OAuth URL generation.
+func (h *ServicesHandler) sweepExpiredOAuthStates() {
+	now := time.Now()
+	h.oauthStates.Range(func(key, value any) bool {
+		entry := value.(oauthStateEntry)
+		if now.After(entry.ExpiresAt) {
+			h.oauthStates.Delete(key)
+		}
+		return true
+	})
 }
 
 // oauthAuthURL builds the OAuth2 authorization URL. For non-default aliases

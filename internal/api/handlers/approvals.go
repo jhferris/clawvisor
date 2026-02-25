@@ -141,6 +141,7 @@ func (h *ApprovalsHandler) DenyByRequestID(ctx context.Context, requestID, userI
 	_ = h.st.DeletePendingApproval(ctx, requestID)
 
 	h.updateNotificationMsg(ctx, "approval", requestID, pa.UserID, "❌ <b>Denied</b> — request rejected.")
+	h.decrementNotifierPolling(pa.UserID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		tok := denyBlob.CallbackKey
@@ -190,6 +191,7 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 	_ = h.st.DeletePendingApproval(r.Context(), requestID)
 
 	h.updateNotificationMsg(r.Context(), "approval", requestID, pa.UserID, "❌ <b>Denied</b> — request rejected.")
+	h.decrementNotifierPolling(pa.UserID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		tok := denyBlob.CallbackKey
@@ -232,7 +234,11 @@ func (h *ApprovalsHandler) executeApproval(ctx context.Context, pa *store.Pendin
 	_ = h.st.UpdateAuditOutcome(ctx, pa.AuditID, outcome, errMsg, dur)
 	_ = h.st.DeletePendingApproval(ctx, pa.RequestID)
 
-	h.updateNotificationMsg(ctx, "approval", pa.RequestID, pa.UserID, "✅ <b>Approved</b> — request executed.")
+	notifyText := "✅ <b>Approved</b> — request executed."
+	if errMsg != "" {
+		notifyText = "✅ <b>Approved</b> — execution failed: " + errMsg
+	}
+	h.updateNotificationMsg(ctx, "approval", pa.RequestID, pa.UserID, notifyText)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		var cbResult *adapters.Result
@@ -295,6 +301,7 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 				AuditID:   pa.AuditID,
 			}, expiryBlob.CallbackKey)
 		}
+		h.decrementNotifierPolling(pa.UserID)
 		h.logger.Info("pending approval expired", "request_id", pa.RequestID)
 	}
 
@@ -315,7 +322,18 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 				Status:    "task_expired",
 			}, "")
 		}
+		h.decrementNotifierPolling(task.UserID)
 		h.logger.Info("task expired", "task_id", task.ID)
+	}
+}
+
+// decrementNotifierPolling calls DecrementPolling on the notifier if it supports it.
+func (h *ApprovalsHandler) decrementNotifierPolling(userID string) {
+	if h.notifier == nil {
+		return
+	}
+	if pd, ok := h.notifier.(notify.PollingDecrementer); ok {
+		pd.DecrementPolling(userID)
 	}
 }
 

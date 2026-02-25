@@ -47,8 +47,8 @@ func (n *Notifier) ensurePolling(userID, botToken, chatID string) {
 	go n.pollForCallbacks(ctx, ps)
 }
 
-// decrementPolling decrements the pending count and stops polling if ≤0.
-func (n *Notifier) decrementPolling(userID string) {
+// DecrementPolling decrements the pending count and stops polling if ≤0.
+func (n *Notifier) DecrementPolling(userID string) {
 	val, ok := n.pollers.Load(userID)
 	if !ok {
 		return
@@ -191,7 +191,7 @@ func (n *Notifier) handleCallbackQuery(ctx context.Context, ps *pollingSession, 
 	}
 
 	// Decrement pending count.
-	n.decrementPolling(ps.userID)
+	n.DecrementPolling(ps.userID)
 
 	logger.Info("telegram callback processed",
 		"user_id", entry.UserID, "type", entry.Type,

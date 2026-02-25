@@ -695,6 +695,7 @@ func (h *TasksHandler) DenyByTaskID(ctx context.Context, taskID, userID string) 
 	}
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "❌ <b>Denied</b> — task rejected.")
+	h.decrementNotifierPolling(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
@@ -770,6 +771,7 @@ func (h *TasksHandler) ExpandDenyByTaskID(ctx context.Context, taskID, userID st
 	}
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "❌ <b>Scope expansion denied</b>")
+	h.decrementNotifierPolling(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		go func() {
@@ -780,6 +782,16 @@ func (h *TasksHandler) ExpandDenyByTaskID(ctx context.Context, taskID, userID st
 		}()
 	}
 	return nil
+}
+
+// decrementNotifierPolling calls DecrementPolling on the notifier if it supports it.
+func (h *TasksHandler) decrementNotifierPolling(userID string) {
+	if h.notifier == nil {
+		return
+	}
+	if pd, ok := h.notifier.(notify.PollingDecrementer); ok {
+		pd.DecrementPolling(userID)
+	}
 }
 
 // updateNotificationMsg updates the Telegram message for a target

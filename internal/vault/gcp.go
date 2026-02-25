@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/crc32"
+	"strings"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -35,8 +36,20 @@ func NewGCPVault(ctx context.Context, project string, masterKey []byte) (*GCPVau
 	return &GCPVault{client: client, project: project, localVault: lv}, nil
 }
 
+// sanitizeSecretID replaces characters not allowed in GCP Secret Manager IDs
+// ([a-zA-Z0-9_-]) with underscores.
+func sanitizeSecretID(s string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, s)
+}
+
 func (v *GCPVault) secretName(userID, serviceID string) string {
-	return fmt.Sprintf("projects/%s/secrets/clawvisor-%s-%s", v.project, userID, serviceID)
+	safeID := sanitizeSecretID(fmt.Sprintf("clawvisor-%s-%s", userID, serviceID))
+	return fmt.Sprintf("projects/%s/secrets/%s", v.project, safeID)
 }
 
 func (v *GCPVault) Set(ctx context.Context, userID, serviceID string, credential []byte) error {
@@ -49,7 +62,7 @@ func (v *GCPVault) Set(ctx context.Context, userID, serviceID string, credential
 
 	name := v.secretName(userID, serviceID)
 	parent := fmt.Sprintf("projects/%s", v.project)
-	secretID := fmt.Sprintf("clawvisor-%s-%s", userID, serviceID)
+	secretID := sanitizeSecretID(fmt.Sprintf("clawvisor-%s-%s", userID, serviceID))
 
 	// Ensure secret exists
 	_, err = v.client.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: name})
@@ -98,10 +111,6 @@ func (v *GCPVault) Get(ctx context.Context, userID, serviceID string) ([]byte, e
 	payload := string(result.Payload.Data)
 	// Parse "encrypted|iv|authTag"
 	var encrypted, iv, authTag string
-	if n, _ := fmt.Sscanf(payload, "%s", &payload); n == 0 {
-		return nil, fmt.Errorf("invalid vault payload")
-	}
-	// Use a simple pipe-delimited split
 	parts := splitThree(payload)
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid vault payload format")

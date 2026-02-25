@@ -75,9 +75,13 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+// maxRequestBodySize is the default limit for JSON request bodies (1 MB).
+const maxRequestBodySize = 1 << 20
+
 // decodeJSON decodes the request body into v.
-// On failure it writes a 400 error and returns false.
+// It enforces a 1 MB body size limit. On failure it writes a 400 error and returns false.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid JSON body")
 		return false

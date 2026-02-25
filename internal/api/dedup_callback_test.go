@@ -14,16 +14,11 @@ import (
 	"time"
 )
 
-// agentCallbackKey derives the callback signing key from a raw agent bearer token.
-// Mirrors what the gateway stores in the pending_approvals blob:
-//
-//	sha256(rawToken) hex-encoded
-//
-// This is the same hash the middleware computes to look up the agent in the DB,
-// so it leaks no additional information if the blob is read.
+// agentCallbackKey returns the HMAC signing key used for callback delivery.
+// The gateway now stores the raw agent token (not the hash) in the pending
+// blob's CallbackKey, so the agent can verify signatures with its own token.
 func agentCallbackKey(rawToken string) string {
-	h := sha256.Sum256([]byte(rawToken))
-	return hex.EncodeToString(h[:])
+	return rawToken
 }
 
 // ── request_id deduplication ──────────────────────────────────────────────────

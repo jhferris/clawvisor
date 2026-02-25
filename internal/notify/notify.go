@@ -103,5 +103,12 @@ type CallbackDecision struct {
 	UserID   string
 }
 
+// PollingDecrementer is implemented by notifiers that run callback polling
+// goroutines (e.g. Telegram). Call DecrementPolling when a pending approval
+// or task is resolved outside the inline button flow (deny via web UI, expiry).
+type PollingDecrementer interface {
+	DecrementPolling(userID string)
+}
+
 // Ensure we import gateway without unused import errors in callers.
 var _ = gateway.Request{}

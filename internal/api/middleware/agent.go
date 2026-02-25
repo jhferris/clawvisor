@@ -12,12 +12,20 @@ import (
 const (
 	// AgentContextKey is the context key for the authenticated agent.
 	AgentContextKey contextKey = "agent"
+	// AgentRawTokenKey is the context key for the raw agent bearer token.
+	AgentRawTokenKey contextKey = "agent_raw_token"
 )
 
 // AgentFromContext retrieves the authenticated agent from a request context.
 func AgentFromContext(ctx context.Context) *store.Agent {
 	a, _ := ctx.Value(AgentContextKey).(*store.Agent)
 	return a
+}
+
+// AgentRawToken retrieves the raw bearer token from a request context.
+func AgentRawToken(ctx context.Context) string {
+	s, _ := ctx.Value(AgentRawTokenKey).(string)
+	return s
 }
 
 // RequireAgent validates an agent bearer token and injects the agent into the
@@ -39,6 +47,7 @@ func RequireAgent(st store.Store) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), AgentContextKey, agent)
+			ctx = context.WithValue(ctx, AgentRawTokenKey, token)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

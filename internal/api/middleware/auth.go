@@ -29,19 +29,19 @@ func RequireUser(jwtSvc *auth.JWTService, st store.Store) func(http.Handler) htt
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
 			if token == "" {
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				http.Error(w, `{"error":"missing authorization header","code":"UNAUTHORIZED"}`, http.StatusUnauthorized)
 				return
 			}
 
 			claims, err := jwtSvc.ValidateToken(token)
 			if err != nil {
-				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				http.Error(w, `{"error":"invalid or expired token","code":"UNAUTHORIZED"}`, http.StatusUnauthorized)
 				return
 			}
 
 			user, err := st.GetUserByID(r.Context(), claims.UserID)
 			if err != nil {
-				http.Error(w, `{"error":"user not found"}`, http.StatusUnauthorized)
+				http.Error(w, `{"error":"user not found","code":"UNAUTHORIZED"}`, http.StatusUnauthorized)
 				return
 			}
 
