@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM golang:1.23-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -18,5 +18,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o clawvisor ./cmd/server
 # Stage 3: Runtime (minimal distroless image)
 FROM gcr.io/distroless/static-debian12
 COPY --from=go-builder /app/clawvisor /clawvisor
+COPY --from=web-builder /web/dist /web/dist
 EXPOSE 8080
 ENTRYPOINT ["/clawvisor"]
