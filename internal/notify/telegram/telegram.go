@@ -261,7 +261,24 @@ func inlineKeyboard(rows [][]inlineButton) any {
 }
 
 // sendMessage calls the Telegram sendMessage API and returns the message ID as a string.
+// If the API rejects the request when a reply_markup is included (e.g. inline keyboard
+// buttons with localhost URLs), it retries without the markup so the notification text
+// is still delivered.
 func (n *Notifier) sendMessage(ctx context.Context, botToken, chatID, text string, replyMarkup any) (string, error) {
+	msgID, err := n.doSendMessage(ctx, botToken, chatID, text, replyMarkup)
+	if err != nil && replyMarkup != nil {
+		// Retry without the inline keyboard — the markup (e.g. button URLs)
+		// is the most common reason for Telegram rejecting the request.
+		msgID, retryErr := n.doSendMessage(ctx, botToken, chatID, text, nil)
+		if retryErr == nil {
+			return msgID, nil
+		}
+		// Both attempts failed; return the original error.
+	}
+	return msgID, err
+}
+
+func (n *Notifier) doSendMessage(ctx context.Context, botToken, chatID, text string, replyMarkup any) (string, error) {
 	payload := map[string]any{
 		"chat_id":    chatID,
 		"text":       text,

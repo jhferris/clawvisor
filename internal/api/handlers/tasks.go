@@ -142,7 +142,7 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 			expiresInStr = "standing (no expiry)"
 		}
 
-		_, _ = h.notifier.SendTaskApprovalRequest(ctx, notify.TaskApprovalRequest{
+		if _, err := h.notifier.SendTaskApprovalRequest(ctx, notify.TaskApprovalRequest{
 			TaskID:     task.ID,
 			UserID:     agent.UserID,
 			AgentName:  agent.Name,
@@ -151,7 +151,9 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 			ApproveURL: approveURL,
 			DenyURL:    denyURL,
 			ExpiresIn:  expiresInStr,
-		})
+		}); err != nil {
+			h.logger.Warn("failed to send task approval notification", "task_id", task.ID, "err", err)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -484,7 +486,7 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 		approveURL := fmt.Sprintf("%s/dashboard/tasks?action=expand_approve&task_id=%s", h.baseURL, taskID)
 		denyURL := fmt.Sprintf("%s/dashboard/tasks?action=expand_deny&task_id=%s", h.baseURL, taskID)
 
-		_, _ = h.notifier.SendScopeExpansionRequest(ctx, notify.ScopeExpansionRequest{
+		if _, err := h.notifier.SendScopeExpansionRequest(ctx, notify.ScopeExpansionRequest{
 			TaskID:     taskID,
 			UserID:     agent.UserID,
 			AgentName:  agent.Name,
@@ -493,7 +495,9 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 			Reason:     req.Reason,
 			ApproveURL: approveURL,
 			DenyURL:    denyURL,
-		})
+		}); err != nil {
+			h.logger.Warn("failed to send scope expansion notification", "task_id", taskID, "err", err)
+		}
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{

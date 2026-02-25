@@ -30,6 +30,7 @@ type ServerConfig struct {
 	Port        int    `yaml:"port"`
 	Host        string `yaml:"host"`
 	FrontendDir string `yaml:"frontend_dir"`
+	PublicURL   string `yaml:"public_url"` // e.g. "http://192.168.4.247:5173" — used in Telegram notification links
 }
 
 type DatabaseConfig struct {
@@ -177,6 +178,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SERVER_HOST"); v != "" {
 		cfg.Server.Host = v
+	}
+	if v := os.Getenv("PUBLIC_URL"); v != "" {
+		cfg.Server.PublicURL = v
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
 		cfg.Google.ClientID = v

@@ -87,13 +87,16 @@ func New(
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Normalize bind address to a user-reachable host. 0.0.0.0 / 127.0.0.1
-	// are valid bind addresses but not useful as redirect targets in a browser.
-	baseHost := s.cfg.Server.Host
-	if baseHost == "0.0.0.0" || baseHost == "127.0.0.1" || baseHost == "" {
-		baseHost = "localhost"
+	// Public URL for links in notifications and OAuth redirects.
+	// Falls back to a URL derived from the bind address.
+	baseURL := s.cfg.Server.PublicURL
+	if baseURL == "" {
+		baseHost := s.cfg.Server.Host
+		if baseHost == "0.0.0.0" || baseHost == "127.0.0.1" || baseHost == "" {
+			baseHost = "localhost"
+		}
+		baseURL = fmt.Sprintf("http://%s:%d", baseHost, s.cfg.Server.Port)
 	}
-	baseURL := fmt.Sprintf("http://%s:%d", baseHost, s.cfg.Server.Port)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth, s.magicStore, baseURL)
