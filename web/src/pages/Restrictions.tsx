@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { api, type Restriction, type ServiceInfo } from '../api/client'
 import { serviceName, actionName, serviceBrand } from '../lib/services'
 
@@ -248,6 +249,8 @@ function ServiceGroup({
 }
 
 export default function Restrictions() {
+  const [showAll, setShowAll] = useState(false)
+
   const { data: servicesData, isLoading: servicesLoading } = useQuery({
     queryKey: ['services'],
     queryFn: () => api.services.list(),
@@ -259,8 +262,11 @@ export default function Restrictions() {
   })
 
   const isLoading = servicesLoading || restrictionsLoading
-  const services = servicesData?.services ?? []
+  const allServices = servicesData?.services ?? []
   const allRestrictions = restrictions ?? []
+
+  const activated = allServices.filter(s => s.status === 'activated')
+  const unactivated = allServices.filter(s => s.status !== 'activated')
 
   return (
     <div className="p-8 space-y-6">
@@ -271,14 +277,21 @@ export default function Restrictions() {
 
       {isLoading && <div className="text-sm text-gray-400">Loading...</div>}
 
-      {!isLoading && services.length === 0 && (
+      {!isLoading && allServices.length === 0 && (
         <div className="text-sm text-gray-400 py-8 text-center">
           No services registered. Add adapters in the server configuration to manage restrictions.
         </div>
       )}
 
+      {!isLoading && allServices.length > 0 && activated.length === 0 && (
+        <div className="text-sm text-gray-400 py-8 text-center">
+          Activate a service first to manage restrictions.{' '}
+          <Link to="/dashboard/services" className="text-blue-600 hover:underline">Go to Services</Link>
+        </div>
+      )}
+
       <div className="space-y-4">
-        {services.map(svc => (
+        {activated.map(svc => (
           <ServiceGroup
             key={svc.alias ? `${svc.id}:${svc.alias}` : svc.id}
             svc={svc}
@@ -286,6 +299,28 @@ export default function Restrictions() {
           />
         ))}
       </div>
+
+      {unactivated.length > 0 && (
+        <div className="space-y-4">
+          <button
+            onClick={() => setShowAll(s => !s)}
+            className="text-sm text-gray-400 hover:text-gray-600"
+          >
+            {showAll ? 'Hide unactivated services' : `Show all services (${unactivated.length} not activated)`}
+          </button>
+          {showAll && (
+            <div className="space-y-4 opacity-50">
+              {unactivated.map(svc => (
+                <ServiceGroup
+                  key={svc.alias ? `${svc.id}:${svc.alias}` : svc.id}
+                  svc={svc}
+                  restrictions={allRestrictions}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
