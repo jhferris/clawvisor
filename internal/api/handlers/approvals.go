@@ -220,8 +220,8 @@ func (h *ApprovalsHandler) executeApproval(ctx context.Context, pa *store.Pendin
 	}
 
 	start := time.Now()
-	result, _, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-		pa.UserID, blob.Service, blob.Action, blob.Params, "", blob.ResponseFilters, nil)
+	result, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
+		pa.UserID, blob.Service, blob.Action, blob.Params, "")
 	dur := int(time.Since(start).Milliseconds())
 
 	outcome := "executed"

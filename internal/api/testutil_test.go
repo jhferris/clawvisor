@@ -17,7 +17,6 @@ import (
 	"github.com/clawvisor/clawvisor/internal/api"
 	"github.com/clawvisor/clawvisor/internal/auth"
 	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/safety"
 	"github.com/clawvisor/clawvisor/internal/store"
 	sqlitestore "github.com/clawvisor/clawvisor/internal/store/sqlite"
 	"github.com/clawvisor/clawvisor/internal/vault"
@@ -76,7 +75,7 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 		Task:     config.TaskConfig{DefaultExpirySeconds: 3600},
 	}
 
-	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, safety.NoopChecker{}, config.LLMConfig{}, nil)
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, config.LLMConfig{}, nil)
 	if err != nil {
 		t.Fatalf("api.New: %v", err)
 	}

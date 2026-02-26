@@ -16,7 +16,6 @@ import (
 	"github.com/clawvisor/clawvisor/internal/config"
 	"github.com/clawvisor/clawvisor/internal/intent"
 	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/safety"
 	"github.com/clawvisor/clawvisor/internal/store"
 	"github.com/clawvisor/clawvisor/internal/vault"
 	skillfiles "github.com/clawvisor/clawvisor/skills"
@@ -30,7 +29,6 @@ type Server struct {
 	jwtSvc     *auth.JWTService
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier
-	safety     safety.SafetyChecker
 	llmCfg     config.LLMConfig
 	logger     *slog.Logger
 	http       *http.Server
@@ -51,7 +49,6 @@ func New(
 	jwtSvc *auth.JWTService,
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
-	safetyChecker safety.SafetyChecker,
 	llmCfg config.LLMConfig,
 	magicStore *auth.MagicTokenStore,
 ) (*Server, error) {
@@ -66,7 +63,6 @@ func New(
 		jwtSvc:     jwtSvc,
 		adapterReg: adapterReg,
 		notifier:   notifier,
-		safety:     safetyChecker,
 		llmCfg:     llmCfg,
 		magicStore: magicStore,
 		logger:     logger,
@@ -124,7 +120,7 @@ func (s *Server) routes() http.Handler {
 
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg,
-		s.notifier, s.safety, verifier, s.llmCfg, *s.cfg, s.logger, baseURL,
+		s.notifier, verifier, *s.cfg, s.logger, baseURL,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)

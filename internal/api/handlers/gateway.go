@@ -17,12 +17,9 @@ import (
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/filters"
 	"github.com/clawvisor/clawvisor/internal/gateway"
 	"github.com/clawvisor/clawvisor/internal/intent"
-	"github.com/clawvisor/clawvisor/internal/llm"
 	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/safety"
 	"github.com/clawvisor/clawvisor/internal/store"
 	"github.com/clawvisor/clawvisor/internal/vault"
 )
@@ -30,17 +27,16 @@ import (
 // pendingRequestBlob is stored in pending_approvals.request_blob.
 // It contains everything needed to re-execute the request on approval.
 type pendingRequestBlob struct {
-	Service         string                   `json:"service"`
-	Action          string                   `json:"action"`
-	Params          map[string]any           `json:"params"`
-	UserID          string                   `json:"user_id"`
-	AgentID         string                   `json:"agent_id"`
-	AgentName       string                   `json:"agent_name"`
-	RequestID       string                   `json:"request_id"`
-	Reason          string                   `json:"reason"`
-	CallbackURL     string                   `json:"callback_url"`
-	CallbackKey     string                   `json:"callback_key,omitempty"`
-	ResponseFilters []filters.ResponseFilter `json:"response_filters,omitempty"`
+	Service     string         `json:"service"`
+	Action      string         `json:"action"`
+	Params      map[string]any `json:"params"`
+	UserID      string         `json:"user_id"`
+	AgentID     string         `json:"agent_id"`
+	AgentName   string         `json:"agent_name"`
+	RequestID   string         `json:"request_id"`
+	Reason      string         `json:"reason"`
+	CallbackURL string         `json:"callback_url"`
+	CallbackKey string         `json:"callback_key,omitempty"`
 }
 
 // GatewayHandler handles POST /api/gateway/request.
@@ -49,9 +45,7 @@ type GatewayHandler struct {
 	vault      vault.Vault
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier // may be nil if Telegram not configured
-	safety     safety.SafetyChecker
 	verifier   intent.Verifier
-	llmCfg     config.LLMConfig
 	cfg        config.Config
 	logger     *slog.Logger
 	baseURL    string
@@ -62,17 +56,15 @@ func NewGatewayHandler(
 	v vault.Vault,
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
-	safetyChecker safety.SafetyChecker,
 	verifier intent.Verifier,
-	llmCfg config.LLMConfig,
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
 ) *GatewayHandler {
 	return &GatewayHandler{
 		store: st, vault: v, adapterReg: adapterReg,
-		notifier: notifier, safety: safetyChecker, verifier: verifier,
-		llmCfg: llmCfg, cfg: cfg, logger: logger, baseURL: baseURL,
+		notifier: notifier, verifier: verifier,
+		cfg: cfg, logger: logger, baseURL: baseURL,
 	}
 }
 
@@ -272,11 +264,9 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			// ── End intent verification ──────────────────────────────────
 
-			responseFilters := getTaskActionFilters(task, serviceType, serviceAlias, req.Action)
 			vKey := vaultKeyForServiceAlias(serviceType, serviceAlias)
-			result, filterRecs, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
-				agent.UserID, serviceType, req.Action, req.Params, vKey, responseFilters,
-				h.llmFilterFn())
+			result, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg,
+				agent.UserID, serviceType, req.Action, req.Params, vKey)
 			dur := int(time.Since(start).Milliseconds())
 
 			if execErr != nil {
@@ -292,7 +282,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 							h.logger.Warn("audit log failed", "err", logErr)
 						}
 						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-						blob := buildRequestBlob(req, agent, rawToken, nil)
+						blob := buildRequestBlob(req, agent, rawToken)
 						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 							h.baseURL, serviceType, req.RequestID)
 						denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -337,45 +327,9 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// LLM safety check
-			safetyResult, _ := h.safety.Check(ctx, agent.UserID, &req, result)
-			if !safetyResult.Safe {
-				e := baseEntry("execute", "pending", taskIDPtr)
-				e.DurationMS = dur
-				e.SafetyFlagged = true
-				e.SafetyReason = &safetyResult.Reason
-				if len(filterRecs) > 0 {
-					if b, err := json.Marshal(filterRecs); err == nil {
-						e.FiltersApplied = b
-					}
-				}
-				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-					h.logger.Warn("audit log failed", "err", logErr)
-				}
-				expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-				blob := buildRequestBlob(req, agent, rawToken, responseFilters)
-				if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
-					req.Context.CallbackURL, expiresAt, "Safety: "+safetyResult.Reason,
-					true, safetyResult.Reason); routeErr != nil {
-					h.logger.Warn("route to approval failed (safety)", "err", routeErr)
-				}
-				writeJSON(w, http.StatusAccepted, map[string]any{
-					"status":     "pending",
-					"request_id": req.RequestID,
-					"audit_id":   auditID,
-					"message":    "Safety check flagged this request. Approval requested.",
-				})
-				return
-			}
-
 			// Success
 			e := baseEntry("execute", "executed", taskIDPtr)
 			e.DurationMS = dur
-			if len(filterRecs) > 0 {
-				if b, err := json.Marshal(filterRecs); err == nil {
-					e.FiltersApplied = b
-				}
-			}
 			if verdict != nil {
 				e.Verification = intent.MarshalVerdict(verdict)
 			}
@@ -437,7 +391,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
 		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-		blob := buildRequestBlob(req, agent, rawToken, nil)
+		blob := buildRequestBlob(req, agent, rawToken)
 		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 			h.baseURL, serviceType, req.RequestID)
 		denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -467,13 +421,13 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("audit log failed", "err", logErr)
 	}
 	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-	blob := buildRequestBlob(req, agent, rawToken, nil)
+	blob := buildRequestBlob(req, agent, rawToken)
 	reason := ""
 	if hardcoded {
 		reason = "iMessage send_message always requires human approval"
 	}
 	if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
-		req.Context.CallbackURL, expiresAt, reason, false, ""); routeErr != nil {
+		req.Context.CallbackURL, expiresAt, reason); routeErr != nil {
 		h.logger.Warn("route to approval failed", "err", routeErr)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -526,7 +480,7 @@ func writeGatewayStatusResponse(w http.ResponseWriter, e *store.AuditEntry) {
 // ── Shared execution logic ────────────────────────────────────────────────────
 
 // executeAdapterRequest fetches the credential from vault, calls the adapter,
-// and applies response filters. Shared between gateway and approvals handlers.
+// and returns the result. Shared between gateway and approvals handlers.
 // vaultKey overrides the default vault key when non-empty (used for aliased services).
 func executeAdapterRequest(
 	ctx context.Context,
@@ -535,13 +489,11 @@ func executeAdapterRequest(
 	userID, service, action string,
 	params map[string]any,
 	vaultKey string,
-	responseFilters []filters.ResponseFilter,
-	semanticFn filters.SemanticApplyFn,
-) (*adapters.Result, []filters.FilterRecord, error) {
+) (*adapters.Result, error) {
 	serviceType, _ := parseServiceAlias(service)
 	adapter, ok := reg.Get(serviceType)
 	if !ok {
-		return nil, nil, fmt.Errorf("service %q is not supported", serviceType)
+		return nil, fmt.Errorf("service %q is not supported", serviceType)
 	}
 
 	vKey := vaultKey
@@ -553,7 +505,7 @@ func executeAdapterRequest(
 		if errors.Is(err, vault.ErrNotFound) && adapter.ValidateCredential(nil) == nil {
 			cred = nil
 		} else {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -563,23 +515,10 @@ func executeAdapterRequest(
 		Credential: cred,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("adapter %s: %w", service, err)
+		return nil, fmt.Errorf("adapter %s: %w", service, err)
 	}
 
-	if len(responseFilters) > 0 {
-		result, filterRecs := filters.ApplyContext(ctx, result, responseFilters, semanticFn)
-		return result, filterRecs, nil
-	}
-	return result, nil, nil
-}
-
-// llmFilterFn builds a SemanticApplyFn from the current LLM filter config.
-func (h *GatewayHandler) llmFilterFn() filters.SemanticApplyFn {
-	cfg := h.llmCfg.Filters
-	if !cfg.Enabled {
-		return nil
-	}
-	return filters.MakeLLMFilterFn(llm.NewClient(cfg))
+	return result, nil
 }
 
 // ── Approval routing ──────────────────────────────────────────────────────────
@@ -591,8 +530,6 @@ func (h *GatewayHandler) routeToApproval(
 	auditID, callbackURL string,
 	expiresAt time.Time,
 	policyReason string,
-	safetyFlagged bool,
-	safetyReason string,
 ) error {
 	blobBytes, _ := json.Marshal(blob)
 	pa := &store.PendingApproval{
@@ -618,11 +555,6 @@ func (h *GatewayHandler) routeToApproval(
 	approveURL := fmt.Sprintf("%s/dashboard?action=approve&request_id=%s", h.baseURL, blob.RequestID)
 	denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, blob.RequestID)
 
-	reason := policyReason
-	if safetyFlagged && safetyReason != "" {
-		reason = "🔴 Safety check flagged: " + safetyReason
-	}
-
 	msgID, err := h.notifier.SendApprovalRequest(ctx, notify.ApprovalRequest{
 		PendingID:    pa.ID,
 		RequestID:    blob.RequestID,
@@ -632,7 +564,7 @@ func (h *GatewayHandler) routeToApproval(
 		Action:       blob.Action,
 		Params:       blob.Params,
 		Reason:       blob.Reason,
-		PolicyReason: reason,
+		PolicyReason: policyReason,
 		ExpiresIn:    expiresIn,
 		ApproveURL:   approveURL,
 		DenyURL:      denyURL,
@@ -719,19 +651,18 @@ func vaultKeyForServiceAlias(serviceType, alias string) string {
 	return base + ":" + alias
 }
 
-func buildRequestBlob(req gateway.Request, agent *store.Agent, rawToken string, responseFilters []filters.ResponseFilter) *pendingRequestBlob {
+func buildRequestBlob(req gateway.Request, agent *store.Agent, rawToken string) *pendingRequestBlob {
 	return &pendingRequestBlob{
-		Service:         req.Service,
-		Action:          req.Action,
-		Params:          req.Params,
-		UserID:          agent.UserID,
-		AgentID:         agent.ID,
-		AgentName:       agent.Name,
-		RequestID:       req.RequestID,
-		Reason:          req.Reason,
-		CallbackURL:     req.Context.CallbackURL,
-		CallbackKey:     rawToken,
-		ResponseFilters: responseFilters,
+		Service:     req.Service,
+		Action:      req.Action,
+		Params:      req.Params,
+		UserID:      agent.UserID,
+		AgentID:     agent.ID,
+		AgentName:   agent.Name,
+		RequestID:   req.RequestID,
+		Reason:      req.Reason,
+		CallbackURL: req.Context.CallbackURL,
+		CallbackKey: rawToken,
 	}
 }
 
@@ -753,25 +684,3 @@ func cloneParams(m map[string]any) map[string]any {
 	return out
 }
 
-// getTaskActionFilters finds the matching TaskAction for service/action and
-// unmarshals its response_filters JSON. Checks both exact match (with alias)
-// and base service type (wildcard).
-func getTaskActionFilters(task *store.Task, serviceType, alias, action string) []filters.ResponseFilter {
-	fullService := serviceType
-	if alias != "" && alias != "default" {
-		fullService = serviceType + ":" + alias
-	}
-	for _, a := range task.AuthorizedActions {
-		if (a.Service == fullService || a.Service == serviceType) && (a.Action == action || a.Action == "*") {
-			if len(a.ResponseFilters) == 0 {
-				return nil
-			}
-			var rf []filters.ResponseFilter
-			if err := json.Unmarshal(a.ResponseFilters, &rf); err != nil {
-				return nil
-			}
-			return rf
-		}
-	}
-	return nil
-}

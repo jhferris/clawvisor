@@ -31,7 +31,6 @@ import (
 	"github.com/clawvisor/clawvisor/internal/config"
 	"github.com/clawvisor/clawvisor/internal/notify"
 	telegramnotify "github.com/clawvisor/clawvisor/internal/notify/telegram"
-	"github.com/clawvisor/clawvisor/internal/safety"
 	"github.com/clawvisor/clawvisor/internal/store"
 	pgstore "github.com/clawvisor/clawvisor/internal/store/postgres"
 	sqlitestore "github.com/clawvisor/clawvisor/internal/store/sqlite"
@@ -199,13 +198,6 @@ func run(logger *slog.Logger) error {
 	var notifier notify.Notifier = telegramnotify.New(st, ctx)
 	logger.Info("telegram notifier enabled (per-user bot tokens)")
 
-	// ── Safety Checker ───────────────────────────────────────────────────────
-	var safetyChecker safety.SafetyChecker = safety.NoopChecker{}
-	if cfg.LLM.Safety.Enabled {
-		safetyChecker = safety.NewLLMSafetyChecker(cfg.LLM)
-		logger.Info("LLM safety checker enabled", "model", cfg.LLM.Safety.Model)
-	}
-
 	// ── Magic link auth (local mode) ────────────────────────────────────────
 	// Auto-detect: magic_link when local, password otherwise.
 	// Explicit AUTH_MODE / config.yaml auth_mode overrides auto-detection.
@@ -280,7 +272,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	// ── HTTP Server ─────────────────────────────────────────────────────────
-	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, safetyChecker, cfg.LLM, magicStore)
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, cfg.LLM, magicStore)
 	if err != nil {
 		return err
 	}

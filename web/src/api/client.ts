@@ -223,7 +223,6 @@ export interface TaskAction {
   service: string
   action: string
   auto_execute: boolean
-  response_filters?: unknown[]
   expected_use?: string
 }
 

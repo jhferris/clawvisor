@@ -47,31 +47,8 @@ services:
     enabled: true          # from env: TWILIO_ENABLED — per-user Account SID:Auth Token activation
 
 # ── LLM configuration ────────────────────────────────────────────────────────
-# Four independent LLM slots. Each can use a different provider/model.
-# Env overrides: CLAWVISOR_LLM_{SAFETY,FILTERS,VERIFICATION,AUTHORING}_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL}
+# Env overrides: CLAWVISOR_LLM_VERIFICATION_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL,FAIL_CLOSED}
 llm:
-
-  # Safety checker — runs after policy evaluation on every execute path.
-  # Detects prompt injection in formatted adapter results.
-  # Recommended: fast/cheap model (haiku, gpt-4o-mini).
-  safety:
-    enabled: false
-    provider: anthropic           # "anthropic" | "openai"
-    endpoint: https://api.anthropic.com/v1
-    api_key: ""                   # from env: CLAWVISOR_LLM_SAFETY_API_KEY
-    model: claude-haiku-4-5-20251001
-    timeout_seconds: 10
-    skip_readonly: true           # skip check for list_*, get_*, read_*, search_*, fetch_*
-
-  # Semantic response filters — LLM-powered "remove PII" / "summarise" filters.
-  # Applied after structural filters, before the safety checker.
-  filters:
-    enabled: false
-    provider: anthropic
-    endpoint: https://api.anthropic.com/v1
-    api_key: ""                   # from env: CLAWVISOR_LLM_FILTERS_API_KEY
-    model: claude-haiku-4-5-20251001
-    timeout_seconds: 10
 
   # Intent verification — checks that gateway request params and reason are
   # consistent with the approved task purpose and expected_use.
@@ -86,17 +63,6 @@ llm:
     timeout_seconds: 5
     fail_closed: false           # false = allow on LLM error; true = block on error
     cache_ttl_seconds: 60        # cache identical verdicts for 60s
-
-  # Policy authoring — generates YAML from plain-English descriptions and
-  # detects semantic conflicts between policies. Used only in the dashboard.
-  # Recommended: smarter model (sonnet, gpt-4o).
-  authoring:
-    enabled: false
-    provider: anthropic
-    endpoint: https://api.anthropic.com/v1
-    api_key: ""                   # from env: CLAWVISOR_LLM_AUTHORING_API_KEY
-    model: claude-sonnet-4-6
-    timeout_seconds: 30
 
 mcp:
   approval_timeout: 240    # MCP tool calls block this many seconds waiting for approval
