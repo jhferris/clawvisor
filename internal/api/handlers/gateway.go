@@ -99,6 +99,11 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Context.CallbackURL != "" {
 		if err := callback.ValidateCallbackURL(req.Context.CallbackURL); err != nil {
+			h.logger.Warn("callback URL blocked by SSRF policy",
+				"callback_url", req.Context.CallbackURL,
+				"err", err,
+				"agent_id", agent.ID,
+			)
 			writeError(w, http.StatusBadRequest, "INVALID_CALLBACK_URL", err.Error())
 			return
 		}

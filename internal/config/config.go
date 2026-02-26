@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -15,10 +16,16 @@ type Config struct {
 	Vault    VaultConfig    `yaml:"vault"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Approval ApprovalConfig `yaml:"approval"`
+	Callback CallbackConfig `yaml:"callback"`
 	Task     TaskConfig     `yaml:"task"`
 	LLM      LLMConfig      `yaml:"llm"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	Services ServicesConfig `yaml:"services"`
+}
+
+// CallbackConfig holds settings for callback delivery.
+type CallbackConfig struct {
+	AllowPrivateCIDRs []string `yaml:"allow_private_cidrs"` // CIDRs exempt from SSRF callback blocking
 }
 
 // TaskConfig holds settings for task-scoped authorization.
@@ -271,6 +278,10 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("TWILIO_ENABLED"); v != "" {
 		cfg.Services.Twilio.Enabled = v == "true" || v == "1"
+	}
+
+	if v := os.Getenv("CALLBACK_ALLOW_PRIVATE_CIDRS"); v != "" {
+		cfg.Callback.AllowPrivateCIDRs = strings.Split(v, ",")
 	}
 
 	// LLM Verification overrides

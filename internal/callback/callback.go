@@ -79,7 +79,29 @@ var ssrfRanges = func() []*net.IPNet {
 	return nets
 }()
 
+// allowedCIDRs are CIDR blocks exempt from SSRF blocking (configured at startup).
+var allowedCIDRs []*net.IPNet
+
+// Init parses the given CIDR strings into an allowlist that exempts matching IPs
+// from the SSRF check. Call once at startup.
+func Init(cidrs []string) {
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		nets = append(nets, n)
+	}
+	allowedCIDRs = nets
+}
+
 func isSSRFTarget(ip net.IP) bool {
+	for _, n := range allowedCIDRs {
+		if n.Contains(ip) {
+			return false
+		}
+	}
 	for _, n := range ssrfRanges {
 		if n.Contains(ip) {
 			return true

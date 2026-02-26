@@ -26,6 +26,7 @@ import (
 	contactsadapter "github.com/clawvisor/clawvisor/internal/adapters/google/contacts"
 	driveadapter "github.com/clawvisor/clawvisor/internal/adapters/google/drive"
 	gmailadapter "github.com/clawvisor/clawvisor/internal/adapters/google/gmail"
+	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/api"
 	"github.com/clawvisor/clawvisor/internal/auth"
 	"github.com/clawvisor/clawvisor/internal/config"
@@ -62,6 +63,9 @@ func run(logger *slog.Logger) error {
 	if cfg.Auth.JWTSecret == "" {
 		return fmt.Errorf("JWT_SECRET must be set (via env or config.yaml)")
 	}
+
+	// Initialize callback CIDR allowlist (before any gateway requests).
+	callback.Init(cfg.Callback.AllowPrivateCIDRs)
 
 	// ── Database + Store ────────────────────────────────────────────────────
 	var (
