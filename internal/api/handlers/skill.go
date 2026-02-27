@@ -228,7 +228,7 @@ func (h *SkillHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 	if !anyAvailable {
 		buf.WriteString("All supported services are activated.\n")
 	} else {
-		buf.WriteString("\nTo activate a service, direct the user to the Clawvisor dashboard or use\nthe `activate_url` from any `SERVICE_NOT_CONFIGURED` response.\n")
+		buf.WriteString("\nTo activate a service, direct the user to the Clawvisor dashboard.\n")
 	}
 
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")

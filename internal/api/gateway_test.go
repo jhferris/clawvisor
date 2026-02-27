@@ -266,17 +266,20 @@ func TestGateway_Execute_AdapterError_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestGateway_Execute_NoVaultCred_ReturnsPendingActivation(t *testing.T) {
+func TestGateway_Execute_NoVaultCred_ReturnsError(t *testing.T) {
 	adapter := newMockAdapter("mock.noauth", "go")
 	env := newTestEnv(t, adapter)
 
 	sc := newScenario(t, env, "runner")
 	taskID := sc.createApprovedTask(t, env, "mock.noauth", "go", true)
 
-	// No vault credential seeded — gateway should return pending_activation
+	// No vault credential seeded — gateway should return error
 	result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-na-%s", randSuffix()), "mock.noauth", "go", taskID)
-	if result["status"] != "pending_activation" {
-		t.Errorf("no vault cred: expected status=pending_activation, got %v", result["status"])
+	if result["status"] != "error" {
+		t.Errorf("no vault cred: expected status=error, got %v", result["status"])
+	}
+	if result["code"] != "SERVICE_NOT_CONFIGURED" {
+		t.Errorf("no vault cred: expected code=SERVICE_NOT_CONFIGURED, got %v", result["code"])
 	}
 }
 

@@ -244,8 +244,7 @@ Every response has a `status` field. Handle each case as follows:
 | `blocked` | A restriction blocks this action | Tell the user: "I wasn't allowed to [action] — [reason]." Do **not** retry or attempt a workaround. |
 | `restricted` | Intent verification rejected the request | Your params or reason were inconsistent with the task's approved purpose. Tell the user: "My request was restricted — [reason from response]." Adjust your params or reason and retry with a new `request_id`. |
 | `pending` | Action is awaiting human approval | Tell the user: "I've requested approval for [action]. Check the Approvals panel in the Clawvisor dashboard to approve or deny it." Do **not** retry — wait for the callback. |
-| `pending_activation` | Service not yet connected | The response includes an `activate_url` field. Tell the user: "[Service] isn't activated yet. Activate it here: [activate_url]" so they can connect it directly. |
-| `error` (code `SERVICE_NOT_CONFIGURED`) | Same as `pending_activation` | Same as above — surface the `activate_url` from the response. |
+| `error` (code `SERVICE_NOT_CONFIGURED`) | Service not yet connected | Tell the user: "[Service] isn't activated yet. Connect it in the Clawvisor dashboard." Do **not** retry. |
 | `error` (other) | Something went wrong | Report the error message to the user. Do not silently retry. |
 
 ---

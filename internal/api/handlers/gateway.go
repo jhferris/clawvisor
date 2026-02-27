@@ -283,33 +283,22 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 			if execErr != nil {
 				if errors.Is(execErr, vault.ErrNotFound) {
-					// Vault credential missing — handle pending_activation inline.
+					// Vault credential missing — fail immediately.
 					adapter, adapterOK := h.adapterReg.Get(serviceType)
 					if adapterOK && adapter.ValidateCredential(nil) != nil {
-						e := baseEntry("approve", "pending_activation", taskIDPtr)
+						e := baseEntry("block", "error", taskIDPtr)
 						e.DurationMS = dur
 						errMsg := fmt.Sprintf("service %q not activated", req.Service)
 						e.ErrorMsg = &errMsg
 						if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 							h.logger.Warn("audit log failed", "err", logErr)
 						}
-						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-						blob := buildRequestBlob(req, agent)
-						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-							h.baseURL, serviceType, req.RequestID)
-						denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
-						if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
-							req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
-							activateURL, denyURL); notifyErr != nil {
-							h.logger.Warn("activation notification failed", "err", notifyErr)
-						}
-						writeJSON(w, http.StatusAccepted, map[string]any{
-							"status":       "pending_activation",
-							"request_id":   req.RequestID,
-							"audit_id":     auditID,
-							"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
-							"code":         "SERVICE_NOT_CONFIGURED",
-							"activate_url": activateURL,
+						writeJSON(w, http.StatusOK, map[string]any{
+							"status":     "error",
+							"request_id": req.RequestID,
+							"audit_id":   auditID,
+							"error":      fmt.Sprintf("Service %q is not activated. Connect it in the Clawvisor dashboard before making requests.", req.Service),
+							"code":       "SERVICE_NOT_CONFIGURED",
 						})
 						return
 					}
@@ -397,30 +386,19 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	vKey := vaultKeyForServiceAlias(serviceType, serviceAlias)
 	if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) &&
 		approveAdapter.ValidateCredential(nil) != nil {
-		e := baseEntry("approve", "pending_activation", nil)
+		e := baseEntry("block", "error", nil)
 		e.DurationMS = int(time.Since(start).Milliseconds())
 		errMsg := fmt.Sprintf("service %q not activated", req.Service)
 		e.ErrorMsg = &errMsg
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
-		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-		blob := buildRequestBlob(req, agent)
-		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
-			h.baseURL, serviceType, req.RequestID)
-		denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
-		if notifyErr := h.saveAndNotifyActivation(ctx, agent.UserID, blob, auditID,
-			req.Context.CallbackURL, expiresAt, req.Service, agent.Name, req.Action,
-			activateURL, denyURL); notifyErr != nil {
-			h.logger.Warn("activation notification failed", "err", notifyErr)
-		}
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"status":       "pending_activation",
-			"request_id":   req.RequestID,
-			"audit_id":     auditID,
-			"message":      "Service not activated. Please activate in the Clawvisor dashboard.",
-			"code":         "SERVICE_NOT_CONFIGURED",
-			"activate_url": activateURL,
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":     "error",
+			"request_id": req.RequestID,
+			"audit_id":   auditID,
+			"error":      fmt.Sprintf("Service %q is not activated. Connect it in the Clawvisor dashboard before making requests.", req.Service),
+			"code":       "SERVICE_NOT_CONFIGURED",
 		})
 		return
 	}
@@ -628,46 +606,6 @@ func (h *GatewayHandler) routeToApproval(
 	}
 
 	_ = h.store.SaveNotificationMessage(ctx, "approval", blob.RequestID, "telegram", msgID)
-	return nil
-}
-
-func (h *GatewayHandler) saveAndNotifyActivation(
-	ctx context.Context,
-	userID string,
-	blob *pendingRequestBlob,
-	auditID, callbackURL string,
-	expiresAt time.Time,
-	service, agentName, action, activateURL, denyURL string,
-) error {
-	blobBytes, _ := json.Marshal(blob)
-	pa := &store.PendingApproval{
-		ID:          uuid.New().String(),
-		UserID:      userID,
-		RequestID:   blob.RequestID,
-		AuditID:     auditID,
-		RequestBlob: json.RawMessage(blobBytes),
-		ExpiresAt:   expiresAt,
-	}
-	if callbackURL != "" {
-		pa.CallbackURL = &callbackURL
-	}
-	if err := h.store.SavePendingApproval(ctx, pa); err != nil {
-		return fmt.Errorf("save pending approval (activation): %w", err)
-	}
-
-	if h.notifier == nil {
-		return nil
-	}
-
-	if err := h.notifier.SendActivationRequest(ctx, notify.ActivationRequest{
-		UserID:      userID,
-		AgentName:   agentName,
-		Service:     service,
-		ActivateURL: activateURL,
-		DenyURL:     denyURL,
-	}); err != nil {
-		h.logger.Warn("telegram activation notification failed", "err", err)
-	}
 	return nil
 }
 
