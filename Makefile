@@ -21,8 +21,8 @@ test-verbose:
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 
-# Run locally (builds unified binary, starts server subcommand)
-run:
+# Run locally (rebuilds frontend if web/src changed, then builds + runs)
+run: web/dist
 	@go build -o bin/clawvisor ./cmd/clawvisor && bin/clawvisor server
 
 run-sqlite:
