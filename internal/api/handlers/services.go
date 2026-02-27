@@ -684,12 +684,13 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 		if execErr == nil {
 			cbResult = result
 		}
+		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, blob.AgentID)
 		_ = callback.DeliverResult(ctx, *pa.CallbackURL, &callback.Payload{
 			RequestID: requestID,
 			Status:    outcome,
 			Result:    cbResult,
 			AuditID:   pa.AuditID,
-		}, blob.CallbackKey)
+		}, cbKey)
 	}
 
 	h.logger.Info("pending request re-executed after activation",

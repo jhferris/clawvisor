@@ -226,6 +226,9 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/gateway/request", agentRateLimited(gatewayHandler.HandleRequest))
 	mux.Handle("GET /api/gateway/request/{request_id}/status", agentRateLimited(gatewayHandler.HandleStatus))
 
+	// Callback secret registration (agent token)
+	mux.Handle("POST /api/callbacks/register", agent(gatewayHandler.RegisterCallback))
+
 	// Services / OAuth (user JWT, rate-limited)
 	mux.Handle("GET /api/services", user(servicesHandler.List))
 	mux.Handle("GET /api/oauth/url", userOAuthRL(servicesHandler.OAuthGetURL))     // fetch → returns {"url":"..."}

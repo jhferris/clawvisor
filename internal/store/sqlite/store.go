@@ -265,6 +265,37 @@ func (s *Store) DeleteAgent(ctx context.Context, id, userID string) error {
 	return nil
 }
 
+func (s *Store) SetAgentCallbackSecret(ctx context.Context, agentID, secret string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE agents SET callback_secret = ? WHERE id = ?`,
+		secret, agentID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetAgentCallbackSecret(ctx context.Context, agentID string) (string, error) {
+	var secret *string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT callback_secret FROM agents WHERE id = ?`, agentID,
+	).Scan(&secret)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", store.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if secret == nil {
+		return "", nil
+	}
+	return *secret, nil
+}
+
 func (s *Store) getAgentByID(ctx context.Context, id string) (*store.Agent, error) {
 	a := &store.Agent{}
 	var createdAt string

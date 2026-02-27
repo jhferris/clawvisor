@@ -34,6 +34,26 @@ The authorization model has three layers:
 
 ---
 
+## Setup
+
+### Register for callback notifications (optional)
+
+If you use `callback_url` in your requests and want to verify that callbacks
+are genuinely from Clawvisor, register a dedicated callback signing secret:
+
+```
+POST $CLAWVISOR_URL/api/callbacks/register
+Authorization: Bearer $CLAWVISOR_AGENT_TOKEN
+```
+
+Response: `{"callback_secret": "cbsec_..."}`
+
+Store this as `CLAWVISOR_CALLBACK_SECRET`. Use it to verify the
+`X-Clawvisor-Signature` header on incoming callbacks (HMAC-SHA256 of the
+request body). Calling this endpoint again rotates the secret.
+
+---
+
 ## Getting Your Service Catalog
 
 At the start of each session, fetch your personalized service catalog:
@@ -245,9 +265,11 @@ Clawvisor POSTs a JSON payload to the `callback_url` you provided:
 ```
 
 `status` will be `executed`, `denied`, or `error`. Handle accordingly:
-1. Find the pending task associated with `request_id`.
-2. If `status` is `executed`, continue with the `result` data.
-3. If `status` is `denied` or `error`, tell the user the outcome and stop.
+1. If you registered a callback secret, verify the `X-Clawvisor-Signature`
+   header: it should equal `sha256=` + HMAC-SHA256(body, CLAWVISOR_CALLBACK_SECRET).
+2. Find the pending task associated with `request_id`.
+3. If `status` is `executed`, continue with the `result` data.
+4. If `status` is `denied` or `error`, tell the user the outcome and stop.
 
 **OpenClaw note:** When your `callback_url` is an OpenClaw `/hooks/agent`
 endpoint, the JSON callback is delivered to your session as a text message

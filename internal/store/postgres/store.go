@@ -234,6 +234,36 @@ func (s *Store) DeleteAgent(ctx context.Context, id, userID string) error {
 	return nil
 }
 
+func (s *Store) SetAgentCallbackSecret(ctx context.Context, agentID, secret string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE agents SET callback_secret = $1 WHERE id = $2`,
+		secret, agentID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetAgentCallbackSecret(ctx context.Context, agentID string) (string, error) {
+	var secret *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT callback_secret FROM agents WHERE id = $1`, agentID,
+	).Scan(&secret)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", store.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if secret == nil {
+		return "", nil
+	}
+	return *secret, nil
+}
+
 func (s *Store) getAgentByID(ctx context.Context, id string) (*store.Agent, error) {
 	a := &store.Agent{}
 	err := s.pool.QueryRow(ctx,

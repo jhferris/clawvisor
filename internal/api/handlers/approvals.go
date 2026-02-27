@@ -144,13 +144,13 @@ func (h *ApprovalsHandler) DenyByRequestID(ctx context.Context, requestID, userI
 	h.decrementNotifierPolling(pa.UserID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
-		tok := denyBlob.CallbackKey
+		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, denyBlob.AgentID)
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
 				RequestID: requestID,
 				Status:    "denied",
 				AuditID:   pa.AuditID,
-			}, tok)
+			}, cbKey)
 		}()
 	}
 
@@ -194,13 +194,13 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 	h.decrementNotifierPolling(pa.UserID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
-		tok := denyBlob.CallbackKey
+		cbKey, _ := h.st.GetAgentCallbackSecret(r.Context(), denyBlob.AgentID)
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
 				RequestID: requestID,
 				Status:    "denied",
 				AuditID:   pa.AuditID,
-			}, tok)
+			}, cbKey)
 		}()
 	}
 
@@ -245,7 +245,7 @@ func (h *ApprovalsHandler) executeApproval(ctx context.Context, pa *store.Pendin
 		if execErr == nil {
 			cbResult = result
 		}
-		tok := blob.CallbackKey
+		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, blob.AgentID)
 		cbErr := errMsg
 		requestID := pa.RequestID
 		auditID := pa.AuditID
@@ -256,7 +256,7 @@ func (h *ApprovalsHandler) executeApproval(ctx context.Context, pa *store.Pendin
 				Result:    cbResult,
 				Error:     cbErr,
 				AuditID:   auditID,
-			}, tok)
+			}, cbKey)
 		}()
 	}
 
@@ -295,11 +295,12 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 		if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 			var expiryBlob pendingRequestBlob
 			_ = json.Unmarshal(pa.RequestBlob, &expiryBlob)
+			cbKey, _ := h.st.GetAgentCallbackSecret(ctx, expiryBlob.AgentID)
 			_ = callback.DeliverResult(ctx, *pa.CallbackURL, &callback.Payload{
 				RequestID: pa.RequestID,
 				Status:    "timeout",
 				AuditID:   pa.AuditID,
-			}, expiryBlob.CallbackKey)
+			}, cbKey)
 		}
 		h.decrementNotifierPolling(pa.UserID)
 		h.logger.Info("pending approval expired", "request_id", pa.RequestID)

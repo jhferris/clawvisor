@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +38,6 @@ type pendingRequestBlob struct {
 	RequestID   string         `json:"request_id"`
 	Reason      string         `json:"reason"`
 	CallbackURL string         `json:"callback_url"`
-	CallbackKey string         `json:"callback_key,omitempty"`
 }
 
 // GatewayHandler handles POST /api/gateway/request.
@@ -83,7 +84,6 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 		return
 	}
-	rawToken := middleware.AgentRawToken(ctx)
 
 	var req gateway.Request
 	if !decodeJSON(w, r, &req) {
@@ -294,7 +294,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 							h.logger.Warn("audit log failed", "err", logErr)
 						}
 						expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-						blob := buildRequestBlob(req, agent, rawToken)
+						blob := buildRequestBlob(req, agent)
 						activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 							h.baseURL, serviceType, req.RequestID)
 						denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -322,7 +322,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
 				if req.Context.CallbackURL != "" {
-					cbKey := rawToken
+					cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 					go func() {
 						_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
 							RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
@@ -351,7 +351,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
 			if req.Context.CallbackURL != "" {
-				cbKey := rawToken
+				cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 				go func() {
 					_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
 						RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
@@ -405,7 +405,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
 		expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-		blob := buildRequestBlob(req, agent, rawToken)
+		blob := buildRequestBlob(req, agent)
 		activateURL := fmt.Sprintf("%s/api/oauth/start?service=%s&pending_request_id=%s",
 			h.baseURL, serviceType, req.RequestID)
 		denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, req.RequestID)
@@ -437,7 +437,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("audit log failed", "err", logErr)
 	}
 	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
-	blob := buildRequestBlob(req, agent, rawToken)
+	blob := buildRequestBlob(req, agent)
 	reason := ""
 	if hardcoded {
 		reason = "iMessage send_message always requires human approval"
@@ -491,6 +491,43 @@ func writeGatewayStatusResponse(w http.ResponseWriter, e *store.AuditEntry) {
 		resp["reason"] = *e.Reason
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// RegisterCallback generates and stores a dedicated callback signing secret
+// for the authenticated agent. Calling again regenerates (rotates) the secret.
+//
+// POST /api/callbacks/register
+// Auth: agent bearer token
+func (h *GatewayHandler) RegisterCallback(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.AgentFromContext(r.Context())
+	if agent == nil {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		return
+	}
+
+	secret, err := generateCallbackSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not generate secret")
+		return
+	}
+
+	if err := h.store.SetAgentCallbackSecret(r.Context(), agent.ID, secret); err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not store callback secret")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"callback_secret": secret,
+	})
+}
+
+// generateCallbackSecret returns a "cbsec_"-prefixed 32-byte hex secret.
+func generateCallbackSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "cbsec_" + hex.EncodeToString(b), nil
 }
 
 // ── Shared execution logic ────────────────────────────────────────────────────
@@ -667,7 +704,7 @@ func vaultKeyForServiceAlias(serviceType, alias string) string {
 	return base + ":" + alias
 }
 
-func buildRequestBlob(req gateway.Request, agent *store.Agent, rawToken string) *pendingRequestBlob {
+func buildRequestBlob(req gateway.Request, agent *store.Agent) *pendingRequestBlob {
 	return &pendingRequestBlob{
 		Service:     req.Service,
 		Action:      req.Action,
@@ -678,7 +715,6 @@ func buildRequestBlob(req gateway.Request, agent *store.Agent, rawToken string) 
 		RequestID:   req.RequestID,
 		Reason:      req.Reason,
 		CallbackURL: req.Context.CallbackURL,
-		CallbackKey: rawToken,
 	}
 }
 

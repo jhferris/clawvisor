@@ -14,11 +14,16 @@ import (
 	"time"
 )
 
-// agentCallbackKey returns the HMAC signing key used for callback delivery.
-// The gateway now stores the raw agent token (not the hash) in the pending
-// blob's CallbackKey, so the agent can verify signatures with its own token.
-func agentCallbackKey(rawToken string) string {
-	return rawToken
+// registerCallbackSecret calls POST /api/callbacks/register and returns the secret.
+func registerCallbackSecret(t *testing.T, env *testEnv, agentToken string) string {
+	t.Helper()
+	resp := env.do("POST", "/api/callbacks/register", agentToken, nil)
+	body := mustStatus(t, resp, http.StatusOK)
+	secret, ok := body["callback_secret"].(string)
+	if !ok || secret == "" {
+		t.Fatal("registerCallbackSecret: expected non-empty callback_secret in response")
+	}
+	return secret
 }
 
 // ── request_id deduplication ──────────────────────────────────────────────────
@@ -292,13 +297,16 @@ func verifyCallbackHMAC(t *testing.T, body []byte, sig, key, label string) {
 
 func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 	// When a request is immediately executed via task, the callback POST must carry a valid
-	// X-Clawvisor-Signature header, signed with the agent's bearer token.
+	// X-Clawvisor-Signature header, signed with the agent's registered callback secret.
 	adapter := newMockAdapter("mock.cb-exec", "run").withResult("cb-exec-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-exec")
 	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-exec", []byte("cred")); err != nil {
 		t.Fatalf("vault seed: %v", err)
 	}
+
+	// Register callback secret
+	cbSecret := registerCallbackSecret(t, env, sc.AgentToken)
 
 	taskID := sc.createApprovedTask(t, env, "mock.cb-exec", "run", true)
 
@@ -321,7 +329,7 @@ func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 
 	select {
 	case cb := <-cbCh:
-		verifyCallbackHMAC(t, cb.body, cb.sig, agentCallbackKey(sc.AgentToken), "execute callback")
+		verifyCallbackHMAC(t, cb.body, cb.sig, cbSecret, "execute callback")
 
 		var payload map[string]any
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
@@ -340,7 +348,7 @@ func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 
 func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 	// When a pending request is approved, the callback must be HMAC-signed with
-	// the original agent's bearer token.
+	// the agent's registered callback secret.
 	adapter := newMockAdapter("mock.cb-approve", "run").withResult("approve-cb-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-approve")
@@ -348,6 +356,9 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 		t.Fatalf("vault seed: %v", err)
 	}
 	// No restriction, no task → default pending
+
+	// Register callback secret
+	cbSecret := registerCallbackSecret(t, env, sc.AgentToken)
 
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-approve-%s", randSuffix())
@@ -372,7 +383,7 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 
 	select {
 	case cb := <-cbCh:
-		verifyCallbackHMAC(t, cb.body, cb.sig, agentCallbackKey(sc.AgentToken), "approve callback")
+		verifyCallbackHMAC(t, cb.body, cb.sig, cbSecret, "approve callback")
 
 		var payload map[string]any
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
@@ -394,6 +405,9 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 		t.Fatalf("vault seed: %v", err)
 	}
 	// No restriction, no task → default pending
+
+	// Register callback secret
+	cbSecret := registerCallbackSecret(t, env, sc.AgentToken)
 
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-deny-%s", randSuffix())
@@ -418,7 +432,7 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 
 	select {
 	case cb := <-cbCh:
-		verifyCallbackHMAC(t, cb.body, cb.sig, agentCallbackKey(sc.AgentToken), "deny callback")
+		verifyCallbackHMAC(t, cb.body, cb.sig, cbSecret, "deny callback")
 
 		var payload map[string]any
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
@@ -447,4 +461,77 @@ func TestGateway_Callback_NoCallbackURL_NoDelivery(t *testing.T) {
 	if result["status"] != "executed" {
 		t.Errorf("no callback_url: expected status=executed, got %v", result["status"])
 	}
+}
+
+func TestGateway_Callback_Unsigned_WhenNoSecret(t *testing.T) {
+	// When an agent has NOT registered a callback secret, the callback should
+	// still be delivered but with an empty X-Clawvisor-Signature header.
+	adapter := newMockAdapter("mock.cb-nosec", "run").withResult("nosec-ok", nil)
+	env := newTestEnv(t, adapter)
+	sc := newScenario(t, env, "cb-nosec")
+	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-nosec", []byte("cred")); err != nil {
+		t.Fatalf("vault seed: %v", err)
+	}
+
+	// Do NOT register a callback secret
+
+	taskID := sc.createApprovedTask(t, env, "mock.cb-nosec", "run", true)
+
+	cbSrv, cbCh := newCallbackServer(t)
+	reqID := fmt.Sprintf("cb-nosec-%s", randSuffix())
+
+	resp := env.do("POST", "/api/gateway/request", sc.AgentToken, map[string]any{
+		"service":    "mock.cb-nosec",
+		"action":     "run",
+		"params":     map[string]any{},
+		"reason":     "test unsigned callback",
+		"request_id": reqID,
+		"task_id":    taskID,
+		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
+	})
+	body := mustStatus(t, resp, http.StatusOK)
+	if body["status"] != "executed" {
+		t.Fatalf("expected executed, got %v", body["status"])
+	}
+
+	select {
+	case cb := <-cbCh:
+		// Callback should arrive but signature should be empty (unsigned)
+		if cb.sig != "" {
+			t.Errorf("unsigned callback: expected empty signature, got %q", cb.sig)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(cb.body, &payload); err != nil {
+			t.Fatalf("callback body not JSON: %v", err)
+		}
+		if payload["request_id"] != reqID {
+			t.Errorf("callback: request_id mismatch: got %v", payload["request_id"])
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("unsigned callback not received within 3s")
+	}
+}
+
+func TestCallbackSecret_Register(t *testing.T) {
+	// POST /api/callbacks/register should return a cbsec_-prefixed secret.
+	env := newTestEnv(t)
+	sc := newScenario(t, env, "cbsec-reg")
+
+	secret := registerCallbackSecret(t, env, sc.AgentToken)
+	if len(secret) < 10 || secret[:6] != "cbsec_" {
+		t.Errorf("expected cbsec_-prefixed secret, got %q", secret)
+	}
+
+	// Calling again should return a different secret (rotation).
+	secret2 := registerCallbackSecret(t, env, sc.AgentToken)
+	if secret2 == secret {
+		t.Error("expected rotated secret to differ from original")
+	}
+}
+
+func TestCallbackSecret_RequiresAuth(t *testing.T) {
+	env := newTestEnv(t)
+	resp := env.do("POST", "/api/callbacks/register", "", nil)
+	mustStatus(t, resp, http.StatusUnauthorized)
 }
