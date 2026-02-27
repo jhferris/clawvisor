@@ -27,6 +27,17 @@ terraform/
 # Landing page (has its own git repo)
 landing/
 
+# Dev
+CLAUDE.md
+archive/
+.claude/
+TODO.md
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
 # OS
 .DS_Store
 Thumbs.db
