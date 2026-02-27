@@ -435,11 +435,27 @@ func (s *DashboardScreen) renderTaskAuditView() string {
 		}
 	}
 	if len(s.drillTask.AuthorizedActions) > 0 {
-		var actions []string
+		b.WriteString("\n")
+		b.WriteString(tui.StyleBold.Render("Authorized Actions") + "\n")
 		for _, a := range s.drillTask.AuthorizedActions {
-			actions = append(actions, a.Service+"/"+a.Action)
+			auto := "per-request"
+			if a.AutoExecute {
+				auto = "auto"
+			}
+			b.WriteString(fmt.Sprintf("  %s/%s (%s)", a.Service, a.Action, auto))
+			if a.ExpectedUse != "" {
+				b.WriteString("  — " + a.ExpectedUse)
+			}
+			b.WriteString("\n")
 		}
-		b.WriteString(tui.StyleDim.Render("Actions:   ") + strings.Join(actions, ", ") + "\n")
+	}
+
+	if s.drillTask.PendingAction != nil {
+		b.WriteString("\n" + tui.StyleAmber.Render("Pending Expansion") + "\n")
+		b.WriteString(fmt.Sprintf("  %s/%s\n", s.drillTask.PendingAction.Service, s.drillTask.PendingAction.Action))
+		if s.drillTask.PendingReason != "" {
+			b.WriteString("  Reason: " + s.drillTask.PendingReason + "\n")
+		}
 	}
 	b.WriteString("\n")
 
