@@ -173,6 +173,14 @@ type ServiceInfo struct {
 	ActivatedAt        string   `json:"activated_at,omitempty"`
 }
 
+// ── OAuth URL ───────────────────────────────────────────────────────────────
+
+type OAuthURLResponse struct {
+	URL               string `json:"url,omitempty"`
+	AlreadyAuthorized bool   `json:"already_authorized,omitempty"`
+	Service           string `json:"service,omitempty"`
+}
+
 // ── Restrictions ────────────────────────────────────────────────────────────
 
 type Restriction struct {

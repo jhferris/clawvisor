@@ -1,13 +1,21 @@
 package screens
 
 import (
+	"context"
+	"fmt"
+	"net"
+	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/clawvisor/clawvisor/internal/browser"
 	"github.com/clawvisor/clawvisor/internal/tui"
 	"github.com/clawvisor/clawvisor/internal/tui/client"
+	"github.com/clawvisor/clawvisor/internal/tui/components"
 )
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -15,6 +23,31 @@ import (
 type servicesDataMsg struct {
 	services []client.ServiceInfo
 }
+
+type svcActivatedMsg struct {
+	err error
+}
+
+type svcDeactivatedMsg struct {
+	err error
+}
+
+type oauthURLMsg struct {
+	resp *client.OAuthURLResponse
+	err  error
+}
+
+type oauthDoneMsg struct{}
+
+// ── Input steps ─────────────────────────────────────────────────────────────
+
+const (
+	stepNone         = 0
+	stepAlias        = 1
+	stepKeyEntry     = 2
+	stepOAuthConfirm = 3
+	stepOAuthWaiting = 4
+)
 
 // ── Model ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +60,21 @@ type ServicesScreen struct {
 	loading  bool
 	err      error
 	detail   Detail
+
+	// Activation flow state.
+	inputStep         int
+	aliasInput        *textinput.Model
+	keyInput          *textinput.Model
+	pendingAlias      string
+	pendingOAuthURL   string
+	activatingService *client.ServiceInfo
+
+	// Deactivation.
+	confirm *components.Confirm
+
+	// OAuth completion listener.
+	oauthDoneCh chan struct{}
+	oauthCleanup func()
 }
 
 func NewServicesScreen(c *client.Client) *ServicesScreen {
@@ -44,6 +92,7 @@ func (s *ServicesScreen) Init() tea.Cmd {
 func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	// Detail overlay takes priority.
 	if s.detail.Visible() {
 		d, cmd := s.detail.Update(msg)
 		s.detail = d
@@ -52,6 +101,98 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 		}
 		if _, isKey := msg.(tea.KeyMsg); isKey {
 			return s, tea.Batch(cmds...)
+		}
+	}
+
+	// Confirm dialog.
+	if s.confirm != nil {
+		switch msg := msg.(type) {
+		case components.ConfirmResult:
+			s.confirm = nil
+			if msg.Confirmed && msg.Tag == "deactivate-service" {
+				return s, s.deactivateSelected()
+			}
+			return s, nil
+		default:
+			c, cmd := s.confirm.Update(msg)
+			*s.confirm = c
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return s, tea.Batch(cmds...)
+		}
+	}
+
+	// Alias input overlay.
+	if s.inputStep == stepAlias && s.aliasInput != nil {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				s.resetActivation()
+				return s, nil
+			case "enter":
+				s.pendingAlias = s.aliasInput.Value()
+				s.aliasInput = nil
+				return s, s.proceedAfterAlias()
+			}
+		}
+		var cmd tea.Cmd
+		*s.aliasInput, cmd = s.aliasInput.Update(msg)
+		return s, cmd
+	}
+
+	// Key entry overlay.
+	if s.inputStep == stepKeyEntry && s.keyInput != nil {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				s.resetActivation()
+				return s, nil
+			case "enter":
+				keyVal := s.keyInput.Value()
+				s.keyInput = nil
+				if keyVal == "" {
+					s.resetActivation()
+					return s, nil
+				}
+				return s, s.activateWithKey(keyVal)
+			}
+		}
+		var cmd tea.Cmd
+		*s.keyInput, cmd = s.keyInput.Update(msg)
+		return s, cmd
+	}
+
+	// OAuth confirm overlay.
+	if s.inputStep == stepOAuthConfirm {
+		if msg, isKey := msg.(tea.KeyMsg); isKey {
+			switch msg.String() {
+			case "esc":
+				s.stopOAuthListener()
+				s.resetActivation()
+				return s, nil
+			case "enter":
+				browser.Open(s.pendingOAuthURL)
+				s.inputStep = stepOAuthWaiting
+				return s, s.waitForOAuth()
+			}
+			return s, nil
+		}
+	}
+
+	// OAuth waiting overlay.
+	if s.inputStep == stepOAuthWaiting {
+		if msg, isKey := msg.(tea.KeyMsg); isKey {
+			switch msg.String() {
+			case "esc":
+				s.stopOAuthListener()
+				s.resetActivation()
+				return s, nil
+			}
+			_ = msg
+			return s, nil
 		}
 	}
 
@@ -75,6 +216,10 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 			s.showDetail()
 		case key.Matches(msg, tui.Keys.Refresh):
 			return s, s.fetchServices()
+		case msg.String() == "a":
+			return s, s.startActivation()
+		case msg.String() == "d":
+			s.startDeactivation()
 		}
 
 	case tui.TickMsg:
@@ -87,6 +232,57 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 			s.cursor = max(0, len(s.services)-1)
 		}
 
+	case oauthURLMsg:
+		if msg.err != nil {
+			s.err = msg.err
+			s.stopOAuthListener()
+			s.resetActivation()
+			return s, nil
+		}
+		if msg.resp.AlreadyAuthorized {
+			s.stopOAuthListener()
+			s.resetActivation()
+			cmds = append(cmds, func() tea.Msg {
+				return tui.StatusMsg("Already connected")
+			})
+			cmds = append(cmds, s.fetchServices())
+			return s, tea.Batch(cmds...)
+		}
+		s.pendingOAuthURL = msg.resp.URL
+		s.inputStep = stepOAuthConfirm
+
+	case oauthDoneMsg:
+		s.stopOAuthListener()
+		s.resetActivation()
+		cmds = append(cmds, func() tea.Msg {
+			return tui.StatusMsg("Service connected")
+		})
+		cmds = append(cmds, s.fetchServices())
+		return s, tea.Batch(cmds...)
+
+	case svcActivatedMsg:
+		s.resetActivation()
+		if msg.err != nil {
+			s.err = msg.err
+		} else {
+			cmds = append(cmds, func() tea.Msg {
+				return tui.StatusMsg("Service connected")
+			})
+		}
+		cmds = append(cmds, s.fetchServices())
+		return s, tea.Batch(cmds...)
+
+	case svcDeactivatedMsg:
+		if msg.err != nil {
+			s.err = msg.err
+		} else {
+			cmds = append(cmds, func() tea.Msg {
+				return tui.StatusMsg("Service disconnected")
+			})
+		}
+		cmds = append(cmds, s.fetchServices())
+		return s, tea.Batch(cmds...)
+
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
@@ -96,8 +292,24 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 }
 
 func (s *ServicesScreen) View() string {
+	// Overlays in priority order.
 	if s.detail.Visible() {
 		return s.detail.View()
+	}
+	if s.confirm != nil {
+		return s.confirm.View()
+	}
+	if s.inputStep == stepAlias && s.aliasInput != nil {
+		return s.viewAliasInput()
+	}
+	if s.inputStep == stepKeyEntry && s.keyInput != nil {
+		return s.viewKeyInput()
+	}
+	if s.inputStep == stepOAuthConfirm {
+		return s.viewOAuthConfirm()
+	}
+	if s.inputStep == stepOAuthWaiting {
+		return s.viewOAuthWaiting()
 	}
 
 	var b strings.Builder
@@ -154,6 +366,21 @@ func (s *ServicesScreen) View() string {
 }
 
 func (s *ServicesScreen) ShortHelp() []string {
+	if s.cursor < len(s.services) {
+		svc := s.services[s.cursor]
+		if svc.Status == "activated" {
+			return []string{
+				tui.StyleStatusKey.Render("[d]") + tui.StyleStatusBar.Render(" Disconnect"),
+				tui.StyleStatusKey.Render("[enter]") + tui.StyleStatusBar.Render(" Details"),
+			}
+		}
+		if svc.RequiresActivation {
+			return []string{
+				tui.StyleStatusKey.Render("[a]") + tui.StyleStatusBar.Render(" Connect"),
+				tui.StyleStatusKey.Render("[enter]") + tui.StyleStatusBar.Render(" Details"),
+			}
+		}
+	}
 	return []string{
 		tui.StyleStatusKey.Render("[enter]") + tui.StyleStatusBar.Render(" Details"),
 	}
@@ -198,7 +425,211 @@ func (s *ServicesScreen) renderService(svc client.ServiceInfo, selected, connect
 	return line + "\n"
 }
 
-// ── Actions ─────────────────────────────────────────────────────────────────
+// ── Overlay views ───────────────────────────────────────────────────────────
+
+func (s *ServicesScreen) viewAliasInput() string {
+	svcName := ""
+	if s.activatingService != nil {
+		svcName = s.activatingService.Name
+	}
+	title := lipgloss.NewStyle().
+		Foreground(tui.ColorBrand).
+		Bold(true).
+		Render("Connect " + svcName)
+
+	content := fmt.Sprintf("%s\n\n%s\n%s\n\n%s",
+		title,
+		tui.StyleDim.Render("Alias (leave blank for default):"),
+		"  "+s.aliasInput.View(),
+		tui.StyleDim.Render("[enter] Continue  [esc] Cancel"),
+	)
+	return tui.StyleOverlayBorder.Width(s.overlayWidth()).Render(content)
+}
+
+func (s *ServicesScreen) viewKeyInput() string {
+	svcName := ""
+	if s.activatingService != nil {
+		svcName = s.activatingService.Name
+	}
+	title := lipgloss.NewStyle().
+		Foreground(tui.ColorBrand).
+		Bold(true).
+		Render("Connect " + svcName)
+
+	content := fmt.Sprintf("%s\n\n%s\n%s\n\n%s",
+		title,
+		tui.StyleDim.Render("API key / token:"),
+		"  "+s.keyInput.View(),
+		tui.StyleDim.Render("[enter] Activate  [esc] Cancel"),
+	)
+	return tui.StyleOverlayBorder.Width(s.overlayWidth()).Render(content)
+}
+
+func (s *ServicesScreen) viewOAuthConfirm() string {
+	svcName := ""
+	if s.activatingService != nil {
+		svcName = s.activatingService.Name
+	}
+	title := lipgloss.NewStyle().
+		Foreground(tui.ColorBrand).
+		Bold(true).
+		Render("Connect " + svcName)
+
+	urlLine := tui.StyleDim.Render(s.pendingOAuthURL)
+
+	content := fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s",
+		title,
+		"Press Enter to open browser for OAuth authorization.",
+		urlLine,
+		tui.StyleDim.Render("[enter] Open browser  [esc] Cancel"),
+	)
+	return tui.StyleOverlayBorder.Width(s.overlayWidth()).Render(content)
+}
+
+func (s *ServicesScreen) viewOAuthWaiting() string {
+	svcName := ""
+	if s.activatingService != nil {
+		svcName = s.activatingService.Name
+	}
+	title := lipgloss.NewStyle().
+		Foreground(tui.ColorBrand).
+		Bold(true).
+		Render("Connect " + svcName)
+
+	content := fmt.Sprintf("%s\n\n%s\n\n%s",
+		title,
+		tui.StyleAmber.Render("Waiting for OAuth completion in browser..."),
+		tui.StyleDim.Render("[esc] Cancel"),
+	)
+	return tui.StyleOverlayBorder.Width(s.overlayWidth()).Render(content)
+}
+
+// ── Activation flow ─────────────────────────────────────────────────────────
+
+func (s *ServicesScreen) startActivation() tea.Cmd {
+	if s.cursor >= len(s.services) {
+		return nil
+	}
+	svc := s.services[s.cursor]
+	if svc.Status == "activated" || !svc.RequiresActivation {
+		return nil
+	}
+
+	s.activatingService = &svc
+	s.inputStep = stepAlias
+	ni := textinput.New()
+	ni.Placeholder = "default"
+	ni.Focus()
+	s.aliasInput = &ni
+	return nil
+}
+
+func (s *ServicesScreen) proceedAfterAlias() tea.Cmd {
+	svc := s.activatingService
+	if svc == nil {
+		s.resetActivation()
+		return nil
+	}
+
+	if svc.OAuth {
+		// Start local listener, then fetch OAuth URL.
+		port, done, cleanup := startOAuthListener()
+		s.oauthDoneCh = done
+		s.oauthCleanup = cleanup
+		cliCallback := fmt.Sprintf("http://localhost:%d/oauth-done", port)
+		alias := s.pendingAlias
+		serviceID := svc.ID
+		cl := s.client
+		return func() tea.Msg {
+			resp, err := cl.GetOAuthURL(serviceID, alias, cliCallback)
+			return oauthURLMsg{resp: resp, err: err}
+		}
+	}
+
+	// API key service — show key input.
+	s.inputStep = stepKeyEntry
+	ki := textinput.New()
+	ki.Placeholder = "paste token here"
+	ki.EchoMode = textinput.EchoPassword
+	ki.Focus()
+	s.keyInput = &ki
+	return nil
+}
+
+func (s *ServicesScreen) activateWithKey(keyVal string) tea.Cmd {
+	svc := s.activatingService
+	if svc == nil {
+		return nil
+	}
+	alias := s.pendingAlias
+	serviceID := svc.ID
+	cl := s.client
+	return func() tea.Msg {
+		err := cl.ActivateWithKey(serviceID, keyVal, alias)
+		return svcActivatedMsg{err: err}
+	}
+}
+
+func (s *ServicesScreen) waitForOAuth() tea.Cmd {
+	ch := s.oauthDoneCh
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		<-ch
+		return oauthDoneMsg{}
+	}
+}
+
+// ── Deactivation ────────────────────────────────────────────────────────────
+
+func (s *ServicesScreen) startDeactivation() {
+	if s.cursor >= len(s.services) {
+		return
+	}
+	svc := s.services[s.cursor]
+	if svc.Status != "activated" {
+		return
+	}
+	c := components.NewConfirm(
+		"Disconnect Service",
+		fmt.Sprintf("Disconnect %s? This removes stored credentials.", svc.Name),
+		"deactivate-service",
+	)
+	s.confirm = &c
+}
+
+func (s *ServicesScreen) deactivateSelected() tea.Cmd {
+	if s.cursor >= len(s.services) {
+		return nil
+	}
+	svc := s.services[s.cursor]
+	cl := s.client
+	alias := svc.Alias
+	return func() tea.Msg {
+		err := cl.DeactivateService(svc.ID, alias)
+		return svcDeactivatedMsg{err: err}
+	}
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+func (s *ServicesScreen) resetActivation() {
+	s.inputStep = stepNone
+	s.aliasInput = nil
+	s.keyInput = nil
+	s.pendingAlias = ""
+	s.pendingOAuthURL = ""
+	s.activatingService = nil
+}
+
+func (s *ServicesScreen) stopOAuthListener() {
+	if s.oauthCleanup != nil {
+		s.oauthCleanup()
+		s.oauthCleanup = nil
+	}
+	s.oauthDoneCh = nil
+}
 
 func (s *ServicesScreen) fetchServices() tea.Cmd {
 	c := s.client
@@ -250,4 +681,51 @@ func (s *ServicesScreen) contentWidth() int {
 		w = 40
 	}
 	return w
+}
+
+func (s *ServicesScreen) overlayWidth() int {
+	w := s.width - 8
+	if w > 60 {
+		w = 60
+	}
+	if w < 40 {
+		w = 40
+	}
+	return w
+}
+
+// ── OAuth local listener ────────────────────────────────────────────────────
+
+// startOAuthListener starts a one-shot HTTP server on a random port.
+// It returns the port, a channel that receives when the callback fires,
+// and a cleanup function to shut down the server.
+func startOAuthListener() (port int, done chan struct{}, cleanup func()) {
+	done = make(chan struct{})
+	var once sync.Once
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth-done", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+		once.Do(func() { close(done) })
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		// Fallback: return a closed channel so caller doesn't block forever.
+		close(done)
+		return 0, done, func() {}
+	}
+
+	port = ln.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{Handler: mux}
+
+	go func() { _ = srv.Serve(ln) }()
+
+	cleanup = func() {
+		once.Do(func() { close(done) })
+		_ = srv.Shutdown(context.Background())
+	}
+	return port, done, cleanup
 }

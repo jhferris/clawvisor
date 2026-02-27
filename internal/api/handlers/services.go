@@ -41,6 +41,7 @@ type oauthStateEntry struct {
 	ServiceID    string
 	Alias        string // "default" when not specified
 	PendingReqID string // pending_request_id query param (may be empty)
+	CLICallback  string // TUI local server callback URL (may be empty)
 	Scopes       []string  // merged scopes for this OAuth flow
 	ExpiresAt    time.Time
 }
@@ -253,6 +254,7 @@ func (h *ServicesHandler) OAuthGetURL(w http.ResponseWriter, r *http.Request) {
 		ServiceID:    serviceID,
 		Alias:        alias,
 		PendingReqID: r.URL.Query().Get("pending_request_id"),
+		CLICallback:  r.URL.Query().Get("cli_callback"),
 		Scopes:       mergedScopes,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	})
@@ -329,24 +331,24 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	code := r.URL.Query().Get("code")
 
 	if state == "" || code == "" {
-		oauthPopupClose(w, "Missing OAuth parameters.")
+		oauthPopupClose(w, "Missing OAuth parameters.", "")
 		return
 	}
 
 	val, ok := h.oauthStates.LoadAndDelete(state)
 	if !ok {
-		oauthPopupClose(w, "Invalid or expired OAuth state. Please try again.")
+		oauthPopupClose(w, "Invalid or expired OAuth state. Please try again.", "")
 		return
 	}
 	entry := val.(oauthStateEntry)
 	if time.Now().After(entry.ExpiresAt) {
-		oauthPopupClose(w, "OAuth session expired. Please try again.")
+		oauthPopupClose(w, "OAuth session expired. Please try again.", "")
 		return
 	}
 
 	adapter, ok := h.adapterReg.Get(entry.ServiceID)
 	if !ok {
-		oauthPopupClose(w, "Service not found.")
+		oauthPopupClose(w, "Service not found.", "")
 		return
 	}
 
@@ -358,7 +360,7 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	token, err := oauthCfg.Exchange(r.Context(), code)
 	if err != nil {
 		h.logger.Warn("oauth token exchange failed", "service", entry.ServiceID, "err", err)
-		oauthPopupClose(w, "Token exchange with provider failed.")
+		oauthPopupClose(w, "Token exchange with provider failed.", "")
 		return
 	}
 
@@ -382,14 +384,14 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 	credBytes, err := credential.FromToken(token, scopes)
 	if err != nil {
 		h.logger.Warn("credential from token failed", "service", entry.ServiceID, "err", err)
-		oauthPopupClose(w, "Failed to process credential.")
+		oauthPopupClose(w, "Failed to process credential.", "")
 		return
 	}
 
 	vKey := vaultKeyForServiceAlias(entry.ServiceID, alias)
 	if err := h.vault.Set(r.Context(), entry.UserID, vKey, credBytes); err != nil {
 		h.logger.Warn("vault set failed", "service", entry.ServiceID, "err", err)
-		oauthPopupClose(w, "Failed to store credential in vault.")
+		oauthPopupClose(w, "Failed to store credential in vault.", "")
 		return
 	}
 
@@ -401,13 +403,14 @@ func (h *ServicesHandler) OAuthCallback(w http.ResponseWriter, r *http.Request) 
 		go h.reactivatePendingRequest(context.Background(), entry.UserID, entry.PendingReqID)
 	}
 
-	oauthPopupClose(w, "")
+	oauthPopupClose(w, "", entry.CLICallback)
 }
 
 // oauthPopupClose serves a minimal HTML page that closes the OAuth popup window.
 // On success (errMsg == "") it posts a message to the opener so the dashboard can
 // refresh its services list. On error it shows the message and auto-closes after 5s.
-func oauthPopupClose(w http.ResponseWriter, errMsg string) {
+// If cliCallback is set, the success page also pings that URL to notify the TUI.
+func oauthPopupClose(w http.ResponseWriter, errMsg, cliCallback string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Error – Clawvisor</title>
@@ -419,15 +422,20 @@ h2{color:#dc2626;margin:0 0 8px}p{color:#6b7280;margin:4px 0;font-size:14px}</st
 			html.EscapeString(errMsg))
 		return
 	}
-	fmt.Fprint(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Authorized – Clawvisor</title>
+	// Build the CLI callback fetch snippet if a callback URL was provided.
+	cliCallbackSnippet := ""
+	if cliCallback != "" {
+		cliCallbackSnippet = fmt.Sprintf("fetch(%q).catch(function(){});", cliCallback)
+	}
+	fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Authorized – Clawvisor</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
 .card{background:#fff;border-radius:8px;padding:32px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1);max-width:320px}
 h2{color:#16a34a;margin:0 0 8px}p{color:#6b7280;margin:0;font-size:14px}</style></head>
 <body><div class="card"><h2>&#10003; Authorized</h2><p>Service activated. This window will close automatically.</p></div>
 <script>
 if(window.opener){try{window.opener.postMessage({type:'clawvisor_oauth_done'},'*')}catch(e){}}
-setTimeout(function(){window.close()},1500)
-</script></body></html>`)
+%ssetTimeout(function(){window.close()},1500)
+</script></body></html>`, cliCallbackSnippet)
 }
 
 // Activate is a unified activation endpoint.

@@ -246,6 +246,47 @@ func (c *Client) GetServices() (*ServicesResponse, error) {
 	return &resp, nil
 }
 
+// ── Service Activation ──────────────────────────────────────────────────────
+
+// GetOAuthURL returns an OAuth authorization URL for the given service.
+// If cliCallback is non-empty it is passed as cli_callback so the OAuth HTML
+// page pings the TUI's local server on completion.
+func (c *Client) GetOAuthURL(serviceID, alias, cliCallback string) (*OAuthURLResponse, error) {
+	params := url.Values{}
+	params.Set("service", serviceID)
+	if alias != "" {
+		params.Set("alias", alias)
+	}
+	if cliCallback != "" {
+		params.Set("cli_callback", cliCallback)
+	}
+	var resp OAuthURLResponse
+	if err := c.get("/api/oauth/url", params, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ActivateWithKey activates a non-OAuth service using an API key / token.
+func (c *Client) ActivateWithKey(serviceID, token, alias string) error {
+	body := map[string]string{"token": token}
+	if alias != "" {
+		body["alias"] = alias
+	}
+	var resp map[string]string
+	return c.post("/api/services/"+serviceID+"/activate-key", body, &resp)
+}
+
+// DeactivateService removes credentials for a service (default alias).
+func (c *Client) DeactivateService(serviceID, alias string) error {
+	body := map[string]string{}
+	if alias != "" {
+		body["alias"] = alias
+	}
+	var resp map[string]string
+	return c.post("/api/services/"+serviceID+"/deactivate", body, &resp)
+}
+
 // ── Restrictions ────────────────────────────────────────────────────────────
 
 func (c *Client) GetRestrictions() ([]Restriction, error) {

@@ -9,10 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +30,7 @@ import (
 	driveadapter "github.com/clawvisor/clawvisor/internal/adapters/google/drive"
 	gmailadapter "github.com/clawvisor/clawvisor/internal/adapters/google/gmail"
 	"github.com/clawvisor/clawvisor/internal/api"
+	"github.com/clawvisor/clawvisor/internal/browser"
 	"github.com/clawvisor/clawvisor/internal/auth"
 	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/config"
@@ -266,7 +265,7 @@ func Run(logger *slog.Logger) error {
 	var browserOpened bool
 	if cfg.Server.IsLocal() {
 		if magicURL != "" && os.Getenv("NO_OPEN") != "1" {
-			browserOpened = openBrowser(magicURL)
+			browserOpened = browser.Open(magicURL)
 		}
 		printBanner(cfg, adStatus, magicURL, browserOpened)
 	}
@@ -394,20 +393,6 @@ func wrapNames(names []string, maxWidth int) string {
 	return b.String()
 }
 
-func openBrowser(url string) bool {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		return false
-	}
-	return cmd.Start() == nil
-}
 
 // localSession is the JSON structure written to ~/.clawvisor/.local-session.
 type localSession struct {
