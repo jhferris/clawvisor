@@ -11,6 +11,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// AutoConfigured tracks which settings were auto-resolved (not explicitly set).
+type AutoConfigured struct {
+	DatabaseDriver bool
+	JWTSecret      bool
+}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Database  DatabaseConfig  `yaml:"database"`
@@ -23,6 +29,8 @@ type Config struct {
 	MCP       MCPConfig       `yaml:"mcp"`
 	Services  ServicesConfig  `yaml:"services"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
+
+	AutoConfig AutoConfigured `yaml:"-"`
 }
 
 // CallbackConfig holds settings for callback delivery.
@@ -172,7 +180,7 @@ func Default() *Config {
 			FrontendDir: "./web/dist",
 		},
 		Database: DatabaseConfig{
-			Driver:     "postgres",
+			Driver:     "",
 			SQLitePath: "./clawvisor.db",
 		},
 		Vault: VaultConfig{
@@ -333,6 +341,18 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_FAIL_CLOSED"); v != "" {
 		cfg.LLM.Verification.FailClosed = v == "true" || v == "1"
+	}
+
+	// Resolve empty database driver: explicit env/config wins; otherwise auto-detect.
+	if cfg.Database.Driver == "" {
+		if cfg.Database.PostgresURL != "" {
+			cfg.Database.Driver = "postgres"
+		} else if cfg.Server.IsLocal() {
+			cfg.Database.Driver = "sqlite"
+			cfg.AutoConfig.DatabaseDriver = true
+		} else {
+			cfg.Database.Driver = "postgres"
+		}
 	}
 
 	return cfg, nil

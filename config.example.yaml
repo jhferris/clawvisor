@@ -6,7 +6,7 @@ server:
   log_level: "info"        # "debug", "info", "warn", "error". Env: LOG_LEVEL
 
 database:
-  driver: "postgres"       # "postgres" | "sqlite"
+  driver: ""               # "postgres" | "sqlite" | "" (auto: sqlite locally, postgres otherwise)
   postgres_url: ""         # from env: DATABASE_URL
   sqlite_path: "./clawvisor.db"
 
@@ -16,7 +16,7 @@ vault:
   gcp_project: ""          # from env: GCP_PROJECT
 
 auth:
-  jwt_secret: ""           # from env: JWT_SECRET  (REQUIRED)
+  jwt_secret: ""           # from env: JWT_SECRET  (auto-generated locally; required in prod)
   access_token_ttl: "15m"
   refresh_token_ttl: "720h"
 

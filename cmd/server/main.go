@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,9 +29,9 @@ import (
 	contactsadapter "github.com/clawvisor/clawvisor/internal/adapters/google/contacts"
 	driveadapter "github.com/clawvisor/clawvisor/internal/adapters/google/drive"
 	gmailadapter "github.com/clawvisor/clawvisor/internal/adapters/google/gmail"
-	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/api"
 	"github.com/clawvisor/clawvisor/internal/auth"
+	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/config"
 	"github.com/clawvisor/clawvisor/internal/notify"
 	telegramnotify "github.com/clawvisor/clawvisor/internal/notify/telegram"
@@ -60,8 +63,18 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	// Auto-generate JWT secret for local dev; fail fast in non-local mode.
 	if cfg.Auth.JWTSecret == "" {
-		return fmt.Errorf("JWT_SECRET must be set (via env or config.yaml)")
+		if cfg.Server.IsLocal() {
+			secret := make([]byte, 32)
+			if _, err := cryptorand.Read(secret); err != nil {
+				return fmt.Errorf("generating JWT secret: %w", err)
+			}
+			cfg.Auth.JWTSecret = hex.EncodeToString(secret)
+			cfg.AutoConfig.JWTSecret = true
+		} else {
+			return fmt.Errorf("JWT_SECRET must be set (via env or config.yaml)")
+		}
 	}
 
 	// Initialize callback CIDR allowlist (before any gateway requests).
@@ -112,100 +125,84 @@ func run(logger *slog.Logger) error {
 
 	// ── Adapter Registry ─────────────────────────────────────────────────────
 	adapterReg := adapters.NewRegistry()
+	adStatus := adapterStatus{skipped: make(map[string]string)}
+
 	if cfg.Services.Google.ClientID != "" {
 		redirectURL := cfg.Services.Google.RedirectURL
 		if redirectURL == "" {
-			// Normalize the host for the OAuth redirect URL. When the server binds to
-			// 0.0.0.0 or 127.0.0.1, use "localhost" instead — Google Cloud Console
-			// requires the redirect URI to match exactly and users typically register
-			// http://localhost:PORT, not http://0.0.0.0:PORT or http://127.0.0.1:PORT.
 			host := cfg.Server.Host
 			if host == "0.0.0.0" || host == "127.0.0.1" || host == "" {
 				host = "localhost"
 			}
 			redirectURL = fmt.Sprintf("http://%s:%d/api/oauth/callback", host, cfg.Server.Port)
 		}
-		// Register all Google adapters — they share the same OAuth credentials (vault key "google").
 		adapterReg.Register(gmailadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
 		adapterReg.Register(calendaradapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
 		adapterReg.Register(driveadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
 		adapterReg.Register(contactsadapter.New(cfg.Services.Google.ClientID, cfg.Services.Google.ClientSecret, redirectURL))
-		logger.Info("google adapters registered (gmail, calendar, drive, contacts)")
+		adStatus.registered = append(adStatus.registered, "Gmail", "Calendar", "Drive", "Contacts")
 	} else {
-		logger.Info("google adapters not registered (GOOGLE_CLIENT_ID not set)")
+		adStatus.skipped["Google"] = "set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to enable Gmail, Calendar, Drive, and Contacts"
 	}
 
-	// GitHub adapter — registered unless explicitly disabled via config.
 	if cfg.Services.GitHub.Enabled {
 		adapterReg.Register(githubadapter.New())
-		logger.Info("github adapter registered")
+		adStatus.registered = append(adStatus.registered, "GitHub")
 	} else {
-		logger.Info("github adapter disabled via config")
+		adStatus.skipped["GitHub"] = "disabled via config"
 	}
-
-	// Slack adapter — registered unless explicitly disabled via config.
 	if cfg.Services.Slack.Enabled {
 		adapterReg.Register(slackadapter.New())
-		logger.Info("slack adapter registered")
+		adStatus.registered = append(adStatus.registered, "Slack")
 	} else {
-		logger.Info("slack adapter disabled via config")
+		adStatus.skipped["Slack"] = "disabled via config"
 	}
-
-	// Notion adapter — registered unless explicitly disabled via config.
 	if cfg.Services.Notion.Enabled {
 		adapterReg.Register(notionadapter.New())
-		logger.Info("notion adapter registered")
+		adStatus.registered = append(adStatus.registered, "Notion")
 	} else {
-		logger.Info("notion adapter disabled via config")
+		adStatus.skipped["Notion"] = "disabled via config"
 	}
-
-	// Linear adapter — registered unless explicitly disabled via config.
 	if cfg.Services.Linear.Enabled {
 		adapterReg.Register(linearadapter.New())
-		logger.Info("linear adapter registered")
+		adStatus.registered = append(adStatus.registered, "Linear")
 	} else {
-		logger.Info("linear adapter disabled via config")
+		adStatus.skipped["Linear"] = "disabled via config"
 	}
-
-	// Stripe adapter — registered unless explicitly disabled via config.
 	if cfg.Services.Stripe.Enabled {
 		adapterReg.Register(stripeadapter.New())
-		logger.Info("stripe adapter registered")
+		adStatus.registered = append(adStatus.registered, "Stripe")
 	} else {
-		logger.Info("stripe adapter disabled via config")
+		adStatus.skipped["Stripe"] = "disabled via config"
 	}
-
-	// Twilio adapter — registered unless explicitly disabled via config.
 	if cfg.Services.Twilio.Enabled {
 		adapterReg.Register(twilioadapter.New())
-		logger.Info("twilio adapter registered")
+		adStatus.registered = append(adStatus.registered, "Twilio")
 	} else {
-		logger.Info("twilio adapter disabled via config")
+		adStatus.skipped["Twilio"] = "disabled via config"
 	}
-
-	// iMessage adapter — registered if enabled in config and available (macOS with chat.db).
 	if cfg.Services.IMessage.Enabled {
 		imsg := imessageadapter.New()
 		if imsg.Available() {
 			adapterReg.Register(imsg)
-			logger.Info("imessage adapter registered")
+			adStatus.registered = append(adStatus.registered, "iMessage")
 		} else {
-			logger.Info("imessage adapter not available (requires macOS with Messages.app configured)")
+			adStatus.skipped["iMessage"] = "requires macOS with Messages.app configured"
 		}
 	} else {
-		logger.Info("imessage adapter disabled via config")
+		adStatus.skipped["iMessage"] = "disabled via config"
 	}
+	logger.Debug("adapters registered", "count", len(adStatus.registered), "names", adStatus.registered)
 
 	// ── Notifier ─────────────────────────────────────────────────────────────
-	// Per-user bot tokens are stored in notification_configs. The notifier
-	// is always created; it reads credentials from the store on each call.
 	var notifier notify.Notifier = telegramnotify.New(st, ctx)
-	logger.Info("telegram notifier enabled (per-user bot tokens)")
+	logger.Debug("telegram notifier enabled (per-user bot tokens)")
 
 	// ── Magic link auth (local mode) ────────────────────────────────────────
 	// Auto-detect: magic_link when local, password otherwise.
 	// Explicit AUTH_MODE / config.yaml auth_mode overrides auto-detection.
 	var magicStore *auth.MagicTokenStore
+	var magicURL string
 	useMagicLink := cfg.Server.IsLocal()
 	if cfg.Server.AuthMode == "password" {
 		useMagicLink = false
@@ -231,7 +228,7 @@ func run(logger *slog.Logger) error {
 			if _, err := st.CreateUser(ctx, localEmail, hash); err != nil {
 				return fmt.Errorf("creating local user: %w", err)
 			}
-			logger.Info("created local user", "email", localEmail)
+			logger.Debug("created local user", "email", localEmail)
 		}
 
 		// Look up the user to get their ID.
@@ -250,15 +247,7 @@ func run(logger *slog.Logger) error {
 		if displayHost == "0.0.0.0" || displayHost == "127.0.0.1" || displayHost == "" {
 			displayHost = "localhost"
 		}
-		magicURL := fmt.Sprintf("http://%s:%d/auth/local?token=%s", displayHost, cfg.Server.Port, token)
-
-		fmt.Println()
-		fmt.Println("  Clawvisor dashboard")
-		fmt.Printf("  %s\n", magicURL)
-		fmt.Println()
-		fmt.Println("  Open this link in your browser to sign in.")
-		fmt.Println("  Valid for 15 minutes. Single use.")
-		fmt.Println()
+		magicURL = fmt.Sprintf("http://%s:%d/auth/local?token=%s", displayHost, cfg.Server.Port, token)
 
 		// Background cleanup goroutine.
 		go func() {
@@ -275,12 +264,161 @@ func run(logger *slog.Logger) error {
 		}()
 	}
 
+	// ── Banner (local mode only) ─────────────────────────────────────────────
+	var browserOpened bool
+	if cfg.Server.IsLocal() {
+		if magicURL != "" && os.Getenv("NO_OPEN") != "1" {
+			browserOpened = openBrowser(magicURL)
+		}
+		printBanner(cfg, adStatus, magicURL, browserOpened)
+	}
+
 	// ── HTTP Server ─────────────────────────────────────────────────────────
 	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, notifier, cfg.LLM, magicStore)
 	if err != nil {
 		return err
 	}
 	return srv.Run(ctx)
+}
+
+// ── Banner & helpers ────────────────────────────────────────────────────────
+
+type adapterStatus struct {
+	registered []string
+	skipped    map[string]string
+}
+
+func printBanner(cfg *config.Config, adStatus adapterStatus, magicURL string, browserOpened bool) {
+	const banner = `
+   ___  _                       _
+  / __\| | __ ___      ____   _(_) ___  ___   _ __
+ / /   | |/ _` + "`" + ` \ \ /\ / /\ \ / / |/ __|/ _ \ | '__|
+/ /___ | | (_| |\ V  V /  \ V /| |\__ \ (_) || |
+\____/ |_|\__,_| \_/\_/    \_/ |_||___/\___/ |_|
+`
+	fmt.Print(banner)
+	fmt.Println("  Clawvisor — AI Gatekeeper")
+	fmt.Println()
+
+	// Configuration summary
+	fmt.Println("  Configuration")
+	fmt.Println("  ─────────────────────────────────────────")
+
+	// Database
+	dbDesc := "Postgres"
+	if cfg.Database.Driver == "sqlite" {
+		dbDesc = fmt.Sprintf("SQLite (%s)", cfg.Database.SQLitePath)
+	}
+	if cfg.AutoConfig.DatabaseDriver {
+		fmt.Printf("  %-12s %s  (auto)\n", "Database", dbDesc)
+	} else {
+		fmt.Printf("  %-12s %s\n", "Database", dbDesc)
+	}
+
+	// Vault
+	vaultDesc := "Local AES-256-GCM"
+	if cfg.Vault.Backend == "gcp" {
+		vaultDesc = "GCP Secret Manager"
+	}
+	fmt.Printf("  %-12s %s\n", "Vault", vaultDesc)
+
+	// JWT
+	if cfg.AutoConfig.JWTSecret {
+		fmt.Printf("  %-12s Generated for this session  (auto)\n", "JWT secret")
+	} else {
+		fmt.Printf("  %-12s Set via env/config\n", "JWT secret")
+	}
+
+	// Auth mode
+	authMode := "Password"
+	if magicURL != "" {
+		authMode = "Magic link"
+	}
+	fmt.Printf("  %-12s %s\n", "Auth mode", authMode)
+	fmt.Println()
+
+	// Adapters
+	if len(adStatus.registered) > 0 {
+		fmt.Printf("  Adapters (%d registered)\n", len(adStatus.registered))
+		fmt.Println("  ─────────────────────────────────────────")
+		fmt.Printf("  %s\n", wrapNames(adStatus.registered, 40))
+	} else {
+		fmt.Println("  Adapters (none registered)")
+		fmt.Println("  ─────────────────────────────────────────")
+	}
+
+	for name, reason := range adStatus.skipped {
+		fmt.Println()
+		fmt.Printf("  %s adapters not registered — %s.\n", name, reason)
+	}
+	fmt.Println()
+
+	// Dashboard link
+	fmt.Println("  Dashboard")
+	fmt.Println("  ─────────────────────────────────────────")
+	if magicURL != "" {
+		fmt.Printf("  %s\n", magicURL)
+		fmt.Println()
+		if browserOpened {
+			fmt.Println("  Opening in browser...")
+		} else {
+			fmt.Println("  Open this link in your browser to sign in.")
+		}
+	} else {
+		displayHost := cfg.Server.Host
+		if displayHost == "0.0.0.0" || displayHost == "127.0.0.1" || displayHost == "" {
+			displayHost = "localhost"
+		}
+		fmt.Printf("  http://%s:%d\n", displayHost, cfg.Server.Port)
+	}
+	fmt.Println("  Press Ctrl+C to stop the server.")
+	fmt.Println()
+}
+
+// wrapNames joins names with commas, wrapping at roughly maxWidth characters.
+func wrapNames(names []string, maxWidth int) string {
+	if len(names) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	lineLen := 0
+	for i, n := range names {
+		seg := n
+		if i < len(names)-1 {
+			seg += ","
+		}
+		// +1 for the space before the segment (except first on a line)
+		needed := len(seg)
+		if lineLen > 0 {
+			needed++ // leading space
+		}
+		if lineLen > 0 && lineLen+needed > maxWidth {
+			b.WriteString("\n  ")
+			lineLen = 0
+		}
+		if lineLen > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(seg)
+		lineLen += needed
+	}
+	return b.String()
+}
+
+// openBrowser launches the default browser. Returns true on success.
+func openBrowser(url string) bool {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		return false
+	}
+	return cmd.Start() == nil
 }
 
 func buildVault(cfg *config.Config, db *sql.DB, driver string) (vault.Vault, error) {

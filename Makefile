@@ -18,13 +18,12 @@ test-verbose:
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 
-# Run with Postgres (requires DATABASE_URL)
+# Run locally (builds first, then runs the binary — clean Ctrl+C exit)
 run:
-	go run ./cmd/server
+	@go build -o bin/clawvisor ./cmd/server && bin/clawvisor
 
-# Run with SQLite (no external dependencies)
 run-sqlite:
-	DATABASE_DRIVER=sqlite JWT_SECRET=$${JWT_SECRET:-dev-secret} go run ./cmd/server
+	@go build -o bin/clawvisor ./cmd/server && bin/clawvisor
 
 # ── Docker / Cloud ─────────────────────────────────────────────────────────────
 

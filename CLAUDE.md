@@ -129,8 +129,8 @@ go test ./...                         # all tests
 go test ./internal/policy/...         # policy engine tests (critical)
 go vet ./...
 
-# Run locally (SQLite mode, no Docker needed)
-DATABASE_DRIVER=sqlite JWT_SECRET=dev-secret go run ./cmd/server
+# Run locally (auto-configures SQLite + JWT secret)
+go run ./cmd/server
 
 # Run locally with Postgres
 docker compose up                     # starts app + postgres
@@ -175,7 +175,7 @@ Mark a phase complete by checking its box when all success criteria in its doc a
 
 ### Phase 1 — Foundation
 - Generate a 32-byte `vault.key` on first run if missing (`os.Stat` → if not exists → `crypto/rand`). `chmod 600` it.
-- JWT secret must be set via env (`JWT_SECRET`); fail fast on startup if missing.
+- JWT secret: auto-generated for local dev; must be set via env (`JWT_SECRET`) in non-local mode (fail fast if missing).
 - Both Postgres and SQLite migrations live in separate subdirectories. SQLite uses `TEXT` everywhere (no `TIMESTAMPTZ`, no `JSONB`). Run migrations on startup in both implementations.
 - Refresh tokens: store SHA-256 hash in `sessions` table, return raw token once.
 - The frontend shell for Phase 1 is login/register pages only. `Dashboard.tsx` is a placeholder.

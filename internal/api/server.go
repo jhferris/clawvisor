@@ -357,7 +357,9 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		s.logger.Info("server starting", "addr", s.http.Addr)
+		if !s.cfg.Server.IsLocal() {
+			s.logger.Info("server starting", "addr", s.http.Addr)
+		}
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("server error: %w", err)
 		}
@@ -367,14 +369,20 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		s.logger.Info("shutting down server")
+		if s.cfg.Server.IsLocal() {
+			fmt.Println("\n  Shutting down...")
+		} else {
+			s.logger.Info("shutting down server")
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := s.http.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
 		s.store.Close()
-		s.logger.Info("server stopped")
+		if !s.cfg.Server.IsLocal() {
+			s.logger.Info("server stopped")
+		}
 		return nil
 	}
 }
