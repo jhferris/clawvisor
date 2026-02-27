@@ -533,10 +533,10 @@ func (s *DashboardScreen) renderTaskAuditView() string {
 		return b.String()
 	}
 
-	colTime := lipgloss.NewStyle().Width(12)
-	colService := lipgloss.NewStyle().Width(22)
-	colAction := lipgloss.NewStyle().Width(18)
-	colStatus := lipgloss.NewStyle().Width(10)
+	colTime := lipgloss.NewStyle().Width(12).MaxWidth(12)
+	colService := lipgloss.NewStyle().Width(22).MaxWidth(22)
+	colAction := lipgloss.NewStyle().Width(18).MaxWidth(18)
+	colStatus := lipgloss.NewStyle().Width(10).MaxWidth(10)
 
 	headerLine := tui.StyleTableHeader.Render(
 		colTime.Render("TIME") +
