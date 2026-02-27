@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -140,14 +142,42 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 		req.Header.Set("X-Clawvisor-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
+	slog.Info("callback: delivering",
+		"url", callbackURL,
+		"request_id", payload.RequestID,
+		"status", payload.Status,
+		"body", string(body),
+		"signed", signingKey != "",
+	)
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		slog.Warn("callback: delivery failed",
+			"url", callbackURL,
+			"request_id", payload.RequestID,
+			"err", err,
+		)
 		return fmt.Errorf("callback: POST %s: %w", callbackURL, err)
 	}
 	defer resp.Body.Close()
 
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 	if resp.StatusCode >= 400 {
+		slog.Warn("callback: non-success response",
+			"url", callbackURL,
+			"request_id", payload.RequestID,
+			"status_code", resp.StatusCode,
+			"response_body", string(respBody),
+		)
 		return fmt.Errorf("callback: POST %s returned %d", callbackURL, resp.StatusCode)
 	}
+
+	slog.Info("callback: delivered",
+		"url", callbackURL,
+		"request_id", payload.RequestID,
+		"status_code", resp.StatusCode,
+		"response_body", string(respBody),
+	)
 	return nil
 }
