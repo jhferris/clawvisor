@@ -1,12 +1,15 @@
-.PHONY: build test run run-sqlite migrate lint clean
+.PHONY: build test run run-sqlite migrate lint clean setup tui
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
 build: web/dist
-	go build -o bin/clawvisor ./cmd/server
+	go build -o bin/clawvisor ./cmd/clawvisor
+
+build-server: web/dist
+	go build -o bin/clawvisor-server ./cmd/server
 
 web/dist: web/src
-	cd web && npm run build
+	cd web && npm install && npm run build
 
 # ── Test ───────────────────────────────────────────────────────────────────────
 
@@ -18,12 +21,16 @@ test-verbose:
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 
-# Run locally (builds first, then runs the binary — clean Ctrl+C exit)
+# Run locally (builds unified binary, starts server subcommand)
 run:
-	@go build -o bin/clawvisor ./cmd/server && bin/clawvisor
+	@go build -o bin/clawvisor ./cmd/clawvisor && bin/clawvisor server
 
 run-sqlite:
-	@go build -o bin/clawvisor ./cmd/server && bin/clawvisor
+	@go build -o bin/clawvisor ./cmd/clawvisor && bin/clawvisor server
+
+# Launch TUI dashboard
+tui:
+	@go build -o bin/clawvisor ./cmd/clawvisor && bin/clawvisor tui
 
 # ── Docker / Cloud ─────────────────────────────────────────────────────────────
 
@@ -58,6 +65,9 @@ deploy:
 
 lint:
 	go vet ./...
+
+setup: build
+	@bin/clawvisor setup
 
 clean:
 	rm -rf bin/ web/dist/

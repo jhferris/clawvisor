@@ -195,6 +195,7 @@ func (s *Server) routes() http.Handler {
 	// Magic link auth (no auth required; only registered when magicStore is set)
 	if s.magicStore != nil {
 		mux.HandleFunc("GET /auth/local", authHandler.HandleMagicLink)
+		mux.HandleFunc("POST /api/auth/magic", authHandler.ExchangeMagic)
 	}
 
 	// Auth (requires user JWT)

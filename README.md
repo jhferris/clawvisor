@@ -48,26 +48,32 @@ Google services share a single OAuth connection — activating one activates all
 **Prerequisites:** Go 1.23+, Node 18+
 
 ```bash
-# Clone and build
 git clone https://github.com/ericlevine/clawvisor-gatekeeper.git
 cd clawvisor-gatekeeper
-cd web && npm install && npm run build && cd ..
 
-# Run locally with SQLite (no Docker, no Postgres)
+# Interactive setup — installs deps, builds, generates config
+make setup
+
+# Start the server
+make run
+
+# Launch the TUI dashboard (in a separate terminal)
+make tui
+```
+
+That's it — three commands to a working setup.
+
+`make setup` walks through environment, Google OAuth, iMessage, and intent verification configuration. It generates a `config.yaml` with sensible defaults (hit Enter through most prompts for a basic local setup) and writes `~/.clawvisor/config.yaml` with the server URL so the TUI knows where to connect.
+
+`make run` starts the server. In local mode it auto-creates an `admin@local` user, opens the web dashboard via a magic link, and writes a session file (`~/.clawvisor/.local-session`) for the TUI.
+
+`make tui` launches the terminal dashboard. It automatically authenticates using the local session file — no manual token configuration needed. On first launch it exchanges the session token for a refresh token and saves it for future use.
+
+You can also run without the setup script:
+
+```bash
 DATABASE_DRIVER=sqlite JWT_SECRET=dev-secret go run ./cmd/server
 ```
-
-On startup, Clawvisor prints a magic link to the terminal:
-
-```
-  Clawvisor dashboard
-  http://localhost:8080/auth/local?token=abc123...
-
-  Open this link in your browser to sign in.
-  Valid for 15 minutes. Single use.
-```
-
-This auto-creates an `admin@local` user and logs you in — no registration needed in local mode.
 
 A `vault.key` file is auto-generated on first run if one doesn't exist. This is the master encryption key for stored credentials.
 
@@ -168,6 +174,37 @@ The web UI provides:
 - **Audit log** — searchable history of every gateway request with outcomes
 - **Agents** — create agent tokens, manage per-agent restrictions
 - **Telegram** — pair your Telegram bot for mobile approval notifications
+
+## TUI
+
+The terminal dashboard (`clawvisor tui`) provides the same approval and monitoring capabilities without leaving the terminal.
+
+```bash
+# After setup + server are running:
+make tui
+
+# Or directly:
+clawvisor tui
+
+# With explicit connection details:
+clawvisor tui --url http://localhost:8080 --token <refresh_token>
+```
+
+Authentication is automatic in local mode. The flow:
+
+1. `clawvisor server` writes `~/.clawvisor/.local-session` with a one-time magic token
+2. `clawvisor tui` reads this file, exchanges the token via `POST /api/auth/magic`, and saves the resulting refresh token to `~/.clawvisor/config.yaml`
+3. Subsequent launches use the saved refresh token directly
+
+For password-mode servers, the TUI prompts for email and password on first launch.
+
+You can also set credentials via environment variables:
+
+```bash
+export CLAWVISOR_URL=http://localhost:8080
+export CLAWVISOR_TOKEN=<refresh_token>
+clawvisor tui
+```
 
 ## Architecture
 

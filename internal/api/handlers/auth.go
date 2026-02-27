@@ -339,6 +339,44 @@ func (h *AuthHandler) magicLinkError(w http.ResponseWriter, msg string) {
 </body></html>`, msg)
 }
 
+// ExchangeMagic validates a magic token via JSON and returns a token pair.
+// This is the API equivalent of HandleMagicLink, used by the TUI.
+//
+// POST /api/auth/magic
+// Body: {"token": "..."}
+func (h *AuthHandler) ExchangeMagic(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "token is required")
+		return
+	}
+	if h.magicStore == nil {
+		writeError(w, http.StatusBadRequest, "NOT_ENABLED", "magic link auth is not enabled")
+		return
+	}
+
+	userID, err := h.magicStore.Validate(body.Token)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "INVALID_TOKEN", "token expired or already used")
+		return
+	}
+
+	user, err := h.st.GetUserByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "USER_NOT_FOUND", "user not found")
+		return
+	}
+
+	resp, err := h.issueTokens(r, user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not issue tokens")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (h *AuthHandler) issueTokens(r *http.Request, user *store.User) (*authResponse, error) {
