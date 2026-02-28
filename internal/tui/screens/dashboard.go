@@ -275,7 +275,7 @@ func (s *DashboardScreen) View() string {
 	if s.view == dashViewAuditDetail && s.detail.Visible() {
 		return s.detail.View()
 	}
-	if s.view == dashViewTaskAudit {
+	if s.view == dashViewTaskAudit && s.drillTask != nil {
 		return s.renderTaskAuditView()
 	}
 	return s.renderMainView()
