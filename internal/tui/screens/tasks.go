@@ -17,6 +17,7 @@ import (
 
 type tasksDataMsg struct {
 	tasks []client.Task
+	total int
 }
 
 type taskActionDoneMsg struct {
@@ -27,21 +28,25 @@ type taskActionDoneMsg struct {
 // ── Model ───────────────────────────────────────────────────────────────────
 
 type TasksScreen struct {
-	client   *client.Client
-	tasks    []client.Task
-	cursor   int
-	width    int
-	height   int
-	loading  bool
-	err      error
-	detail   Detail
-	confirm  *components.Confirm
+	client  *client.Client
+	tasks   []client.Task
+	cursor  int
+	width   int
+	height  int
+	loading bool
+	err     error
+	detail  Detail
+	confirm *components.Confirm
+	total   int
+	filter  client.TaskFilter
+	showAll bool
 }
 
 func NewTasksScreen(c *client.Client) *TasksScreen {
 	return &TasksScreen{
 		client: c,
 		detail: NewDetail(),
+		filter: client.TaskFilter{ActiveOnly: true, Limit: 50},
 	}
 }
 
@@ -112,10 +117,31 @@ func (s *TasksScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 					s.confirm = &c
 				}
 			}
+		case key.Matches(msg, tui.TaskKeys.History):
+			s.showAll = !s.showAll
+			s.filter.ActiveOnly = !s.showAll
+			s.filter.Offset = 0
+			s.cursor = 0
+			return s, s.fetchTasks()
 		case key.Matches(msg, tui.ListNavKeys.Enter):
 			s.showDetail()
 		case key.Matches(msg, tui.Keys.Refresh):
 			return s, s.fetchTasks()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("pgdown"))):
+			if s.filter.Limit > 0 && s.filter.Offset+s.filter.Limit < s.total {
+				s.filter.Offset += s.filter.Limit
+				s.cursor = 0
+				return s, s.fetchTasks()
+			}
+		case key.Matches(msg, key.NewBinding(key.WithKeys("pgup"))):
+			if s.filter.Offset > 0 {
+				s.filter.Offset -= s.filter.Limit
+				if s.filter.Offset < 0 {
+					s.filter.Offset = 0
+				}
+				s.cursor = 0
+				return s, s.fetchTasks()
+			}
 		}
 
 	case tui.TickMsg:
@@ -125,6 +151,7 @@ func (s *TasksScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 		s.loading = false
 		s.err = nil
 		s.tasks = msg.tasks
+		s.total = msg.total
 		if s.cursor >= len(s.tasks) {
 			s.cursor = max(0, len(s.tasks)-1)
 		}
@@ -163,7 +190,11 @@ func (s *TasksScreen) View() string {
 	var b strings.Builder
 
 	header := lipgloss.NewStyle().Foreground(tui.ColorWhite).Bold(true)
-	b.WriteString(header.Render("TASKS"))
+	title := "TASKS"
+	if s.showAll {
+		title = "TASKS (all)"
+	}
+	b.WriteString(header.Render(title))
 	b.WriteString("\n")
 	b.WriteString(tui.StyleDim.Render(strings.Repeat("─", min(60, s.contentWidth()))))
 	b.WriteString("\n\n")
@@ -178,7 +209,11 @@ func (s *TasksScreen) View() string {
 	}
 
 	if len(s.tasks) == 0 {
-		b.WriteString(tui.StyleDim.Render("  No tasks."))
+		if s.showAll {
+			b.WriteString(tui.StyleDim.Render("  No tasks."))
+		} else {
+			b.WriteString(tui.StyleDim.Render("  No active tasks."))
+		}
 		return b.String()
 	}
 
@@ -211,14 +246,31 @@ func (s *TasksScreen) View() string {
 		}
 	}
 
+	// Pagination info.
+	if s.filter.Limit > 0 && s.total > s.filter.Limit {
+		page := s.filter.Offset/s.filter.Limit + 1
+		totalPages := (s.total + s.filter.Limit - 1) / s.filter.Limit
+		b.WriteString("\n")
+		b.WriteString(tui.StyleDim.Render(fmt.Sprintf("  Page %d/%d (%d total)  [pgup/pgdn] Navigate", page, totalPages, s.total)))
+	}
+
 	return b.String()
 }
 
 func (s *TasksScreen) ShortHelp() []string {
-	return []string{
+	help := []string{
 		tui.StyleStatusKey.Render("[v]") + tui.StyleStatusBar.Render(" Revoke"),
 		tui.StyleStatusKey.Render("[enter]") + tui.StyleStatusBar.Render(" Details"),
 	}
+	if s.showAll {
+		help = append(help, tui.StyleStatusKey.Render("[h]")+tui.StyleStatusBar.Render(" Active"))
+	} else {
+		help = append(help, tui.StyleStatusKey.Render("[h]")+tui.StyleStatusBar.Render(" History"))
+	}
+	if s.filter.Limit > 0 && s.total > s.filter.Limit {
+		help = append(help, tui.StyleStatusKey.Render("[pgup/pgdn]")+tui.StyleStatusBar.Render(" Page"))
+	}
+	return help
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -309,12 +361,13 @@ func (s *TasksScreen) isSelected(idx int) bool {
 
 func (s *TasksScreen) fetchTasks() tea.Cmd {
 	c := s.client
+	f := s.filter
 	return func() tea.Msg {
-		resp, err := c.GetTasks()
+		resp, err := c.GetTasks(f)
 		if err != nil {
 			return tui.ErrMsg{Err: err}
 		}
-		return tasksDataMsg{tasks: resp.Tasks}
+		return tasksDataMsg{tasks: resp.Tasks, total: resp.Total}
 	}
 }
 

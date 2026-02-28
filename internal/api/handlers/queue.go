@@ -54,7 +54,7 @@ func (h *QueueHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.st.ListTasks(r.Context(), user.ID)
+	tasks, _, err := h.st.ListTasks(r.Context(), user.ID, store.TaskFilter{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not list tasks")
 		return

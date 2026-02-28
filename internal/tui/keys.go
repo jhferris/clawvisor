@@ -80,13 +80,18 @@ var PendingKeys = ApprovalKeys{
 
 // TaskActionKeys for the tasks screen.
 type TaskActionKeys struct {
-	Revoke key.Binding
+	Revoke  key.Binding
+	History key.Binding
 }
 
 var TaskKeys = TaskActionKeys{
 	Revoke: key.NewBinding(
 		key.WithKeys("v"),
 		key.WithHelp("v", "revoke"),
+	),
+	History: key.NewBinding(
+		key.WithKeys("h"),
+		key.WithHelp("h", "toggle history"),
 	),
 }
 

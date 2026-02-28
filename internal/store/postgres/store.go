@@ -656,19 +656,43 @@ func (s *Store) GetTask(ctx context.Context, id string) (*store.Task, error) {
 	return t, nil
 }
 
-func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
+func (s *Store) ListTasks(ctx context.Context, userID string, filter store.TaskFilter) ([]*store.Task, int, error) {
+	where := "WHERE user_id = $1"
+	args := []any{userID}
+	argIdx := 2
+
+	if filter.ActiveOnly {
+		where += fmt.Sprintf(" AND status IN ($%d, $%d, $%d)", argIdx, argIdx+1, argIdx+2)
+		args = append(args, "active", "pending_approval", "pending_scope_expansion")
+		argIdx += 3
+	}
+
+	// Count total matching rows.
+	var total int
+	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM tasks "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := `SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
 		       pending_action, pending_reason, lifetime
-		FROM tasks WHERE user_id = $1
-		ORDER BY created_at DESC
-	`, userID)
+		FROM tasks ` + where + ` ORDER BY created_at DESC`
+
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+		args = append(args, filter.Limit, filter.Offset)
+	}
+
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	return scanTasks(rows)
+	tasks, err := scanTasks(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, total, nil
 }
 
 func (s *Store) UpdateTaskStatus(ctx context.Context, id, status string) error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -212,7 +213,22 @@ func (h *TasksHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.st.ListTasks(ctx, user.ID)
+	var filter store.TaskFilter
+	if r.URL.Query().Get("active_only") == "true" {
+		filter.ActiveOnly = true
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			filter.Limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+
+	tasks, total, err := h.st.ListTasks(ctx, user.ID, filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not list tasks")
 		return
@@ -225,7 +241,7 @@ func (h *TasksHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total": len(tasks),
+		"total": total,
 		"tasks": tasks,
 	})
 }

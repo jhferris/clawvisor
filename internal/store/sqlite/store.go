@@ -772,16 +772,34 @@ func (s *Store) GetTask(ctx context.Context, id string) (*store.Task, error) {
 	return t, nil
 }
 
-func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
+func (s *Store) ListTasks(ctx context.Context, userID string, filter store.TaskFilter) ([]*store.Task, int, error) {
+	where := "WHERE user_id = ?"
+	args := []any{userID}
+
+	if filter.ActiveOnly {
+		where += " AND status IN (?, ?, ?)"
+		args = append(args, "active", "pending_approval", "pending_scope_expansion")
+	}
+
+	// Count total matching rows.
+	var total int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := `SELECT id, user_id, agent_id, purpose, status, authorized_actions, callback_url,
 		       created_at, approved_at, expires_at, expires_in_seconds, request_count,
 		       pending_action, pending_reason, lifetime
-		FROM tasks WHERE user_id = ?
-		ORDER BY created_at DESC
-	`, userID)
+		FROM tasks ` + where + ` ORDER BY created_at DESC`
+
+	if filter.Limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, filter.Limit, filter.Offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -793,7 +811,7 @@ func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, er
 		if err := rows.Scan(&t.ID, &t.UserID, &t.AgentID, &t.Purpose, &t.Status, &actionsStr,
 			&t.CallbackURL, &createdAt, &approvedAt, &expiresAt, &t.ExpiresInSeconds,
 			&t.RequestCount, &pendingActionStr, &t.PendingReason, &t.Lifetime); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		t.CreatedAt = parseTime(createdAt)
 		if approvedAt != nil {
@@ -813,7 +831,7 @@ func (s *Store) ListTasks(ctx context.Context, userID string) ([]*store.Task, er
 		}
 		tasks = append(tasks, t)
 	}
-	return tasks, rows.Err()
+	return tasks, total, rows.Err()
 }
 
 func (s *Store) UpdateTaskStatus(ctx context.Context, id, status string) error {

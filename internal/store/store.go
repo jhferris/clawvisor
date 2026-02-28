@@ -65,7 +65,7 @@ type Store interface {
 	// Tasks
 	CreateTask(ctx context.Context, task *Task) error
 	GetTask(ctx context.Context, id string) (*Task, error)
-	ListTasks(ctx context.Context, userID string) ([]*Task, error)
+	ListTasks(ctx context.Context, userID string, filter TaskFilter) ([]*Task, int, error)
 	UpdateTaskStatus(ctx context.Context, id, status string) error
 	UpdateTaskApproved(ctx context.Context, id string, expiresAt time.Time) error
 	UpdateTaskActions(ctx context.Context, id string, actions []TaskAction, expiresAt time.Time) error
@@ -213,6 +213,14 @@ type PendingApproval struct {
 	CallbackURL   *string         `json:"callback_url,omitempty"`
 	ExpiresAt     time.Time       `json:"expires_at"`
 	CreatedAt     time.Time       `json:"created_at"`
+}
+
+// TaskFilter controls which tasks are returned by ListTasks.
+// Zero values mean "no filter" (backwards compatible).
+type TaskFilter struct {
+	ActiveOnly bool   // status IN ('active','pending_approval','pending_scope_expansion')
+	Limit      int    // 0 → no limit
+	Offset     int
 }
 
 // AuditFilter controls which entries are returned by ListAuditEntries.

@@ -152,9 +152,25 @@ func (c *Client) DenyRequest(requestID string) (*ApprovalActionResponse, error) 
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
-func (c *Client) GetTasks() (*TasksResponse, error) {
+type TaskFilter struct {
+	ActiveOnly bool
+	Limit      int
+	Offset     int
+}
+
+func (c *Client) GetTasks(f TaskFilter) (*TasksResponse, error) {
+	params := url.Values{}
+	if f.ActiveOnly {
+		params.Set("active_only", "true")
+	}
+	if f.Limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", f.Limit))
+	}
+	if f.Offset > 0 {
+		params.Set("offset", fmt.Sprintf("%d", f.Offset))
+	}
 	var resp TasksResponse
-	if err := c.get("/api/tasks", nil, &resp); err != nil {
+	if err := c.get("/api/tasks", params, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
