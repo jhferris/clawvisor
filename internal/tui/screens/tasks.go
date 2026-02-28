@@ -123,10 +123,12 @@ func (s *TasksScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case tasksDataMsg:
 		s.loading = false
+		s.err = nil
 		s.tasks = msg.tasks
 		if s.cursor >= len(s.tasks) {
 			s.cursor = max(0, len(s.tasks)-1)
 		}
+		cmds = append(cmds, tui.ConnState(true))
 
 	case taskActionDoneMsg:
 		if msg.err != nil {
@@ -141,6 +143,7 @@ func (s *TasksScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

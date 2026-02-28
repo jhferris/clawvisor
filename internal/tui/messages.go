@@ -24,5 +24,13 @@ func (e ErrMsg) Error() string { return e.Err.Error() }
 // StatusMsg is displayed briefly in the status bar.
 type StatusMsg string
 
+// ConnStateMsg indicates whether the server is reachable.
+type ConnStateMsg bool
+
+// ConnState returns a tea.Cmd that emits a ConnStateMsg.
+func ConnState(connected bool) tea.Cmd {
+	return func() tea.Msg { return ConnStateMsg(connected) }
+}
+
 // ScreenSwitchMsg requests switching to a different screen.
 type ScreenSwitchMsg struct{ Screen Screen }

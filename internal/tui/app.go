@@ -21,6 +21,7 @@ type App struct {
 	pendingCount int
 	status       string
 	pollInterval time.Duration
+	disconnected bool
 	// overlay state
 	showHelp bool
 }
@@ -112,6 +113,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PendingCountMsg:
 		a.pendingCount = int(msg)
+		return a, nil
+
+	case ConnStateMsg:
+		connected := bool(msg)
+		if connected && a.disconnected {
+			a.pollInterval = 5 * time.Second
+		} else if !connected && !a.disconnected {
+			a.pollInterval = 15 * time.Second
+		}
+		a.disconnected = !connected
 		return a, nil
 
 	case ScreenSwitchMsg:
@@ -259,6 +270,10 @@ func (a *App) renderStatusBar(hints []string) string {
 			content += sep
 		}
 		content += h
+	}
+
+	if a.disconnected {
+		content = StyleRed.Render("Reconnecting...") + sep + content
 	}
 
 	if a.status != "" {

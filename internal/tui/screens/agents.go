@@ -162,10 +162,12 @@ func (s *AgentsScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case agentsDataMsg:
 		s.loading = false
+		s.err = nil
 		s.agents = msg.agents
 		if s.cursor >= len(s.agents) {
 			s.cursor = max(0, len(s.agents)-1)
 		}
+		cmds = append(cmds, tui.ConnState(true))
 
 	case agentCreatedMsg:
 		if msg.err != nil {
@@ -188,6 +190,7 @@ func (s *AgentsScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

@@ -119,6 +119,7 @@ func (s *DashboardScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case dashOverviewMsg:
 		s.loading = false
+		s.err = nil
 		s.queue = msg.queue
 		s.queueTotal = msg.queueTotal
 		s.activeTasks = msg.activeTasks
@@ -127,6 +128,7 @@ func (s *DashboardScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 		cmds = append(cmds, func() tea.Msg {
 			return tui.PendingCountMsg(msg.queueTotal)
 		})
+		cmds = append(cmds, tui.ConnState(true))
 
 	case dashAuditListMsg:
 		s.auditEntries = msg.entries
@@ -162,6 +164,7 @@ func (s *DashboardScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

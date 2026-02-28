@@ -140,10 +140,12 @@ func (s *RestrictionsScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case restrictionsDataMsg:
 		s.loading = false
+		s.err = nil
 		s.restrictions = msg.restrictions
 		if s.cursor >= len(s.restrictions) {
 			s.cursor = max(0, len(s.restrictions)-1)
 		}
+		cmds = append(cmds, tui.ConnState(true))
 
 	case restrictionActionDoneMsg:
 		if msg.err != nil {
@@ -158,6 +160,7 @@ func (s *RestrictionsScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

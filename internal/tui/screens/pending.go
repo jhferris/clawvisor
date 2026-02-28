@@ -100,6 +100,7 @@ func (s *PendingScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case queueDataMsg:
 		s.loading = false
+		s.err = nil
 		s.items = msg.items
 		if s.cursor >= len(s.items) {
 			s.cursor = max(0, len(s.items)-1)
@@ -107,6 +108,7 @@ func (s *PendingScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 		cmds = append(cmds, func() tea.Msg {
 			return tui.PendingCountMsg(msg.total)
 		})
+		cmds = append(cmds, tui.ConnState(true))
 
 	case approvalDoneMsg:
 		if msg.err != nil {
@@ -122,6 +124,7 @@ func (s *PendingScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

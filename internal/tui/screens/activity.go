@@ -110,11 +110,13 @@ func (s *ActivityScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case auditDataMsg:
 		s.loading = false
+		s.err = nil
 		s.entries = msg.entries
 		s.total = msg.total
 		if s.cursor >= len(s.entries) {
 			s.cursor = max(0, len(s.entries)-1)
 		}
+		cmds = append(cmds, tui.ConnState(true))
 
 	case auditDetailMsg:
 		if msg.err != nil {
@@ -129,6 +131,7 @@ func (s *ActivityScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)

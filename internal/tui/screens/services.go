@@ -246,11 +246,13 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 
 	case servicesDataMsg:
 		s.loading = false
+		s.err = nil
 		s.services = msg.services
 		s.rebuildDisplayOrder()
 		if s.cursor >= len(s.displayOrder) {
 			s.cursor = max(0, len(s.displayOrder)-1)
 		}
+		cmds = append(cmds, tui.ConnState(true))
 
 	case oauthURLMsg:
 		if msg.err != nil {
@@ -306,6 +308,7 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	case tui.ErrMsg:
 		s.err = msg.Err
 		s.loading = false
+		cmds = append(cmds, tui.ConnState(false))
 	}
 
 	return s, tea.Batch(cmds...)
