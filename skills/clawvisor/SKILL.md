@@ -142,9 +142,13 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
       {"service": "apple.imessage", "action": "list_threads", "auto_execute": true, "expected_use": "List recent iMessage threads to find ones needing replies"},
       {"service": "apple.imessage", "action": "get_thread", "auto_execute": true, "expected_use": "Read individual thread messages to classify reply status"}
     ],
-    "expires_in_seconds": 1800
+    "expires_in_seconds": 1800,
+    "callback_url": "<your session inbound URL>"
   }'
 ```
+
+Include `callback_url` to receive a callback when the task is approved, denied,
+or expires — otherwise you must poll `GET /api/tasks/{id}` for status changes.
 
 #### `expected_use` — declare your intent per action
 
@@ -200,8 +204,8 @@ request to auto-execute in-scope actions without per-request approvals:
 
 | Status | Meaning | What to do |
 |---|---|---|
-| `pending_task_approval` | Task declared but not yet approved | Tell the user and wait for callback or poll `GET /api/tasks/{id}`. |
-| `pending_scope_expansion` | Request outside task scope | Call `POST /api/tasks/{id}/expand` with the new action. |
+| `pending_task_approval` | Task declared but not yet approved | Tell the user and wait for the `approved` or `denied` callback (or poll `GET /api/tasks/{id}`). |
+| `pending_scope_expansion` | Request outside task scope | Call `POST /api/tasks/{id}/expand` with the new action. Wait for the `scope_expanded` or `scope_expansion_denied` callback. |
 | `task_expired` | Task has passed its expiry | Expand the task to extend, or create a new task. |
 
 ### Scope expansion
@@ -251,11 +255,17 @@ Every response has a `status` field. Handle each case as follows:
 
 ## Receiving callbacks
 
-When a `pending` request is resolved (approved, denied, or timed out),
-Clawvisor POSTs a JSON payload to the `callback_url` you provided:
+Clawvisor sends callbacks for two categories of events: **gateway request
+resolutions** and **task lifecycle changes**. Each callback includes a `type`
+field (`"request"` or `"task"`) so you can distinguish them.
+
+When a `pending` gateway request is resolved (approved, denied, or timed out),
+Clawvisor POSTs a JSON payload to the `callback_url` you provided in the
+gateway request:
 
 ```json
 {
+  "type": "request",
   "request_id": "send-email-5678",
   "status": "executed",
   "result": { "summary": "Email sent to alice@example.com", "data": { ... } },
@@ -263,12 +273,41 @@ Clawvisor POSTs a JSON payload to the `callback_url` you provided:
 }
 ```
 
-`status` will be `executed`, `denied`, or `error`. Handle accordingly:
+Gateway request callback statuses: `executed`, `denied`, `timeout`, or `error`.
+
+When a task is approved, denied, expanded, or expires, Clawvisor POSTs to the
+`callback_url` you provided when creating the task. The `task_id` field
+contains the task ID:
+
+```json
+{
+  "type": "task",
+  "task_id": "<task-id>",
+  "status": "approved"
+}
+```
+
+Task callback statuses:
+
+| Status | Meaning |
+|---|---|
+| `approved` | Task was approved and is now active |
+| `denied` | Task or scope expansion was denied |
+| `scope_expanded` | Scope expansion was approved; new action added |
+| `scope_expansion_denied` | Scope expansion was denied; task unchanged |
+| `expired` | Task expired without being completed |
+
+All callbacks are signed when you have registered a callback secret.
+
+Handle callbacks as follows:
 1. If you registered a callback secret, verify the `X-Clawvisor-Signature`
    header: it should equal `sha256=` + HMAC-SHA256(body, CLAWVISOR_CALLBACK_SECRET).
-2. Find the pending task associated with `request_id`.
-3. If `status` is `executed`, continue with the `result` data.
-4. If `status` is `denied` or `error`, tell the user the outcome and stop.
+2. Check the `type` field: `"request"` → match `request_id` to your pending
+   request. `"task"` → match `task_id` to your task.
+3. For request callbacks: if `status` is `executed`, continue with the `result`
+   data. If `denied`, `timeout`, or `error`, tell the user the outcome and stop.
+4. For task callbacks: if `approved` or `scope_expanded`, proceed with your
+   task. If `denied`, `scope_expansion_denied`, or `expired`, inform the user.
 
 **OpenClaw note:** When your `callback_url` is an OpenClaw `/hooks/agent`
 endpoint, the JSON callback is delivered to your session as a text message

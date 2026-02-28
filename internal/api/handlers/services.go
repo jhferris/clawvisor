@@ -686,6 +686,7 @@ func (h *ServicesHandler) reactivatePendingRequest(ctx context.Context, userID, 
 		}
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, blob.AgentID)
 		_ = callback.DeliverResult(ctx, *pa.CallbackURL, &callback.Payload{
+			Type:      "request",
 			RequestID: requestID,
 			Status:    outcome,
 			Result:    cbResult,

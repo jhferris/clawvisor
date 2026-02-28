@@ -314,7 +314,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 					cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 					go func() {
 						_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
-							RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
+							Type: "request", RequestID: req.RequestID, Status: "error", Error: errMsg, AuditID: auditID,
 						}, cbKey)
 					}()
 				}
@@ -343,7 +343,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 				go func() {
 					_ = callback.DeliverResult(context.Background(), req.Context.CallbackURL, &callback.Payload{
-						RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
+						Type: "request", RequestID: req.RequestID, Status: "executed", Result: result, AuditID: auditID,
 					}, cbKey)
 				}()
 			}

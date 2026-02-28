@@ -335,6 +335,9 @@ func TestGateway_Callback_HMACSigned_OnExecute(t *testing.T) {
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
 			t.Fatalf("callback body not JSON: %v", err)
 		}
+		if payload["type"] != "request" {
+			t.Errorf("callback: expected type=request, got %v", payload["type"])
+		}
 		if payload["request_id"] != reqID {
 			t.Errorf("callback: request_id mismatch: got %v", payload["request_id"])
 		}
@@ -389,6 +392,9 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
 			t.Fatalf("callback body not JSON: %v", err)
 		}
+		if payload["type"] != "request" {
+			t.Errorf("approve callback: expected type=request, got %v", payload["type"])
+		}
 		if payload["status"] != "executed" {
 			t.Errorf("approve callback: expected status=executed, got %v", payload["status"])
 		}
@@ -437,6 +443,9 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 		var payload map[string]any
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
 			t.Fatalf("callback body not JSON: %v", err)
+		}
+		if payload["type"] != "request" {
+			t.Errorf("deny callback: expected type=request, got %v", payload["type"])
 		}
 		if payload["status"] != "denied" {
 			t.Errorf("deny callback: expected status=denied, got %v", payload["status"])
@@ -504,6 +513,9 @@ func TestGateway_Callback_Unsigned_WhenNoSecret(t *testing.T) {
 		var payload map[string]any
 		if err := json.Unmarshal(cb.body, &payload); err != nil {
 			t.Fatalf("callback body not JSON: %v", err)
+		}
+		if payload["type"] != "request" {
+			t.Errorf("callback: expected type=request, got %v", payload["type"])
 		}
 		if payload["request_id"] != reqID {
 			t.Errorf("callback: request_id mismatch: got %v", payload["request_id"])

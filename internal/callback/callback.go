@@ -21,11 +21,13 @@ import (
 
 // Payload is posted to the agent's callback URL.
 type Payload struct {
-	RequestID string           `json:"request_id"`
-	Status    string           `json:"status"` // "executed" | "denied" | "timeout" | "error"
+	Type      string           `json:"type"`                 // "request" or "task"
+	RequestID string           `json:"request_id,omitempty"` // populated when Type == "request"
+	TaskID    string           `json:"task_id,omitempty"`    // populated when Type == "task"
+	Status    string           `json:"status"`
 	Result    *adapters.Result `json:"result,omitempty"`
-	Error     string           `json:"error,omitempty"` // populated when status == "error"
-	AuditID   string           `json:"audit_id"`
+	Error     string           `json:"error,omitempty"`
+	AuditID   string           `json:"audit_id,omitempty"`
 }
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -142,9 +144,11 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 		req.Header.Set("X-Clawvisor-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
+	idKey, idVal := payloadIDAttr(payload)
 	slog.Info("callback: delivering",
 		"url", callbackURL,
-		"request_id", payload.RequestID,
+		"type", payload.Type,
+		idKey, idVal,
 		"status", payload.Status,
 		"body", string(body),
 		"signed", signingKey != "",
@@ -154,7 +158,8 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 	if err != nil {
 		slog.Warn("callback: delivery failed",
 			"url", callbackURL,
-			"request_id", payload.RequestID,
+			"type", payload.Type,
+			idKey, idVal,
 			"err", err,
 		)
 		return fmt.Errorf("callback: POST %s: %w", callbackURL, err)
@@ -166,7 +171,8 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 	if resp.StatusCode >= 400 {
 		slog.Warn("callback: non-success response",
 			"url", callbackURL,
-			"request_id", payload.RequestID,
+			"type", payload.Type,
+			idKey, idVal,
 			"status_code", resp.StatusCode,
 			"response_body", string(respBody),
 		)
@@ -175,9 +181,18 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 
 	slog.Info("callback: delivered",
 		"url", callbackURL,
-		"request_id", payload.RequestID,
+		"type", payload.Type,
+		idKey, idVal,
 		"status_code", resp.StatusCode,
 		"response_body", string(respBody),
 	)
 	return nil
+}
+
+// payloadIDAttr returns the log key/value for the payload's ID field.
+func payloadIDAttr(p *Payload) (string, string) {
+	if p.TaskID != "" {
+		return "task_id", p.TaskID
+	}
+	return "request_id", p.RequestID
 }

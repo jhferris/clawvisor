@@ -147,6 +147,7 @@ func (h *ApprovalsHandler) DenyByRequestID(ctx context.Context, requestID, userI
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, denyBlob.AgentID)
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
+				Type:      "request",
 				RequestID: requestID,
 				Status:    "denied",
 				AuditID:   pa.AuditID,
@@ -197,6 +198,7 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 		cbKey, _ := h.st.GetAgentCallbackSecret(r.Context(), denyBlob.AgentID)
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
+				Type:      "request",
 				RequestID: requestID,
 				Status:    "denied",
 				AuditID:   pa.AuditID,
@@ -251,6 +253,7 @@ func (h *ApprovalsHandler) executeApproval(ctx context.Context, pa *store.Pendin
 		auditID := pa.AuditID
 		go func() {
 			_ = callback.DeliverResult(context.Background(), *pa.CallbackURL, &callback.Payload{
+				Type:      "request",
 				RequestID: requestID,
 				Status:    outcome,
 				Result:    cbResult,
@@ -297,6 +300,7 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 			_ = json.Unmarshal(pa.RequestBlob, &expiryBlob)
 			cbKey, _ := h.st.GetAgentCallbackSecret(ctx, expiryBlob.AgentID)
 			_ = callback.DeliverResult(ctx, *pa.CallbackURL, &callback.Payload{
+				Type:      "request",
 				RequestID: pa.RequestID,
 				Status:    "timeout",
 				AuditID:   pa.AuditID,
@@ -320,8 +324,9 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 		if task.CallbackURL != nil && *task.CallbackURL != "" {
 			cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
 			_ = callback.DeliverResult(ctx, *task.CallbackURL, &callback.Payload{
-				RequestID: task.ID,
-				Status:    "task_expired",
+				Type:   "task",
+				TaskID: task.ID,
+				Status: "expired",
 			}, cbKey)
 		}
 		h.decrementNotifierPolling(task.UserID)
