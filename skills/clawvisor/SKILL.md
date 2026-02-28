@@ -13,9 +13,11 @@ metadata:
     requires_env:
       - CLAWVISOR_URL          # e.g. http://localhost:8080 or https://your-instance.run.app
       - CLAWVISOR_AGENT_TOKEN  # agent bearer token from the Clawvisor dashboard
+      - OPENCLAW_HOOKS_URL     # default: http://localhost:18789
     user_setup:
       - "Set CLAWVISOR_URL to your Clawvisor instance URL"
       - "Create an agent in the Clawvisor dashboard, copy the token, then run: openclaw credentials set CLAWVISOR_AGENT_TOKEN"
+      - "Set OPENCLAW_HOOKS_URL to your OpenClaw gateway's reachable URL (default http://localhost:18789). Override if using Tailscale or a remote gateway."
       - "Activate any services you want the agent to use (Gmail, GitHub, etc.) in the dashboard under Services"
       - "Optionally create restrictions in the dashboard to block specific actions"
 ---
@@ -316,7 +318,7 @@ installed, build your `callback_url` using the `hooks_url` and `session_key`
 from `session_status`:
 
 ```
-callback_url: "<hooks_url>/clawvisor/callback?session=<session_key>"
+callback_url: "${OPENCLAW_HOOKS_URL}/clawvisor/callback?session=<session_key>"
 ```
 
 The `?session=` query parameter routes the callback to the originating
