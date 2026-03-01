@@ -44,9 +44,9 @@ func (s Sidebar) View() string {
 	b.WriteString("\n\n")
 
 	screens := []tui.Screen{
-		tui.ScreenPending,
+		tui.ScreenQueue,
 		tui.ScreenTasks,
-		tui.ScreenActivity,
+		tui.ScreenAuditLog,
 		tui.ScreenServices,
 		tui.ScreenRestrictions,
 		tui.ScreenAgents,
@@ -61,7 +61,7 @@ func (s Sidebar) View() string {
 		}
 
 		name := screen.String()
-		if screen == tui.ScreenPending && s.PendingCount > 0 {
+		if screen == tui.ScreenQueue && s.PendingCount > 0 {
 			badge := badgeStyle.Render(fmt.Sprintf("(%d)", s.PendingCount))
 			b.WriteString(fmt.Sprintf(" %s %s %s\n", marker, style.Render(name), badge))
 		} else {

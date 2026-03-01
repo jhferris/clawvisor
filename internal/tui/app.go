@@ -31,7 +31,7 @@ func NewApp(c *client.Client) *App {
 	return &App{
 		client:       c,
 		screens:      make(map[Screen]ScreenModel),
-		active:       ScreenDashboard,
+		active:       ScreenOverview,
 		pollInterval: 5 * time.Second,
 	}
 }
@@ -209,10 +209,10 @@ func (a *App) switchTo(s Screen) tea.Cmd {
 
 func (a *App) renderSidebar() string {
 	screens := []Screen{
-		ScreenDashboard,
-		ScreenPending,
+		ScreenOverview,
+		ScreenQueue,
 		ScreenTasks,
-		ScreenActivity,
+		ScreenAuditLog,
 		ScreenServices,
 		ScreenRestrictions,
 		ScreenAgents,
@@ -240,7 +240,7 @@ func (a *App) renderSidebar() string {
 
 		name := s.String()
 		line := marker + " " + style.Render(name)
-		if s == ScreenPending && a.pendingCount > 0 {
+		if s == ScreenQueue && a.pendingCount > 0 {
 			line += " " + StyleSidebarBadge.Render("("+itoa(a.pendingCount)+")")
 		}
 		items = append(items, line)
@@ -308,7 +308,7 @@ func (a *App) renderHelp() string {
 			},
 		},
 		{
-			"Dashboard",
+			"Overview",
 			[][2]string{
 				{"a", "Approve queue item"},
 				{"d", "Deny queue item"},
@@ -317,7 +317,7 @@ func (a *App) renderHelp() string {
 			},
 		},
 		{
-			"Pending Approvals",
+			"Queue",
 			[][2]string{
 				{"a", "Approve"},
 				{"d", "Deny"},
