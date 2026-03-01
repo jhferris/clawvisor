@@ -351,7 +351,6 @@ make build                          # full build (Go binary + frontend)
 - **Vault encryption.** Credentials are encrypted at rest with AES-256-GCM using a master keyfile (`vault.key`).
 - **Audit trail.** Every gateway request is logged with a unique `request_id` (enforced by DB constraint). Outcomes are updated after execution.
 - **Response formatting.** Adapter results are semantically formatted — secrets are stripped, HTML/Unicode is sanitized before anything reaches the agent.
-- **Optional LLM safety check.** A configurable post-execution check scans formatted output for prompt injection or unsafe content before delivery.
 
 ### Agent isolation
 
