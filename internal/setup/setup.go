@@ -18,8 +18,14 @@ var (
 	bold    = lipgloss.NewStyle().Bold(true)
 	dim     = lipgloss.NewStyle().Faint(true)
 	green   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	yellow  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	banner  = lipgloss.NewStyle().Bold(true).Padding(0, 2)
 	section = lipgloss.NewStyle().Faint(true).Padding(0, 2)
+	warnBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("3")).
+		Padding(1, 2).
+		Margin(0, 2)
 )
 
 type config struct {
@@ -83,6 +89,15 @@ func printBanner() {
 	fmt.Println()
 	fmt.Println(bold.Padding(0, 2).Render("Clawvisor Setup"))
 	fmt.Println(section.Render("─────────────────────────────────────────"))
+	fmt.Println()
+	fmt.Println(warnBox.Render(
+		yellow.Bold(true).Render("⚠  USE AT YOUR OWN RISK") + "\n\n" +
+			"Clawvisor is experimental software under active development.\n" +
+			"It has not been audited for security. LLMs are inherently\n" +
+			"nondeterministic — we make no guarantees that policies or\n" +
+			"safety checks will behave as expected in every case. Do not\n" +
+			"use Clawvisor as your sole safeguard for sensitive data or\n" +
+			"critical systems."))
 	fmt.Println()
 	fmt.Println(dim.Padding(0, 2).Render("This will generate a config.yaml for your Clawvisor instance."))
 	fmt.Println()
