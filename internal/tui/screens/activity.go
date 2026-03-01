@@ -164,11 +164,25 @@ func (s *ActivityScreen) View() string {
 		return b.String()
 	}
 
+	// Responsive column widths based on available content area.
+	cw := s.contentWidth()
+	const (
+		markerW = 2
+		timeW   = 10
+		statusW = 12
+	)
+	flexW := cw - markerW - timeW - statusW
+	if flexW < 24 {
+		flexW = 24
+	}
+	serviceW := flexW * 3 / 5
+	actionW := flexW - serviceW
+
 	// Table header.
-	colTime := lipgloss.NewStyle().Width(12).MaxWidth(12)
-	colService := lipgloss.NewStyle().Width(22).MaxWidth(22)
-	colAction := lipgloss.NewStyle().Width(18).MaxWidth(18)
-	colStatus := lipgloss.NewStyle().Width(10).MaxWidth(10)
+	colTime := lipgloss.NewStyle().Width(timeW).MaxWidth(timeW)
+	colService := lipgloss.NewStyle().Width(serviceW).MaxWidth(serviceW)
+	colAction := lipgloss.NewStyle().Width(actionW).MaxWidth(actionW)
+	colStatus := lipgloss.NewStyle().Width(statusW).MaxWidth(statusW)
 
 	headerLine := tui.StyleTableHeader.Render(
 		colTime.Render("TIME") +
