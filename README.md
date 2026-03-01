@@ -1,8 +1,32 @@
-# Clawvisor
+<p align="center">
+  <img src="web/public/favicon.svg" alt="Clawvisor" width="96" height="96" />
+</p>
 
-Clawvisor is a gatekeeper service that sits between AI agents and external APIs. Agents never hold credentials — instead, they declare **tasks** describing what they need to do, the user approves the scope, and Clawvisor handles credential injection, execution, and audit logging for every request under that task.
+<h1 align="center">Clawvisor</h1>
+
+<p align="center">
+  <strong>Your agents act. You stay in control.</strong><br/>
+  The gatekeeper between your AI agents and the APIs they act on.
+</p>
+
+<p align="center">
+  <a href="#quickstart">Quickstart</a> · <a href="#agent-integration">Agent Integration</a> · <a href="#dashboard">Dashboard</a> · <a href="#tui">TUI</a> · <a href="#supported-services">Services</a>
+</p>
+
+---
+
+> [!WARNING]
+> **Use at your own risk.** Clawvisor is experimental software under active development. It has not been audited for security. LLMs are inherently nondeterministic — we make no guarantees that policies or safety checks will behave as expected in every case. Do not use Clawvisor as your sole safeguard for sensitive data or critical systems.
+
+---
+
+AI agents are getting good at doing things. The problem is letting them — safely. Give an agent your Gmail credentials and it can read, send, and delete anything. Refuse, and it can't help you at all.
+
+Clawvisor sits in the middle. Agents never hold credentials. Instead, they declare **tasks** describing what they need to do, the user approves the scope, and Clawvisor handles credential injection, execution, and audit logging for every request under that task.
 
 The typical flow: an agent creates a task ("triage my inbox — read emails, but ask before sending"), the user approves it once, and the agent makes as many requests as it needs within that scope without further interruption. Actions outside the scope go to the user for per-request approval. Restrictions can hard-block specific actions entirely.
+
+Approve a purpose, not a permission. Clawvisor enforces it on every request.
 
 ## How It Works
 
