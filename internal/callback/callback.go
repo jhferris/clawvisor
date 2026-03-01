@@ -144,18 +144,9 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 		req.Header.Set("X-Clawvisor-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
-	idKey, idVal := payloadIDAttr(payload)
-	slog.Info("callback: delivering",
-		"url", callbackURL,
-		"type", payload.Type,
-		idKey, idVal,
-		"status", payload.Status,
-		"body", string(body),
-		"signed", signingKey != "",
-	)
-
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		idKey, idVal := payloadIDAttr(payload)
 		slog.Warn("callback: delivery failed",
 			"url", callbackURL,
 			"type", payload.Type,
@@ -166,9 +157,9 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		idKey, idVal := payloadIDAttr(payload)
 		slog.Warn("callback: non-success response",
 			"url", callbackURL,
 			"type", payload.Type,
@@ -179,13 +170,6 @@ func DeliverResult(ctx context.Context, callbackURL string, payload *Payload, si
 		return fmt.Errorf("callback: POST %s returned %d", callbackURL, resp.StatusCode)
 	}
 
-	slog.Info("callback: delivered",
-		"url", callbackURL,
-		"type", payload.Type,
-		idKey, idVal,
-		"status_code", resp.StatusCode,
-		"response_body", string(respBody),
-	)
 	return nil
 }
 
