@@ -100,7 +100,7 @@ func (s *ServicesScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 			if svc := s.selectedService(); svc != nil {
 				switch msg.String() {
 				case "a":
-					if svc.Status != "activated" && svc.RequiresActivation {
+					if svc.RequiresActivation && (svc.Status != "activated" || !svc.CredentialFree) {
 						s.detail.Hide()
 						return s, s.startActivation()
 					}
@@ -384,10 +384,16 @@ func (s *ServicesScreen) View() string {
 func (s *ServicesScreen) ShortHelp() []string {
 	if svc := s.selectedService(); svc != nil {
 		if svc.Status == "activated" {
-			return []string{
+			hints := []string{
 				tui.StyleStatusKey.Render("[d]") + tui.StyleStatusBar.Render(" Disconnect"),
 				tui.StyleStatusKey.Render("[enter]") + tui.StyleStatusBar.Render(" Details"),
 			}
+			if !svc.CredentialFree {
+				hints = append(hints,
+					tui.StyleStatusKey.Render("[a]")+tui.StyleStatusBar.Render(" Add account"),
+				)
+			}
+			return hints
 		}
 		if svc.RequiresActivation {
 			return []string{
@@ -520,12 +526,15 @@ func (s *ServicesScreen) viewOAuthWaiting() string {
 
 func (s *ServicesScreen) startActivation() tea.Cmd {
 	svc := s.selectedService()
-	if svc == nil || svc.Status == "activated" || !svc.RequiresActivation {
+	if svc == nil || !svc.RequiresActivation {
 		return nil
 	}
 
-	// Credential-free services activate immediately — no alias/key prompt needed.
+	// Credential-free services (e.g. iMessage) don't support multiple accounts.
 	if svc.CredentialFree {
+		if svc.Status == "activated" {
+			return nil
+		}
 		s.activatingService = svc
 		cl := s.client
 		serviceID := svc.ID
@@ -732,7 +741,11 @@ func (s *ServicesScreen) showDetail() {
 	if svc.Status != "activated" && svc.RequiresActivation {
 		b.WriteString("\n" + tui.StyleAmber.Render("Press [a] to connect this service.") + "\n")
 	} else if svc.Status == "activated" {
-		b.WriteString("\n" + tui.StyleDim.Render("Press [d] to disconnect.") + "\n")
+		if !svc.CredentialFree {
+			b.WriteString("\n" + tui.StyleDim.Render("Press [a] to add another account.  Press [d] to disconnect.") + "\n")
+		} else {
+			b.WriteString("\n" + tui.StyleDim.Render("Press [d] to disconnect.") + "\n")
+		}
 	}
 
 	s.detail.Show("Service: "+svc.Name, b.String())
