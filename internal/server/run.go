@@ -30,7 +30,6 @@ import (
 	driveadapter "github.com/clawvisor/clawvisor/internal/adapters/google/drive"
 	gmailadapter "github.com/clawvisor/clawvisor/internal/adapters/google/gmail"
 	"github.com/clawvisor/clawvisor/internal/api"
-	"github.com/clawvisor/clawvisor/internal/browser"
 	"github.com/clawvisor/clawvisor/internal/auth"
 	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/config"
@@ -262,12 +261,8 @@ func Run(logger *slog.Logger) error {
 	}
 
 	// ── Banner (local mode only) ─────────────────────────────────────────────
-	var browserOpened bool
 	if cfg.Server.IsLocal() {
-		if magicURL != "" && os.Getenv("NO_OPEN") != "1" {
-			browserOpened = browser.Open(magicURL)
-		}
-		printBanner(cfg, adStatus, magicURL, browserOpened)
+		printBanner(cfg, adStatus, magicURL)
 	}
 
 	// ── HTTP Server ─────────────────────────────────────────────────────────
@@ -285,7 +280,7 @@ type adapterStatus struct {
 	skipped    map[string]string
 }
 
-func printBanner(cfg *config.Config, adStatus adapterStatus, magicURL string, browserOpened bool) {
+func printBanner(cfg *config.Config, adStatus adapterStatus, magicURL string) {
 	const banner = `
    ___  _                       _
   / __\| | __ ___      ____   _(_) ___  ___   _ __
@@ -349,11 +344,7 @@ func printBanner(cfg *config.Config, adStatus adapterStatus, magicURL string, br
 	if magicURL != "" {
 		fmt.Printf("  %s\n", magicURL)
 		fmt.Println()
-		if browserOpened {
-			fmt.Println("  Opening in browser...")
-		} else {
-			fmt.Println("  Open this link in your browser to sign in.")
-		}
+		fmt.Println("  Open this link in your browser to sign in.")
 	} else {
 		displayHost := cfg.Server.Host
 		if displayHost == "0.0.0.0" || displayHost == "127.0.0.1" || displayHost == "" {

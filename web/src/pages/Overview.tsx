@@ -63,7 +63,7 @@ export default function Overview() {
     if (hasService) done.push(1)
     if (hasAgents) done.push(2)
     if (hasTelegram) done.push(3)
-    if (done.length < 3) {
+    if (!hasService || !hasAgents) {
       setOnboardingInitial(done)
       setShowOnboarding(true)
     }
