@@ -18,7 +18,7 @@ Go to **APIs & Services → Library** and enable each of these:
 - [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
 - [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
 - [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)
-- [People API](https://console.cloud.google.com/apis/library/people.googleapis.com) (for Contacts)
+- [Contacts API](https://console.cloud.google.com/apis/library/contactsapi.googleapis.com)
 
 You only need to enable the ones you plan to use, but there's no harm in
 enabling all four.
@@ -71,7 +71,10 @@ You'll configure three sections: **Branding**, **Audience**, and **Data Access**
 
 ## 5. Configure Clawvisor
 
-Set the credentials as environment variables before starting the server:
+If you ran `make setup` and said **Yes** to Google services, the setup wizard
+already prompted you for these values — you can skip this step.
+
+Otherwise, set the credentials as environment variables before starting the server:
 
 ```bash
 export GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
@@ -86,9 +89,6 @@ services:
     client_id: "your-client-id.apps.googleusercontent.com"
     client_secret: "your-client-secret"
 ```
-
-If you ran `make setup` and said **Yes** to Google services, the setup wizard
-prompted you for these values and wrote them to `config.yaml` already.
 
 ## 6. Connect your account
 
