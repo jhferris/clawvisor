@@ -53,29 +53,6 @@ You'll configure three sections: **Branding**, **Audience**, and **Data Access**
 > authorize. You can add up to 100 test users before Google requires app
 > verification.
 
-### Data Access (Scopes)
-
-1. Go to [**Google Auth Platform → Data Access**](https://console.cloud.google.com/auth/scopes)
-2. Click **Add or Remove Scopes**
-3. Add the following scopes:
-
-| Scope | Level | Used for |
-|-------|-------|----------|
-| `https://www.googleapis.com/auth/gmail.readonly` | Restricted | Reading emails |
-| `https://www.googleapis.com/auth/gmail.send` | Sensitive | Sending emails |
-| `https://www.googleapis.com/auth/calendar.readonly` | Sensitive | Reading calendar events |
-| `https://www.googleapis.com/auth/calendar.events` | Sensitive | Creating/updating events |
-| `https://www.googleapis.com/auth/drive.readonly` | Restricted | Browsing Drive files |
-| `https://www.googleapis.com/auth/drive.file` | Sensitive | App-created Drive files |
-| `https://www.googleapis.com/auth/contacts.readonly` | Sensitive | Reading contacts |
-
-4. Click **Save**
-
-> **Restricted scopes** (`gmail.readonly`, `drive.readonly`) will show a
-> warning. For self-hosted personal use this is fine — you're authorizing your
-> own Google account on your own app. Restricted scopes only require
-> verification and security assessments for apps with more than 100 users.
-
 ## 4. Create OAuth credentials
 
 1. Go to [**Google Auth Platform → Clients**](https://console.cloud.google.com/auth/clients)
