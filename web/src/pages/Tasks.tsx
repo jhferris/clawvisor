@@ -58,6 +58,7 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
     queryKey: ['audit', { task_id: task.id }],
     queryFn: () => api.audit.list({ task_id: task.id, limit: 50 }),
     enabled: expanded,
+    refetchInterval: (query) => expanded && task.request_count !== (query.state.data?.entries?.length ?? 0) ? 1_000 : false,
   })
 
   const isPending = approveMut.isPending || denyMut.isPending || expandApproveMut.isPending || expandDenyMut.isPending || revokeMut.isPending

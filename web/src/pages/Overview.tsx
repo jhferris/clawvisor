@@ -238,6 +238,7 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
     queryKey: ['audit', { task_id: task.id }],
     queryFn: () => api.audit.list({ task_id: task.id, limit: 50 }),
     enabled: expanded,
+    refetchInterval: (query) => expanded && task.request_count !== (query.state.data?.entries?.length ?? 0) ? 1_000 : false,
   })
 
   const auditEntries = auditData?.entries ?? []
@@ -276,7 +277,21 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
           </div>
         </div>
 
-        <p className="text-sm text-gray-600">{summarizeActions(task.authorized_actions)}</p>
+        {/* Authorized scopes — structured list */}
+        <div className="space-y-1">
+          {task.authorized_actions.map(a => (
+            <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-sm">
+              <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${a.auto_execute ? 'bg-green-400' : 'bg-orange-400'}`} />
+              <span className="text-gray-700">
+                {serviceName(a.service)}: {actionName(a.action)}
+                {!a.auto_execute && <span className="text-orange-600 text-xs ml-1">(approval)</span>}
+              </span>
+              {a.expected_use && (
+                <span className="text-gray-400 text-xs italic ml-auto">— {a.expected_use}</span>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Result message */}
