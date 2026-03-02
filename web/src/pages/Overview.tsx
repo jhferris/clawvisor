@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api, type QueueItem, type Task, type AuditEntry, type Agent, type NotificationConfig, type ActivityBucket } from '../api/client'
 import { formatDistanceToNow, format } from 'date-fns'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { serviceName, actionName, serviceBrand, formatServiceAction } from '../lib/services'
 import { summarizeActions, OUTCOME_STYLE } from '../lib/queue-helpers'
 import CountdownTimer from '../components/CountdownTimer'
@@ -213,16 +213,16 @@ function ActivityChart({ data }: { data: ActivityBucket[] }) {
   return (
     <div className="bg-white border rounded-lg p-4">
       <ResponsiveContainer width="100%" height={180}>
-        <AreaChart data={rows}>
+        <BarChart data={rows}>
           <XAxis dataKey="time" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
           <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={30} />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
           />
-          <Area type="monotone" dataKey="executed" stackId="1" stroke={OUTCOME_COLORS.executed} fill={OUTCOME_COLORS.executed} fillOpacity={0.3} name="Executed" />
-          <Area type="monotone" dataKey="blocked" stackId="1" stroke={OUTCOME_COLORS.blocked} fill={OUTCOME_COLORS.blocked} fillOpacity={0.3} name="Blocked" />
-          <Area type="monotone" dataKey="pending" stackId="1" stroke={OUTCOME_COLORS.pending} fill={OUTCOME_COLORS.pending} fillOpacity={0.3} name="Pending" />
-        </AreaChart>
+          <Bar dataKey="executed" stackId="1" stroke={OUTCOME_COLORS.executed} fill={OUTCOME_COLORS.executed} fillOpacity={0.85} name="Executed" />
+          <Bar dataKey="blocked" stackId="1" stroke={OUTCOME_COLORS.blocked} fill={OUTCOME_COLORS.blocked} fillOpacity={0.85} name="Blocked" />
+          <Bar dataKey="pending" stackId="1" stroke={OUTCOME_COLORS.pending} fill={OUTCOME_COLORS.pending} fillOpacity={0.85} name="Pending" />
+        </BarChart>
       </ResponsiveContainer>
     </div>
   )
