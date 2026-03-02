@@ -89,9 +89,9 @@ func (h *OverviewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return queueItems[i].CreatedAt.After(queueItems[j].CreatedAt)
 	})
 
-	// 3. Activity histogram (last 60 minutes, 1-minute buckets)
+	// 3. Activity histogram (last 60 minutes, 5-minute buckets)
 	since := time.Now().Add(-60 * time.Minute)
-	activity, err := h.st.AuditActivityBuckets(r.Context(), user.ID, since, 1)
+	activity, err := h.st.AuditActivityBuckets(r.Context(), user.ID, since, 5)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not load activity")
 		return

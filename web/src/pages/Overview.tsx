@@ -183,20 +183,31 @@ interface ChartRow {
 
 function ActivityChart({ data }: { data: ActivityBucket[] }) {
   const rows = useMemo(() => {
-    const map = new Map<string, ChartRow>()
+    // Build lookup from bucket timestamp → aggregated counts
+    const counts = new Map<number, ChartRow>()
     for (const b of data) {
-      const t = new Date(b.bucket)
-      const key = t.toISOString()
-      const label = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
-      if (!map.has(key)) {
-        map.set(key, { time: label, executed: 0, blocked: 0, pending: 0 })
+      const ms = new Date(b.bucket).getTime()
+      if (!counts.has(ms)) {
+        counts.set(ms, { time: '', executed: 0, blocked: 0, pending: 0 })
       }
-      const row = map.get(key)!
+      const row = counts.get(ms)!
       if (b.outcome === 'executed') row.executed += b.count
       else if (b.outcome === 'blocked' || b.outcome === 'restricted') row.blocked += b.count
       else row.pending += b.count
     }
-    return Array.from(map.values())
+
+    // Generate all 12 five-minute buckets covering the last hour
+    const now = new Date()
+    const startMs = now.getTime() - 60 * 60 * 1000
+    const firstBucket = startMs - (startMs % (5 * 60 * 1000))
+    const result: ChartRow[] = []
+    for (let ms = firstBucket; ms <= now.getTime(); ms += 5 * 60 * 1000) {
+      const t = new Date(ms)
+      const label = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
+      const existing = counts.get(ms)
+      result.push(existing ? { ...existing, time: label } : { time: label, executed: 0, blocked: 0, pending: 0 })
+    }
+    return result
   }, [data])
 
   return (
