@@ -23,33 +23,63 @@ Go to **APIs & Services → Library** and enable each of these:
 You only need to enable the ones you plan to use, but there's no harm in
 enabling all four.
 
-## 3. Configure the OAuth consent screen
+## 3. Set up the Google Auth Platform
 
-1. Go to **APIs & Services → OAuth consent screen**
-2. Select **External** (unless you have a Google Workspace org and want internal-only)
-3. Fill in the required fields:
+The Google Cloud Console uses the **Google Auth Platform** to manage OAuth.
+You'll configure three sections: **Branding**, **Audience**, and **Data Access**.
+
+### Branding
+
+1. Go to [**Google Auth Platform → Branding**](https://console.cloud.google.com/auth/branding)
+2. If you see "Google Auth platform not configured yet", click **Get Started**
+3. Fill in:
    - **App name:** `Clawvisor`
    - **User support email:** your email
-   - **Developer contact:** your email
-4. Click **Save and Continue**
-5. On the **Scopes** page, click **Add or Remove Scopes** and add:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.send`
-   - `https://www.googleapis.com/auth/calendar.readonly`
-   - `https://www.googleapis.com/auth/calendar.events`
-   - `https://www.googleapis.com/auth/drive.readonly`
-   - `https://www.googleapis.com/auth/drive.file`
-   - `https://www.googleapis.com/auth/contacts.readonly`
-6. Click **Save and Continue** through the remaining steps
+4. Click **Next**
+5. Choose your audience type (see below), click **Next**
+6. Enter your **developer contact email**, click **Next**
+7. Agree to the Google API Services User Data Policy
+8. Click **Continue**, then **Create**
 
-> **Note:** While in "Testing" status, only test users you explicitly add can
-> authorize. Add your own Google account under **Test users** on the consent
-> screen page.
+### Audience
+
+1. Go to [**Google Auth Platform → Audience**](https://console.cloud.google.com/auth/audience)
+2. Select **External** (unless you have a Google Workspace org and want internal-only)
+3. Under **Test users**, click **Add users**
+4. Add your own Google email address and any other users who will test Clawvisor
+5. Click **Save**
+
+> **Note:** While in "Testing" status, only the test users you add here can
+> authorize. You can add up to 100 test users before Google requires app
+> verification.
+
+### Data Access (Scopes)
+
+1. Go to [**Google Auth Platform → Data Access**](https://console.cloud.google.com/auth/scopes)
+2. Click **Add or Remove Scopes**
+3. Add the following scopes:
+
+| Scope | Level | Used for |
+|-------|-------|----------|
+| `https://www.googleapis.com/auth/gmail.readonly` | Restricted | Reading emails |
+| `https://www.googleapis.com/auth/gmail.send` | Sensitive | Sending emails |
+| `https://www.googleapis.com/auth/calendar.readonly` | Sensitive | Reading calendar events |
+| `https://www.googleapis.com/auth/calendar.events` | Sensitive | Creating/updating events |
+| `https://www.googleapis.com/auth/drive.readonly` | Restricted | Browsing Drive files |
+| `https://www.googleapis.com/auth/drive.file` | Sensitive | App-created Drive files |
+| `https://www.googleapis.com/auth/contacts.readonly` | Sensitive | Reading contacts |
+
+4. Click **Save**
+
+> **Restricted scopes** (`gmail.readonly`, `drive.readonly`) will show a
+> warning. For self-hosted personal use this is fine — you're authorizing your
+> own Google account on your own app. Restricted scopes only require
+> verification and security assessments for apps with more than 100 users.
 
 ## 4. Create OAuth credentials
 
-1. Go to **APIs & Services → Credentials**
-2. Click **Create Credentials → OAuth client ID**
+1. Go to [**Google Auth Platform → Clients**](https://console.cloud.google.com/auth/clients)
+2. Click **Create Client**
 3. Application type: **Web application**
 4. Name: `Clawvisor`
 5. Under **Authorized redirect URIs**, add:
@@ -58,6 +88,9 @@ enabling all four.
      (e.g. `https://clawvisor.yourdomain.com/api/oauth/google/callback`)
 6. Click **Create**
 7. Copy the **Client ID** and **Client Secret**
+
+> **Important:** The client secret is only shown once at creation time. Store
+> it securely — you won't be able to view it again in the console.
 
 ## 5. Configure Clawvisor
 
@@ -86,7 +119,9 @@ prompted you for these values and wrote them to `config.yaml` already.
 2. Open the dashboard and go to **Services**
 3. Click **Connect** next to Google
 4. You'll be redirected to Google's consent screen — authorize with your account
-5. Once connected, Gmail, Calendar, Drive, and Contacts will show as active
+5. You may see a "This app isn't verified" warning — click **Advanced** then
+   **Go to Clawvisor (unsafe)** to proceed (this is expected for self-hosted apps)
+6. Once connected, Gmail, Calendar, Drive, and Contacts will show as active
 
 ## Troubleshooting
 
@@ -97,19 +132,26 @@ using. Check that:
 - The URI in Google Cloud matches your Clawvisor URL exactly
 - You're using `http` (not `https`) for localhost
 - The path is `/api/oauth/google/callback`
+- Changes to redirect URIs can take 5 minutes to a few hours to take effect
 
 **"This app isn't verified"**
 
-This is normal for apps in "Testing" status. Click **Continue** (you may need
-to click "Advanced" first). You can submit for verification later if you want
-to support multiple users.
+This is normal for self-hosted apps in "Testing" status. Click **Advanced**,
+then **Go to Clawvisor (unsafe)**. This only appears for test users you've
+added in the Audience section.
 
 **"Error 403: access_not_configured"**
 
 You haven't enabled the API you're trying to use. Go back to step 2 and enable
 the relevant API in the Google Cloud Console.
 
+**"You can't sign in because this app sent an invalid request"**
+
+Make sure you've completed the Google Auth Platform setup (Branding + Audience)
+before creating your OAuth client. The client won't work without a configured
+consent screen.
+
 **Only some services work**
 
-Each API must be enabled individually. If Gmail works but Calendar doesn't,
-check that the Calendar API is enabled in your project.
+Each API must be enabled individually in step 2. If Gmail works but Calendar
+doesn't, check that the Calendar API is enabled in your project.
