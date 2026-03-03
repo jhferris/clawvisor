@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // NotificationsHandler manages per-user notification channel configuration.

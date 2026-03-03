@@ -17,13 +17,13 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/display"
 	"github.com/clawvisor/clawvisor/internal/adapters/google/credential"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
-	"github.com/clawvisor/clawvisor/internal/store"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/store"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // ServicesHandler serves the service catalog and OAuth activation flow.

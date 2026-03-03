@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/clawvisor/clawvisor/internal/display"
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // Notifier sends Telegram messages for approval and service-activation requests.

@@ -367,7 +367,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// AccessTokenTTL parses the configured duration.
+// AccessTokenDuration parses the configured duration.
 func (a AuthConfig) AccessTokenDuration() (time.Duration, error) {
 	return time.ParseDuration(a.AccessTokenTTL)
 }
@@ -400,4 +400,3 @@ func (s ServerConfig) SlogLevel() slog.Level {
 		return slog.LevelInfo
 	}
 }
-

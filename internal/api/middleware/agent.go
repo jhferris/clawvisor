@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 const (

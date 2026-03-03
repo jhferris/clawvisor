@@ -13,13 +13,14 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api"
 	"github.com/clawvisor/clawvisor/internal/auth"
-	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/store"
 	sqlitestore "github.com/clawvisor/clawvisor/internal/store/sqlite"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	intvault "github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // ── Test environment ──────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 	st := sqlitestore.NewStore(db)
 
 	// LocalVault with auto-generated key
-	v, err := vault.NewLocalVault(t.TempDir()+"/vault.key", db, "sqlite")
+	v, err := intvault.NewLocalVault(t.TempDir()+"/vault.key", db, "sqlite")
 	if err != nil {
 		t.Fatalf("vault: %v", err)
 	}
@@ -75,7 +76,10 @@ func newTestEnv(t *testing.T, extra ...adapters.Adapter) *testEnv {
 		Task:     config.TaskConfig{DefaultExpirySeconds: 3600},
 	}
 
-	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, config.LLMConfig{}, nil)
+	// Tests use password auth so Register/Login routes are available.
+	srv, err := api.New(cfg, st, v, jwtSvc, adapterReg, nil, config.LLMConfig{}, nil,
+		api.WithFeatures(api.FeatureSet{PasswordAuth: true}),
+	)
 	if err != nil {
 		t.Fatalf("api.New: %v", err)
 	}

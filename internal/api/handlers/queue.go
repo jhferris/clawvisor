@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // QueueHandler serves a unified queue of pending approvals and actionable tasks.

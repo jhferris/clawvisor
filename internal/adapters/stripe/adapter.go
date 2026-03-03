@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/adapters/format"
 )
 

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/clawvisor/clawvisor/internal/store"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/store"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // HealthHandler handles /health and /ready.

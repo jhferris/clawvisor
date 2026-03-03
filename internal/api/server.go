@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -9,16 +10,17 @@ import (
 	"os"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api/handlers"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/auth"
-	"github.com/clawvisor/clawvisor/internal/config"
+	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
+	"github.com/clawvisor/clawvisor/pkg/config"
 	"github.com/clawvisor/clawvisor/internal/intent"
-	"github.com/clawvisor/clawvisor/internal/notify"
+	"github.com/clawvisor/clawvisor/pkg/notify"
 	"github.com/clawvisor/clawvisor/internal/ratelimit"
-	"github.com/clawvisor/clawvisor/internal/store"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/store"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 	skillfiles "github.com/clawvisor/clawvisor/skills"
 
 	"golang.org/x/time/rate"
@@ -29,7 +31,7 @@ type Server struct {
 	cfg        *config.Config
 	store      store.Store
 	vault      vault.Vault
-	jwtSvc     *auth.JWTService
+	jwtSvc     pkgauth.TokenService
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier
 	llmCfg     config.LLMConfig
@@ -38,9 +40,55 @@ type Server struct {
 
 	magicStore *auth.MagicTokenStore
 
+	// Extension points for open-core customization.
+	extraRoutes func(*http.ServeMux, Dependencies)
+	wrapRoutes  func(http.Handler) http.Handler
+	features    FeatureSet
+
 	// approvalsCleaner is used to stop the background goroutine.
 	approvalsHandler *handlers.ApprovalsHandler
 	tasksHandler     *handlers.TasksHandler
+}
+
+// Dependencies is passed to ExtraRoutes so extension handlers can access shared services.
+type Dependencies struct {
+	Store      store.Store
+	Vault      vault.Vault
+	JWTService pkgauth.TokenService
+	AdapterReg *adapters.Registry
+	Notifier   notify.Notifier
+	Logger     *slog.Logger
+	BaseURL    string
+}
+
+// FeatureSet tells the frontend (and API consumers) which capabilities are available.
+// The open-source build returns all false; the cloud build sets the relevant fields.
+type FeatureSet struct {
+	MultiTenant       bool `json:"multi_tenant"`
+	EmailVerification bool `json:"email_verification"`
+	Passkeys          bool `json:"passkeys"`
+	SSO               bool `json:"sso"`
+	Teams             bool `json:"teams"`
+	UsageMetering     bool `json:"usage_metering"`
+	PasswordAuth      bool `json:"password_auth"`
+}
+
+// ServerOption configures optional behavior on the Server.
+type ServerOption func(*Server)
+
+// WithExtraRoutes registers additional HTTP routes (e.g. cloud-only endpoints).
+func WithExtraRoutes(fn func(*http.ServeMux, Dependencies)) ServerOption {
+	return func(s *Server) { s.extraRoutes = fn }
+}
+
+// WithWrapRoutes wraps the entire HTTP handler (e.g. tenant-scoping middleware).
+func WithWrapRoutes(fn func(http.Handler) http.Handler) ServerOption {
+	return func(s *Server) { s.wrapRoutes = fn }
+}
+
+// WithFeatures declares which capabilities the frontend should expose.
+func WithFeatures(f FeatureSet) ServerOption {
+	return func(s *Server) { s.features = f }
 }
 
 // New creates a Server and registers all routes.
@@ -49,11 +97,12 @@ func New(
 	cfg *config.Config,
 	st store.Store,
 	v vault.Vault,
-	jwtSvc *auth.JWTService,
+	jwtSvc pkgauth.TokenService,
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
 	llmCfg config.LLMConfig,
 	magicStore *auth.MagicTokenStore,
+	opts ...ServerOption,
 ) (*Server, error) {
 	logOpts := &slog.HandlerOptions{Level: cfg.Server.SlogLevel()}
 	var logHandler slog.Handler
@@ -79,6 +128,11 @@ func New(
 		llmCfg:     llmCfg,
 		magicStore: magicStore,
 		logger:     logger,
+	}
+
+	// Apply optional configuration.
+	for _, o := range opts {
+		o(s)
 	}
 
 	mux := s.routes()
@@ -111,9 +165,9 @@ func (s *Server) routes() http.Handler {
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth, s.magicStore, baseURL)
-	authMode := "password"
-	if s.magicStore != nil {
-		authMode = "magic_link"
+	authMode := "magic_link"
+	if s.features.PasswordAuth {
+		authMode = "password"
 	}
 	healthHandler := handlers.NewHealthHandler(s.store, s.vault, authMode)
 	restrictionsHandler := handlers.NewRestrictionsHandler(s.store)
@@ -187,21 +241,28 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /ready", healthHandler.Ready)
 	mux.HandleFunc("GET /api/config/public", healthHandler.ConfigPublic)
 
-	// Auth (no auth required)
-	mux.HandleFunc("POST /api/auth/register", authHandler.Register)
-	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	// Auth — core routes (always registered)
 	mux.HandleFunc("POST /api/auth/refresh", authHandler.Refresh)
+	mux.Handle("POST /api/auth/logout", user(authHandler.Logout))
+	mux.Handle("GET /api/me", user(authHandler.Me))
 
-	// Magic link auth (no auth required; only registered when magicStore is set)
+	// Magic link auth (local mode only)
 	if s.magicStore != nil {
 		mux.HandleFunc("POST /api/auth/magic", authHandler.ExchangeMagic)
 	}
 
-	// Auth (requires user JWT)
-	mux.Handle("POST /api/auth/logout", user(authHandler.Logout))
-	mux.Handle("GET /api/me", user(authHandler.Me))
-	mux.Handle("PUT /api/me", user(authHandler.UpdateMe))
-	mux.Handle("DELETE /api/me", user(authHandler.DeleteMe))
+	// Password auth routes are registered only when the PasswordAuth feature is enabled.
+	// In the open-source build this is off by default (local mode uses magic links).
+	// Cloud and self-hosted password deployments enable it via WithFeatures.
+	if s.features.PasswordAuth {
+		mux.HandleFunc("POST /api/auth/register", authHandler.Register)
+		mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+		mux.Handle("PUT /api/me", user(authHandler.UpdateMe))
+		mux.Handle("DELETE /api/me", user(authHandler.DeleteMe))
+	}
+
+	// Features endpoint (always registered, returns the active FeatureSet)
+	mux.HandleFunc("GET /api/features", s.handleFeatures)
 
 	// Restrictions (rate-limited writes)
 	mux.Handle("GET /api/restrictions", user(restrictionsHandler.List))
@@ -282,6 +343,19 @@ func (s *Server) routes() http.Handler {
 	})
 	mux.Handle("/skill/", skillFileHandler)
 
+	// Extension hook: let cloud/enterprise layers add additional routes.
+	if s.extraRoutes != nil {
+		s.extraRoutes(mux, Dependencies{
+			Store:      s.store,
+			Vault:      s.vault,
+			JWTService: s.jwtSvc,
+			AdapterReg: s.adapterReg,
+			Notifier:   s.notifier,
+			Logger:     s.logger,
+			BaseURL:    baseURL,
+		})
+	}
+
 	// SPA fallback
 	if s.cfg.Server.FrontendDir != "" {
 		fs := http.FileServer(http.Dir(s.cfg.Server.FrontendDir))
@@ -298,7 +372,20 @@ func (s *Server) routes() http.Handler {
 		})
 	}
 
-	return securityMiddleware(logMiddleware(mux))
+	handler := securityMiddleware(logMiddleware(mux))
+
+	// Extension hook: let cloud/enterprise layers wrap the entire handler.
+	if s.wrapRoutes != nil {
+		handler = s.wrapRoutes(handler)
+	}
+
+	return handler
+}
+
+// handleFeatures returns the active feature set as JSON.
+func (s *Server) handleFeatures(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.features)
 }
 
 // consumeTelegramDecisions reads from the Telegram notifier's decision channel

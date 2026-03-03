@@ -30,7 +30,7 @@ import (
 
 	_ "modernc.org/sqlite" // registers "sqlite" driver
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/adapters/format"
 )
 
