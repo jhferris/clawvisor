@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
@@ -50,6 +51,20 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if body.Email == "" || body.Password == "" {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "email and password are required")
 		return
+	}
+
+	if len(h.cfg.AllowedEmails) > 0 {
+		allowed := false
+		for _, e := range h.cfg.AllowedEmails {
+			if strings.EqualFold(e, body.Email) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "REGISTRATION_DISABLED", "registration is not open")
+			return
+		}
 	}
 
 	hash, err := auth.HashPassword(body.Password)
