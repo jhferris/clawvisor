@@ -8,6 +8,8 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	pkgvault "github.com/clawvisor/clawvisor/pkg/vault"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -103,7 +105,7 @@ func (v *GCPVault) Get(ctx context.Context, userID, serviceID string) ([]byte, e
 	})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return nil, ErrNotFound
+			return nil, pkgvault.ErrNotFound
 		}
 		return nil, fmt.Errorf("accessing secret: %w", err)
 	}

@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // RestrictionsHandler manages hard-block restrictions.

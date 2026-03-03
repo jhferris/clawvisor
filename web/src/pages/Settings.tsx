@@ -6,12 +6,15 @@ import { api, APIError } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 
 export default function Settings() {
+  const { features } = useAuth()
+  const passwordAuth = features?.password_auth ?? false
+
   return (
     <div className="p-8 space-y-10">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
       <TelegramSection />
-      <PasswordSection />
-      <DangerZone />
+      {passwordAuth && <PasswordSection />}
+      {passwordAuth && <DangerZone />}
     </div>
   )
 }

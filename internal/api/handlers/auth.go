@@ -12,20 +12,22 @@ import (
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/auth"
-	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/store"
+	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
+
+	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // AuthHandler handles user registration, login, token refresh, and logout.
 type AuthHandler struct {
-	jwtSvc     *auth.JWTService
+	jwtSvc     pkgauth.TokenService
 	st         store.Store
 	cfg        config.AuthConfig
-	magicStore *auth.MagicTokenStore // nil when magic link auth is disabled
+	magicStore pkgauth.MagicTokenStore // nil when magic link auth is disabled
 	baseURL    string
 }
 
-func NewAuthHandler(jwtSvc *auth.JWTService, st store.Store, cfg config.AuthConfig, magicStore *auth.MagicTokenStore, baseURL string) *AuthHandler {
+func NewAuthHandler(jwtSvc pkgauth.TokenService, st store.Store, cfg config.AuthConfig, magicStore pkgauth.MagicTokenStore, baseURL string) *AuthHandler {
 	return &AuthHandler{jwtSvc: jwtSvc, st: st, cfg: cfg, magicStore: magicStore, baseURL: baseURL}
 }
 

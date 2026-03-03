@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/config"
+	"github.com/clawvisor/clawvisor/pkg/config"
 	"github.com/clawvisor/clawvisor/internal/llm"
 )
 

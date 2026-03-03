@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // ApprovalsHandler manages pending approval decisions.

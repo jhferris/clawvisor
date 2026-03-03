@@ -245,6 +245,16 @@ export interface Task {
   pending_reason?: string
 }
 
+export interface FeatureSet {
+  multi_tenant: boolean
+  email_verification: boolean
+  passkeys: boolean
+  sso: boolean
+  teams: boolean
+  usage_metering: boolean
+  password_auth: boolean
+}
+
 export interface ActivityBucket {
   bucket: string
   outcome: string
@@ -362,6 +372,9 @@ export const api = {
   },
   config: {
     public: () => get<{ auth_mode: 'magic_link' | 'password' }>('/api/config/public'),
+  },
+  features: {
+    get: () => get<FeatureSet>('/api/features'),
   },
   queue: {
     list: () => get<{ items: QueueItem[]; total: number }>('/api/queue'),

@@ -15,9 +15,10 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading, authMode } = useAuth()
+  const { isAuthenticated, isLoading, authMode, features } = useAuth()
 
   const unauthRedirect = authMode === 'magic_link' ? '/magic-link' : '/login'
+  const passwordAuth = features?.password_auth ?? false
 
   return (
     <Routes>
@@ -31,8 +32,8 @@ export default function App() {
           )
         }
       />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      {passwordAuth && <Route path="/login" element={<Login />} />}
+      {passwordAuth && <Route path="/register" element={<Register />} />}
       <Route path="/magic-link" element={<MagicLink />} />
       <Route
         path="/dashboard/*"

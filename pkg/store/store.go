@@ -219,7 +219,7 @@ type PendingApproval struct {
 // Zero values mean "no filter" (backwards compatible).
 type TaskFilter struct {
 	ActiveOnly bool   // status IN ('active','pending_approval','pending_scope_expansion')
-	Limit      int    // 0 → no limit
+	Limit      int    // 0 -> no limit
 	Offset     int
 }
 
@@ -230,7 +230,7 @@ type AuditFilter struct {
 	Outcome    string // filter by outcome
 	DataOrigin string // filter by data_origin
 	TaskID     string // filter by task_id
-	Limit      int    // 0 → default (50)
+	Limit      int    // 0 -> default (50)
 	Offset     int
 }
 

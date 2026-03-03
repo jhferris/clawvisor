@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, createContext, useContext, useRef, type ReactNode } from 'react'
-import { api, setAccessToken, setRefreshCallback, type User } from '../api/client'
+import { api, setAccessToken, setRefreshCallback, type User, type FeatureSet } from '../api/client'
 
 const REFRESH_TOKEN_KEY = 'clawvisor_refresh_token'
 
@@ -8,6 +8,7 @@ interface AuthContextValue {
   isLoading: boolean
   isAuthenticated: boolean
   authMode: 'magic_link' | 'password' | null
+  features: FeatureSet | null
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -19,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [authMode, setAuthMode] = useState<'magic_link' | 'password' | null>(null)
+  const [features, setFeatures] = useState<FeatureSet | null>(null)
   // Prevents React StrictMode's intentional double-invoke from burning the
   // single-use refresh token twice on the initial session restore.
   const didInit = useRef(false)
@@ -28,10 +30,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (didInit.current) return
     didInit.current = true
 
-    // Fetch auth mode and refresh token in parallel.
+    // Fetch auth mode, features, and refresh token in parallel.
     const configPromise = api.config.public()
       .then((cfg) => setAuthMode(cfg.auth_mode))
       .catch(() => {}) // default stays null → treated like password mode
+
+    const featuresPromise = api.features.get()
+      .then((f) => setFeatures(f))
+      .catch(() => {}) // default stays null
 
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
     const authPromise = storedRefresh
@@ -48,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           })
       : Promise.resolve()
 
-    Promise.all([configPromise, authPromise]).finally(() => setIsLoading(false))
+    Promise.all([configPromise, featuresPromise, authPromise]).finally(() => setIsLoading(false))
   }, [])
 
   // Register a refresh callback so the API client can silently handle 401s on
@@ -97,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, authMode, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, authMode, features, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

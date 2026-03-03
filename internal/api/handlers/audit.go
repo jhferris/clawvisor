@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // AuditHandler serves the audit log query API.

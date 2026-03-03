@@ -12,9 +12,9 @@ import (
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
-	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // hardcodedApprovalActions lists service:action pairs that always require

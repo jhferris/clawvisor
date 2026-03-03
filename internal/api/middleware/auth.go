@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/clawvisor/clawvisor/internal/auth"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/auth"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 type contextKey string
@@ -24,7 +24,7 @@ func UserFromContext(ctx context.Context) *store.User {
 
 // RequireUser is middleware that validates a user JWT and injects the user into
 // the request context. Returns 401 if the token is missing or invalid.
-func RequireUser(jwtSvc *auth.JWTService, st store.Store) func(http.Handler) http.Handler {
+func RequireUser(jwtSvc auth.TokenService, st store.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)

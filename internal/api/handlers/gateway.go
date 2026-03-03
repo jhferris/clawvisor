@@ -14,16 +14,16 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/adapters/format"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
-	"github.com/clawvisor/clawvisor/internal/config"
-	"github.com/clawvisor/clawvisor/internal/gateway"
+	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/gateway"
 	"github.com/clawvisor/clawvisor/internal/intent"
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
-	"github.com/clawvisor/clawvisor/internal/vault"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
+	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // pendingRequestBlob is stored in pending_approvals.request_blob.

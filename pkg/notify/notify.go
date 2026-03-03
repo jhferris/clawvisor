@@ -4,9 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
-	"github.com/clawvisor/clawvisor/internal/gateway"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // Notifier sends approval and activation requests to the user.
@@ -22,18 +21,18 @@ type Notifier interface {
 
 // ApprovalRequest carries the data needed to ask the user to approve or deny a gateway request.
 type ApprovalRequest struct {
-	PendingID   string
-	RequestID   string
-	UserID      string
-	AgentName   string
-	Service     string
-	Action      string
-	Params      map[string]any
-	Reason      string          // agent's stated reason
-	PolicyReason string         // policy rule reason
-	ExpiresIn   string          // human-readable (e.g. "5 minutes")
-	ApproveURL  string          // deep-link for approve action
-	DenyURL     string          // deep-link for deny action (or callback data)
+	PendingID    string
+	RequestID    string
+	UserID       string
+	AgentName    string
+	Service      string
+	Action       string
+	Params       map[string]any
+	Reason       string // agent's stated reason
+	PolicyReason string // policy rule reason
+	ExpiresIn    string // human-readable (e.g. "5 minutes")
+	ApproveURL   string // deep-link for approve action
+	DenyURL      string // deep-link for deny action (or callback data)
 }
 
 // ActivationRequest is sent when a service is not yet configured.
@@ -109,6 +108,3 @@ type CallbackDecision struct {
 type PollingDecrementer interface {
 	DecrementPolling(userID string)
 }
-
-// Ensure we import gateway without unused import errors in callers.
-var _ = gateway.Request{}

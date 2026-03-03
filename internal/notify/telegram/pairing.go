@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/notify"
-	"github.com/clawvisor/clawvisor/internal/store"
+	"github.com/clawvisor/clawvisor/pkg/notify"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // pairingSession is the internal mutable state for a pairing attempt.

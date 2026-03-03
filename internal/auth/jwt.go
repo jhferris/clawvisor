@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
 )
 
-// Claims is the payload stored inside a user JWT.
-type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	jwt.RegisteredClaims
-}
+// Claims is re-exported from pkg/auth so that the JWTService methods satisfy
+// the TokenService interface (same return type).
+type Claims = pkgauth.Claims
 
 // JWTService handles token creation and validation.
+// It implements the TokenService interface.
 type JWTService struct {
 	secret []byte
 }

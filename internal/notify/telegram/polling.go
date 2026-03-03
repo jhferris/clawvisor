@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/notify"
+	"github.com/clawvisor/clawvisor/pkg/notify"
 )
 
 // pollingSession tracks one per-user callback polling goroutine.

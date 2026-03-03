@@ -16,7 +16,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/clawvisor/clawvisor/internal/adapters"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 )
 
 // Payload is posted to the agent's callback URL.

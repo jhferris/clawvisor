@@ -13,6 +13,8 @@ import (
 	"os"
 
 	"github.com/google/uuid"
+
+	pkgvault "github.com/clawvisor/clawvisor/pkg/vault"
 )
 
 // LocalVault encrypts credentials with AES-256-GCM and stores them in the
@@ -92,7 +94,7 @@ func (v *LocalVault) Get(ctx context.Context, userID, serviceID string) ([]byte,
 	var encrypted, iv, authTag string
 	err := v.db.QueryRowContext(ctx, q, userID, serviceID).Scan(&encrypted, &iv, &authTag)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, pkgvault.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("vault get: %w", err)
