@@ -518,18 +518,12 @@ const plugin = {
       res.end(JSON.stringify({ ok: true, ...responseId }));
     }
 
-    // Prefer registerHttpRoute (new Plugin SDK) with fallback to
-    // registerHttpHandler (legacy) for backward compatibility.
-    if (typeof api.registerHttpRoute === "function") {
-      api.registerHttpRoute({ path: webhookPath, handler: handleCallback, auth: "plugin" });
-    } else {
-      api.registerHttpHandler(async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
-        const url = req.url ?? "";
-        if (url !== webhookPath && !url.startsWith(webhookPath + "?")) return false;
-        await handleCallback(req, res);
-        return true;
-      });
+    if (typeof api.registerHttpRoute !== "function") {
+      api.log?.warn("clawvisor-webhook: registerHttpRoute not available — webhook handler not registered");
+      return;
     }
+
+    api.registerHttpRoute({ path: webhookPath, handler: handleCallback, auth: "plugin" });
   },
 };
 
