@@ -15,7 +15,7 @@ When setup is complete, the user should have:
 3. The `clawvisor` skill installed in their OpenClaw workspace
 4. The `clawvisor-webhook` extension installed and configured
 5. Environment variables (`CLAWVISOR_URL`, `CLAWVISOR_AGENT_TOKEN`,
-   `OPENCLAW_HOOKS_URL`) set in `~/.openclaw/.env`
+   `OPENCLAW_HOOKS_URL`) set in `~/.openclaw/workspace/.env`
 6. A magic link URL they can use to sign into the dashboard
 
 ---
@@ -238,7 +238,7 @@ cd "$EXT_DST" && npm install --production
 
 Read `$OPENCLAW_DIR/openclaw.json` and add (or update) the webhook plugin
 entry. The plugin reads its signing secret from the `CLAWVISOR_CALLBACK_SECRET`
-environment variable (set in Step 9 via `~/.openclaw/.env`), and uses
+environment variable (set in Step 9 via `~/.openclaw/workspace/.env`), and uses
 sensible defaults for `path` (`/clawvisor/callback`) and `gatewayWsUrl`
 (`ws://127.0.0.1:18789`), so typically only `enabled` is needed.
 
@@ -311,27 +311,27 @@ Similarly for `OPENCLAW_HOOKS_URL`:
 - If both in Docker: `http://host.docker.internal:18789`
 - If OpenClaw on host: `http://localhost:18789`
 
-Write the variables to `~/.openclaw/.env`. This file uses non-overriding
+Write the variables to `~/.openclaw/workspace/.env`. This file uses non-overriding
 semantics — existing shell env vars take precedence, so it won't clobber
 user overrides.
 
 First, strip any previous Clawvisor-related lines to make this idempotent:
 
 ```bash
-grep -v '^CLAWVISOR_\|^OPENCLAW_HOOKS_URL=' "$OPENCLAW_DIR/.env" > /tmp/openclaw-env.tmp 2>/dev/null || true
-mv /tmp/openclaw-env.tmp "$OPENCLAW_DIR/.env" 2>/dev/null || true
+grep -v '^CLAWVISOR_\|^OPENCLAW_HOOKS_URL=' "$OPENCLAW_DIR/workspace/.env" > /tmp/openclaw-env.tmp 2>/dev/null || true
+mv /tmp/openclaw-env.tmp "$OPENCLAW_DIR/workspace/.env" 2>/dev/null || true
 ```
 
 Then append the new values (the `callback_secret` comes from Step 4):
 
 ```bash
-cat >> "$OPENCLAW_DIR/.env" <<EOF
+cat >> "$OPENCLAW_DIR/workspace/.env" <<EOF
 CLAWVISOR_URL=<determined URL>
 CLAWVISOR_AGENT_TOKEN=<token from Step 4>
 CLAWVISOR_CALLBACK_SECRET=<callback_secret from Step 4>
 OPENCLAW_HOOKS_URL=<determined URL>
 EOF
-chmod 600 "$OPENCLAW_DIR/.env"
+chmod 600 "$OPENCLAW_DIR/workspace/.env"
 ```
 
 ---
