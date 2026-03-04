@@ -95,7 +95,7 @@ clawhub install clawvisor
 Then configure the agent's environment:
 
 ```bash
-openclaw credentials set CLAWVISOR_URL http://localhost:8080
+openclaw credentials set CLAWVISOR_URL http://localhost:25297
 openclaw credentials set CLAWVISOR_AGENT_TOKEN <your-agent-token>
 openclaw credentials set OPENCLAW_HOOKS_URL http://localhost:18789
 ```
@@ -337,7 +337,7 @@ make tui
 clawvisor tui
 
 # With explicit connection details:
-clawvisor tui --url http://localhost:8080 --token <refresh_token>
+clawvisor tui --url http://localhost:25297 --token <refresh_token>
 ```
 
 Authentication is automatic in local mode. The flow:
@@ -351,7 +351,7 @@ For password-mode servers, the TUI prompts for email and password on first launc
 You can also set credentials via environment variables:
 
 ```bash
-export CLAWVISOR_URL=http://localhost:8080
+export CLAWVISOR_URL=http://localhost:25297
 export CLAWVISOR_TOKEN=<refresh_token>
 clawvisor tui
 ```

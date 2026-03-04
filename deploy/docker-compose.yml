@@ -22,7 +22,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     ports:
-      - "8080:8080"
+      - "25297:25297"
     environment:
       DATABASE_URL: "postgres://clawvisor:clawvisor@postgres:5432/clawvisor"
       DATABASE_DRIVER: "postgres"

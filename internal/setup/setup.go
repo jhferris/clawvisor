@@ -108,7 +108,7 @@ func runSetup() (*config, error) {
 		envMode:  "local",
 		dbDriver: "sqlite",
 		host:     "127.0.0.1",
-		port:     "8080",
+		port:     "25297",
 		vault:    "local",
 	}
 

@@ -19,5 +19,5 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o clawvisor ./cmd/clawvi
 FROM gcr.io/distroless/static-debian12
 COPY --from=go-builder /app/clawvisor /clawvisor
 COPY --from=web-builder /web/dist /web/dist
-EXPOSE 8080
+EXPOSE 25297
 ENTRYPOINT ["/clawvisor", "server"]

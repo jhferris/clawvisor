@@ -333,7 +333,7 @@ When the server is bound to a local address (localhost, 127.0.0.1, 0.0.0.0), it 
 
 ```
   Clawvisor dashboard
-  http://localhost:8080/auth/local?token=abc123...
+  http://localhost:25297/auth/local?token=abc123...
 
   Open this link in your browser to sign in.
   Valid for 15 minutes. Single use.
@@ -434,7 +434,7 @@ Configuration is loaded in three layers, each overriding the previous:
 
 | Setting | Default | Env Override | Notes |
 |---|---|---|---|
-| Server port | 8080 | `PORT` | |
+| Server port | 25297 | `PORT` | |
 | Server host | 127.0.0.1 | `SERVER_HOST` | Set to `0.0.0.0` for Cloud Run |
 | Public URL | (empty) | `PUBLIC_URL` | Used in Telegram notification links |
 | Database driver | postgres | `DATABASE_DRIVER` | `postgres` or `sqlite` |
@@ -492,7 +492,7 @@ When the server starts (`cmd/server/main.go`):
 DATABASE_DRIVER=sqlite JWT_SECRET=dev-secret go run ./cmd/server
 ```
 
-This starts with SQLite (no Docker needed), auto-generates `vault.key`, creates a local user, and prints a magic link. The frontend dev server (`npm run dev` in `web/`) proxies API requests to `:8080`.
+This starts with SQLite (no Docker needed), auto-generates `vault.key`, creates a local user, and prints a magic link. The frontend dev server (`npm run dev` in `web/`) proxies API requests to `:25297`.
 
 ### 14.2 Docker Compose
 

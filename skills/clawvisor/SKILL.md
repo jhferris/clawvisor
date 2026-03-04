@@ -11,7 +11,7 @@ homepage: https://github.com/clawvisor/clawvisor
 metadata:
   openclaw:
     requires_env:
-      - CLAWVISOR_URL          # e.g. http://localhost:8080 or https://your-instance.run.app
+      - CLAWVISOR_URL          # e.g. http://localhost:25297 or https://your-instance.run.app
       - CLAWVISOR_AGENT_TOKEN  # agent bearer token from the Clawvisor dashboard
       - OPENCLAW_HOOKS_URL     # default: http://localhost:18789
     user_setup:

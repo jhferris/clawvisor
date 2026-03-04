@@ -40,7 +40,7 @@ Add the plugin to your `plugins` block:
 Add to `~/.openclaw/.env`:
 
 ```
-CLAWVISOR_URL=http://<clawvisor-host>:8080
+CLAWVISOR_URL=http://<clawvisor-host>:25297
 CLAWVISOR_AGENT_TOKEN=<your-agent-bearer-token>
 OPENCLAW_HOOKS_URL=http://localhost:18789
 CLAWVISOR_CALLBACK_SECRET=cbsec_...

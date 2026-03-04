@@ -15,7 +15,7 @@ var healthcheckCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := os.Getenv("PORT")
 		if port == "" {
-			port = "8080"
+			port = "25297"
 		}
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Get("http://localhost:" + port + "/ready")

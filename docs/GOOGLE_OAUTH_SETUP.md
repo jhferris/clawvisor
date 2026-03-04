@@ -60,7 +60,7 @@ You'll configure three sections: **Branding**, **Audience**, and **Data Access**
 3. Application type: **Web application**
 4. Name: `Clawvisor`
 5. Under **Authorized redirect URIs**, add:
-   - `http://localhost:8080/api/oauth/google/callback` (for local development)
+   - `http://localhost:25297/api/oauth/google/callback` (for local development)
    - If you're running Clawvisor on a different host/port, adjust accordingly
      (e.g. `https://clawvisor.yourdomain.com/api/oauth/google/callback`)
 6. Click **Create**
