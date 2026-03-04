@@ -445,8 +445,8 @@ const plugin = {
       return;
     }
 
-    const webhookPath = config.path ?? DEFAULT_PATH;
-    const gatewayWsUrl = config.gatewayWsUrl ?? process.env.OPENCLAW_GATEWAY_WS_URL ?? DEFAULT_GATEWAY_WS_URL;
+    const webhookPath = config?.path ?? DEFAULT_PATH;
+    const gatewayWsUrl = config?.gatewayWsUrl ?? process.env.OPENCLAW_GATEWAY_WS_URL ?? DEFAULT_GATEWAY_WS_URL;
     const dataDir = join(process.env.HOME ?? "/tmp", ".openclaw", "extensions", "clawvisor-webhook");
     const device = getOrCreateDevice(dataDir);
     const gateway = new GatewayClient(device, gatewayToken, gatewayWsUrl, api.log);
