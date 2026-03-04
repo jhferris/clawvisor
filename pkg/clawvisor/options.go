@@ -41,6 +41,10 @@ type ServerOptions struct {
 
 	// WrapRoutes wraps the entire HTTP handler (e.g. tenant-scoping middleware).
 	WrapRoutes func(handler http.Handler) http.Handler
+
+	// SkipBuiltinAuth prevents the core server from registering its built-in
+	// login/register/password routes, allowing ExtraRoutes to provide custom auth.
+	SkipBuiltinAuth bool
 }
 
 // Dependencies is passed to ExtraRoutes so extension handlers can access shared services.

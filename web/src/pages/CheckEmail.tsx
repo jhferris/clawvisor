@@ -1,0 +1,71 @@
+import { useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { api, APIError } from '../api/client'
+
+export default function CheckEmail() {
+  const location = useLocation()
+  const email = (location.state as { email?: string })?.email ?? ''
+  const [resending, setResending] = useState(false)
+  const [resent, setResent] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleResend() {
+    if (!email || resending) return
+    setError(null)
+    setResending(true)
+    try {
+      await api.auth.resendVerification(email)
+      setResent(true)
+    } catch (err) {
+      if (err instanceof APIError) {
+        setError(err.message)
+      } else {
+        setError('Could not resend verification email')
+      }
+    } finally {
+      setResending(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow text-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Check your email</h1>
+          <p className="mt-3 text-gray-600">
+            We sent a verification link to{' '}
+            {email ? <span className="font-medium">{email}</span> : 'your email'}.
+          </p>
+          <p className="mt-2 text-sm text-gray-500">
+            Click the link in the email to continue setting up your account.
+            The link is valid for 24 hours.
+          </p>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+        )}
+
+        {resent ? (
+          <p className="text-sm text-green-600">Verification email resent.</p>
+        ) : (
+          email && (
+            <button
+              onClick={handleResend}
+              disabled={resending}
+              className="text-sm text-blue-600 hover:underline disabled:opacity-50"
+            >
+              {resending ? 'Resending...' : "Didn't get the email? Resend"}
+            </button>
+          )
+        )}
+
+        <p className="text-sm text-gray-500">
+          <Link to="/register" className="text-blue-600 hover:underline">
+            Back to registration
+          </Link>
+        </p>
+      </div>
+    </div>
+  )
+}

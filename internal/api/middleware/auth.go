@@ -39,6 +39,13 @@ func RequireUser(jwtSvc auth.TokenService, st store.Store) func(http.Handler) ht
 				return
 			}
 
+			// Reject purpose-restricted tokens (setup, totp_verify, register) — they
+			// are only accepted by the specific endpoints that check for them.
+			if claims.Purpose != "" {
+				http.Error(w, `{"error":"invalid or expired token","code":"UNAUTHORIZED"}`, http.StatusUnauthorized)
+				return
+			}
+
 			user, err := st.GetUserByID(r.Context(), claims.UserID)
 			if err != nil {
 				http.Error(w, `{"error":"user not found","code":"UNAUTHORIZED"}`, http.StatusUnauthorized)

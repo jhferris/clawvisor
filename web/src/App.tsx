@@ -3,6 +3,10 @@ import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import MagicLink from './pages/MagicLink'
+import CheckEmail from './pages/CheckEmail'
+import VerifyEmail from './pages/VerifyEmail'
+import SetupAuth from './pages/SetupAuth'
+import TOTPVerify from './pages/TOTPVerify'
 import Dashboard from './pages/Dashboard'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -35,6 +39,10 @@ export default function App() {
       {passwordAuth && <Route path="/login" element={<Login />} />}
       {passwordAuth && <Route path="/register" element={<Register />} />}
       <Route path="/magic-link" element={<MagicLink />} />
+      <Route path="/check-email" element={<CheckEmail />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/setup-auth" element={<SetupAuth />} />
+      <Route path="/totp-verify" element={<TOTPVerify />} />
       <Route
         path="/dashboard/*"
         element={

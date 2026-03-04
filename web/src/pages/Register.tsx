@@ -1,23 +1,38 @@
 import { useState, FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { APIError } from '../api/client'
+import { api, APIError, setAccessToken } from '../api/client'
+
+const REFRESH_TOKEN_KEY = 'clawvisor_refresh_token'
 
 export default function Register() {
-  const { register } = useAuth()
+  const { authMode } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  const isPasskeyMode = authMode === 'passkey'
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setIsSubmitting(true)
     try {
-      await register(email, password)
-      navigate('/dashboard')
+      const resp = await api.auth.register(email, isPasskeyMode ? undefined : password)
+      if (resp.status === 'verify_email') {
+        // Non-local with email verification: check your email
+        navigate('/check-email', { state: { email } })
+      } else if (resp.setup_token) {
+        // Non-local without email verification: direct to auth setup
+        navigate('/setup-auth', { state: { setup_token: resp.setup_token } })
+      } else if (resp.access_token) {
+        // Local mode: direct login
+        setAccessToken(resp.access_token)
+        localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token!)
+        navigate('/dashboard')
+      }
     } catch (err) {
       if (err instanceof APIError) {
         setError(err.message)
@@ -56,21 +71,23 @@ export default function Register() {
             />
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
-          </div>
+          {!isPasskeyMode && (
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
+            </div>
+          )}
 
           <button
             type="submit"

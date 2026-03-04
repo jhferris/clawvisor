@@ -42,7 +42,8 @@ type Server struct {
 	// Extension points for open-core customization.
 	extraRoutes func(*http.ServeMux, Dependencies)
 	wrapRoutes  func(http.Handler) http.Handler
-	features    FeatureSet
+	features              FeatureSet
+	skipBuiltinAuthRoutes bool
 
 	// approvalsCleaner is used to stop the background goroutine.
 	approvalsHandler *handlers.ApprovalsHandler
@@ -88,6 +89,12 @@ func WithWrapRoutes(fn func(http.Handler) http.Handler) ServerOption {
 // WithFeatures declares which capabilities the frontend should expose.
 func WithFeatures(f FeatureSet) ServerOption {
 	return func(s *Server) { s.features = f }
+}
+
+// WithSkipBuiltinAuth prevents the core server from registering its built-in
+// login/register/password routes, allowing ExtraRoutes to provide custom auth.
+func WithSkipBuiltinAuth() ServerOption {
+	return func(s *Server) { s.skipBuiltinAuthRoutes = true }
 }
 
 // New creates a Server and registers all routes.
@@ -250,10 +257,11 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("POST /api/auth/magic", authHandler.ExchangeMagic)
 	}
 
-	// Password auth routes are registered only when the PasswordAuth feature is enabled.
+	// Password auth routes are registered only when the PasswordAuth feature is enabled
+	// AND the cloud layer hasn't opted to provide its own auth routes.
 	// In the open-source build this is off by default (local mode uses magic links).
 	// Cloud and self-hosted password deployments enable it via WithFeatures.
-	if s.features.PasswordAuth {
+	if s.features.PasswordAuth && !s.skipBuiltinAuthRoutes {
 		mux.HandleFunc("POST /api/auth/register", authHandler.Register)
 		mux.HandleFunc("POST /api/auth/login", authHandler.Login)
 		mux.Handle("PUT /api/me", user(authHandler.UpdateMe))

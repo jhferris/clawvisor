@@ -98,6 +98,30 @@ const put = <T>(path: string, body: unknown) => request<T>('PUT', path, body)
 const patch = <T>(path: string, body: unknown) => request<T>('PATCH', path, body)
 const del = <T>(path: string, body?: unknown) => request<T>('DELETE', path, body)
 
+// Request with an explicit bearer token (for setup/pending tokens, not the session token)
+async function requestWithToken<T>(
+  method: string,
+  path: string,
+  token: string,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  }
+  const res = await fetch(path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new APIError(res.status, data.error ?? res.statusText, data.code)
+  }
+  if (res.status === 204) return undefined as T
+  return res.json()
+}
+
 // ── Error ─────────────────────────────────────────────────────────────────────
 
 export class APIError extends Error {
@@ -124,6 +148,49 @@ export interface AuthResponse {
   user: User
   access_token: string
   refresh_token: string
+}
+
+// Login may return one of these instead of a full AuthResponse
+export interface LoginResult {
+  // Normal login
+  user?: User
+  access_token?: string
+  refresh_token?: string
+  // TOTP required
+  status?: 'requires_totp' | 'setup_required'
+  pending_token?: string
+  setup_token?: string
+}
+
+export interface RegisterResult {
+  user?: User
+  // Local mode: full tokens
+  access_token?: string
+  refresh_token?: string
+  // Non-local mode without email verification: setup token
+  setup_token?: string
+  // Non-local mode with email verification: status
+  status?: 'verify_email'
+}
+
+export interface VerifyEmailResult {
+  setup_token: string
+  email: string
+}
+
+export interface WebAuthnCredential {
+  id: string
+  user_id: string
+  name: string
+  sign_count: number
+  transports: string[]
+  created_at: string
+}
+
+export interface UserAuthMethods {
+  has_password: boolean
+  has_totp: boolean
+  passkey_count: number
 }
 
 export interface Agent {
@@ -290,14 +357,18 @@ export interface QueueItem {
 
 export const api = {
   auth: {
-    register: (email: string, password: string) =>
-      post<AuthResponse>('/api/auth/register', { email, password }),
+    register: (email: string, password?: string) =>
+      post<RegisterResult>('/api/auth/register', { email, password }),
     login: (email: string, password: string) =>
-      post<AuthResponse>('/api/auth/login', { email, password }),
+      post<LoginResult>('/api/auth/login', { email, password }),
     refresh: (refreshToken: string) =>
       post<AuthResponse>('/api/auth/refresh', { refresh_token: refreshToken }),
     magic: (token: string) =>
       post<AuthResponse>('/api/auth/magic', { token }),
+    verifyEmail: (token: string) =>
+      post<VerifyEmailResult>('/api/auth/verify-email', { token }),
+    resendVerification: (email: string) =>
+      post<{ status: string }>('/api/auth/resend-verification', { email }),
     logout: (refreshToken?: string) =>
       post<void>('/api/auth/logout', { refresh_token: refreshToken }),
     me: () => get<User>('/api/me'),
@@ -305,6 +376,34 @@ export const api = {
       put<User>('/api/me', { current_password: currentPassword, new_password: newPassword }),
     deleteMe: (password: string) =>
       del<void>('/api/me', { password }),
+    methods: () => get<UserAuthMethods>('/api/auth/methods'),
+    setupPassword: (password: string, setupToken: string) =>
+      requestWithToken<AuthResponse>('POST', '/api/auth/setup-password', setupToken, { password }),
+    passkey: {
+      registerBegin: (setupToken: string) =>
+        requestWithToken<{ challenge_id: string; options: any }>('POST', '/api/auth/passkey/register/begin', setupToken, {}),
+      registerFinish: (setupToken: string, challengeId: string, credential: any, name?: string) =>
+        requestWithToken<AuthResponse>('POST', '/api/auth/passkey/register/finish', setupToken, { challenge_id: challengeId, credential, name }),
+      loginBegin: () =>
+        post<{ challenge_id: string; options: any }>('/api/auth/passkey/login/begin', {}),
+      loginFinish: (challengeId: string, credential: any) =>
+        post<AuthResponse>('/api/auth/passkey/login/finish', { challenge_id: challengeId, credential }),
+      list: () => get<WebAuthnCredential[]>('/api/auth/passkeys'),
+      addBegin: () =>
+        post<{ challenge_id: string; options: any }>('/api/auth/passkeys/add/begin', {}),
+      addFinish: (challengeId: string, credential: any, name?: string) =>
+        post<WebAuthnCredential>('/api/auth/passkeys/add/finish', { challenge_id: challengeId, credential, name }),
+      delete: (id: string) => del<void>(`/api/auth/passkeys/${id}`),
+      rename: (id: string, name: string) => put<void>(`/api/auth/passkeys/${id}`, { name }),
+    },
+    totp: {
+      setup: () => post<{ secret: string; uri: string; qr_data_url: string }>('/api/auth/totp/setup', {}),
+      confirm: (code: string) => post<{ enabled: boolean }>('/api/auth/totp/confirm', { code }),
+      verify: (pendingToken: string, code: string) =>
+        requestWithToken<AuthResponse>('POST', '/api/auth/totp/verify', pendingToken, { code }),
+      status: () => get<{ enabled: boolean }>('/api/auth/totp'),
+      disable: (password: string) => del<void>('/api/auth/totp', { password }),
+    },
   },
   agents: {
     list: () => get<Agent[]>('/api/agents'),
@@ -371,7 +470,7 @@ export const api = {
         `/api/notifications/telegram/pair/${pairingId}/confirm`, { code }),
   },
   config: {
-    public: () => get<{ auth_mode: 'magic_link' | 'password' }>('/api/config/public'),
+    public: () => get<{ auth_mode: 'magic_link' | 'password' | 'passkey' }>('/api/config/public'),
   },
   features: {
     get: () => get<FeatureSet>('/api/features'),

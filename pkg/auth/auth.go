@@ -25,7 +25,8 @@ type MagicTokenStore interface {
 
 // Claims is the payload stored inside a user JWT.
 type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
+	UserID  string `json:"user_id"`
+	Email   string `json:"email"`
+	Purpose string `json:"purpose,omitempty"`
 	jwt.RegisteredClaims
 }

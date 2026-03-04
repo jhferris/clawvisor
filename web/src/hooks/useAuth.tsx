@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, createContext, useContext, useRef, type ReactNode } from 'react'
-import { api, setAccessToken, setRefreshCallback, type User, type FeatureSet } from '../api/client'
+import { api, setAccessToken, setRefreshCallback, type User, type FeatureSet, type LoginResult, type RegisterResult } from '../api/client'
 
 const REFRESH_TOKEN_KEY = 'clawvisor_refresh_token'
 
@@ -7,11 +7,13 @@ interface AuthContextValue {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  authMode: 'magic_link' | 'password' | null
+  authMode: 'magic_link' | 'password' | 'passkey' | null
   features: FeatureSet | null
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<LoginResult>
+  register: (email: string, password?: string) => Promise<RegisterResult>
   logout: () => Promise<void>
+  /** Set session tokens directly (used by pages that handle multi-step auth flows) */
+  setSession: (accessToken: string, refreshToken: string, user: User) => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -19,7 +21,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [authMode, setAuthMode] = useState<'magic_link' | 'password' | null>(null)
+  const [authMode, setAuthMode] = useState<'magic_link' | 'password' | 'passkey' | null>(null)
   const [features, setFeatures] = useState<FeatureSet | null>(null)
   // Prevents React StrictMode's intentional double-invoke from burning the
   // single-use refresh token twice on the initial session restore.
@@ -80,18 +82,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setRefreshCallback(null)
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const resp = await api.auth.login(email, password)
-    setAccessToken(resp.access_token)
-    localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
-    setUser(resp.user)
+  const setSession = useCallback((at: string, rt: string, u: User) => {
+    setAccessToken(at)
+    localStorage.setItem(REFRESH_TOKEN_KEY, rt)
+    setUser(u)
   }, [])
 
-  const register = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
+    const resp = await api.auth.login(email, password)
+    // Only set session if we got full tokens back (not TOTP/setup redirect)
+    if (resp.access_token && resp.refresh_token && resp.user) {
+      setAccessToken(resp.access_token)
+      localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
+      setUser(resp.user)
+    }
+    return resp
+  }, [])
+
+  const register = useCallback(async (email: string, password?: string): Promise<RegisterResult> => {
     const resp = await api.auth.register(email, password)
-    setAccessToken(resp.access_token)
-    localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
-    setUser(resp.user)
+    // Only set session if we got full tokens back (local mode)
+    if (resp.access_token && resp.refresh_token) {
+      setAccessToken(resp.access_token)
+      localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token)
+      setUser(resp.user ?? null)
+    }
+    return resp
   }, [])
 
   const logout = useCallback(async () => {
@@ -103,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, authMode, features, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: user !== null, authMode, features, login, register, logout, setSession }}>
       {children}
     </AuthContext.Provider>
   )

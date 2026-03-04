@@ -46,6 +46,10 @@ func Run(opts *ServerOptions) error {
 		apiOpts = append(apiOpts, api.WithWrapRoutes(opts.WrapRoutes))
 	}
 
+	if opts.SkipBuiltinAuth {
+		apiOpts = append(apiOpts, api.WithSkipBuiltinAuth())
+	}
+
 	srv, err := api.New(
 		opts.Config, opts.Store, opts.Vault, opts.JWTService,
 		opts.AdapterReg, opts.Notifier, opts.Config.LLM, opts.MagicStore,
