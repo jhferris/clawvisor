@@ -1,4 +1,4 @@
-.PHONY: build test run run-sqlite migrate lint clean setup tui openclaw-setup openclaw-down
+.PHONY: build test run run-sqlite migrate lint clean setup tui
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
@@ -45,13 +45,6 @@ db-up:
 
 db-down:
 	docker compose -f deploy/docker-compose.yml down
-
-# Start Clawvisor + Postgres pre-configured for OpenClaw
-openclaw-setup:
-	bash scripts/openclaw-setup.sh
-
-openclaw-down:
-	docker compose -f docker-compose.openclaw.yml down
 
 # ── Frontend ───────────────────────────────────────────────────────────────────
 
