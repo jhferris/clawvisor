@@ -172,7 +172,9 @@ func (s *Server) routes() http.Handler {
 	// Handlers
 	authHandler := handlers.NewAuthHandler(s.jwtSvc, s.store, s.cfg.Auth, s.magicStore, baseURL)
 	authMode := "magic_link"
-	if s.features.PasswordAuth {
+	if s.features.Passkeys {
+		authMode = "passkey"
+	} else if s.features.PasswordAuth {
 		authMode = "password"
 	}
 	healthHandler := handlers.NewHealthHandler(s.store, s.vault, authMode)
