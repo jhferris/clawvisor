@@ -21,7 +21,7 @@ function ApprovalCard({ item }: { item: QueueItem }) {
     mutationFn: () => api.approvals.approve(a.request_id),
     onSuccess: (res) => {
       setResult(res.status === 'executed' ? 'Approved & executed' : `Outcome: ${res.status}`)
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
       qc.invalidateQueries({ queryKey: ['approvals'] })
     },
   })
@@ -30,7 +30,7 @@ function ApprovalCard({ item }: { item: QueueItem }) {
     mutationFn: () => api.approvals.deny(a.request_id),
     onSuccess: () => {
       setResult('Denied')
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
       qc.invalidateQueries({ queryKey: ['approvals'] })
     },
   })
@@ -112,7 +112,7 @@ function TaskQueueCard({ item, agentName }: { item: QueueItem; agentName: string
     mutationFn: () => isExpansion ? api.tasks.expandApprove(task.id) : api.tasks.approve(task.id),
     onSuccess: () => {
       setResult(isExpansion ? 'Expansion approved' : 'Approved')
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
@@ -121,7 +121,7 @@ function TaskQueueCard({ item, agentName }: { item: QueueItem; agentName: string
     mutationFn: () => isExpansion ? api.tasks.expandDeny(task.id) : api.tasks.deny(task.id),
     onSuccess: () => {
       setResult(isExpansion ? 'Expansion denied' : 'Denied')
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
       qc.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
@@ -227,7 +227,7 @@ export default function Queue() {
     onSuccess: (_data, requestId) => {
       setDeepLinkResult(`Request ${requestId.slice(0, 8)}... approved.`)
       qc.invalidateQueries({ queryKey: ['approvals'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
     },
     onError: (err: Error) => setDeepLinkResult(`Approve failed: ${err.message}`),
   })
@@ -237,7 +237,7 @@ export default function Queue() {
     onSuccess: (_data, requestId) => {
       setDeepLinkResult(`Request ${requestId.slice(0, 8)}... denied.`)
       qc.invalidateQueries({ queryKey: ['approvals'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
+      qc.invalidateQueries({ queryKey: ['overview'] })
     },
     onError: (err: Error) => setDeepLinkResult(`Deny failed: ${err.message}`),
   })
@@ -245,13 +245,13 @@ export default function Queue() {
   // Deep link mutations for tasks
   const deepApproveTask = useMutation({
     mutationFn: (taskId: string) => api.tasks.approve(taskId),
-    onSuccess: () => { setDeepLinkResult('Task approved.'); qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['queue'] }) },
+    onSuccess: () => { setDeepLinkResult('Task approved.'); qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['overview'] }) },
     onError: (err: Error) => setDeepLinkResult(`Approve failed: ${err.message}`),
   })
 
   const deepDenyTask = useMutation({
     mutationFn: (taskId: string) => api.tasks.deny(taskId),
-    onSuccess: () => { setDeepLinkResult('Task denied.'); qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['queue'] }) },
+    onSuccess: () => { setDeepLinkResult('Task denied.'); qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['overview'] }) },
     onError: (err: Error) => setDeepLinkResult(`Deny failed: ${err.message}`),
   })
 
@@ -275,8 +275,8 @@ export default function Queue() {
   }, [])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['queue'],
-    queryFn: () => api.queue.list(),
+    queryKey: ['overview'],
+    queryFn: () => api.overview.get(),
     refetchInterval: 10_000,
   })
 
@@ -290,7 +290,7 @@ export default function Queue() {
     agentMap.set(a.id, a.name)
   }
 
-  const items = data?.items ?? []
+  const items = data?.queue ?? []
 
   return (
     <div className="p-8 space-y-4">
