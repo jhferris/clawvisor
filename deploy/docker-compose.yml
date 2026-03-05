@@ -18,6 +18,7 @@ services:
       retries: 5
 
   app:
+    container_name: clawvisor
     build:
       context: ..
       dockerfile: deploy/Dockerfile
@@ -29,6 +30,13 @@ services:
       JWT_SECRET: "dev-secret-change-in-production"
       SERVER_HOST: "0.0.0.0"
       VAULT_BACKEND: "local"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      CLAWVISOR_LLM_VERIFICATION_ENABLED: "${CLAWVISOR_LLM_VERIFICATION_ENABLED:-false}"
+      CLAWVISOR_LLM_VERIFICATION_PROVIDER: "${CLAWVISOR_LLM_VERIFICATION_PROVIDER:-}"
+      CLAWVISOR_LLM_VERIFICATION_ENDPOINT: "${CLAWVISOR_LLM_VERIFICATION_ENDPOINT:-}"
+      CLAWVISOR_LLM_VERIFICATION_MODEL: "${CLAWVISOR_LLM_VERIFICATION_MODEL:-}"
+      CLAWVISOR_LLM_VERIFICATION_API_KEY: "${CLAWVISOR_LLM_VERIFICATION_API_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy

@@ -56,16 +56,10 @@ cd "$CLAWVISOR_REPO" && ./bin/clawvisor agent create claude-code --replace --jso
 
 **If running in Docker:**
 
-Find the app container:
-
-```bash
-docker ps --format '{{.Names}}\t{{.Image}}' | grep -i clawvisor
-```
-
 Create the agent inside the container:
 
 ```bash
-docker exec <APP_CONTAINER> /clawvisor agent create claude-code --replace --json
+docker exec clawvisor /clawvisor agent create claude-code --replace --json
 ```
 
 Save the `token` value from the JSON output — it is shown only once.
@@ -114,7 +108,7 @@ Strip the YAML frontmatter (the `---` delimited block at the top, which
 contains OpenClaw-specific metadata) and copy:
 
 ```bash
-sed '1{/^---$/!q;};1,/^---$/d' "$CLAWVISOR_REPO/skills/clawvisor/SKILL.md" \
+awk 'BEGIN{s=0} /^---$/{s++;next} s>=2' "$CLAWVISOR_REPO/skills/clawvisor/SKILL.md" \
   > "$PROJECT_ROOT/.claude/skills/clawvisor/SKILL.md"
 ```
 
@@ -124,7 +118,7 @@ Fetch from GitHub and strip frontmatter:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/clawvisor/clawvisor/main/skills/clawvisor/SKILL.md \
-  | sed '1{/^---$/!q;};1,/^---$/d' \
+  | awk 'BEGIN{s=0} /^---$/{s++;next} s>=2' \
   > "$PROJECT_ROOT/.claude/skills/clawvisor/SKILL.md"
 ```
 

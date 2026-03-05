@@ -95,8 +95,9 @@ The OAuth redirect URL will be `http://localhost:25297/api/oauth/callback`.
 
 ## Step 4: Start Clawvisor
 
-Write a `.env` file with any configuration collected in Step 3, then start
-the stack:
+Write a `.env` file with any configuration collected in Step 3. The compose
+file references these variables via `${VAR:-}` interpolation, and
+`--env-file` makes them available during composition:
 
 ```bash
 cd "$CLAWVISOR_REPO"
