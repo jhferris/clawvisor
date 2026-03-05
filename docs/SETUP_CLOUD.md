@@ -1,9 +1,14 @@
 # Clawvisor — Cloud Deployment Guide
 
-You are deploying Clawvisor to the user's own infrastructure (VPS, container
-platform, or cloud provider). This guide uses Docker with Postgres. Follow
-these instructions step by step. Ask the user for clarification when the
-environment is ambiguous — do not guess silently.
+You are deploying Clawvisor to the user's own infrastructure — a VPS,
+container platform, or cloud provider. This is a remote deployment: the
+instance will be accessible over the internet at a public URL with HTTPS and
+password-based auth. Follow these instructions step by step. Ask the user
+for clarification when the environment is ambiguous — do not guess silently.
+
+If the user just wants to run Clawvisor on their local machine, redirect
+them to [SETUP_LOCAL.md](SETUP_LOCAL.md) or [SETUP_DOCKER.md](SETUP_DOCKER.md)
+instead.
 
 ---
 
@@ -11,86 +16,41 @@ environment is ambiguous — do not guess silently.
 
 When setup is complete, the user should have:
 
-1. A Clawvisor Docker image built (or pulled)
-2. Clawvisor running with Postgres on their server or container platform
-3. HTTPS configured (reverse proxy or platform-managed)
-4. A user account created
+1. Clawvisor running on their remote infrastructure with Postgres
+2. HTTPS configured (reverse proxy or platform-managed)
+3. A user account created via password registration
+4. The deployment verified and reachable at their public URL
 5. Security checklist reviewed
 
 ---
 
-## Step 1: Locate the Clawvisor repository
+## Step 1: Determine the target platform
 
-The Dockerfile and compose template are in the repository.
+Ask the user: **"Where are you deploying Clawvisor?"**
 
-Check if the current directory is the Clawvisor repository:
+- **VPS / dedicated server** — they have SSH access to a Linux server with
+  Docker installed (e.g. DigitalOcean, Hetzner, Linode, EC2)
+- **Container platform** — a managed service that runs containers (e.g.
+  Google Cloud Run, Fly.io, Railway, Render)
 
-```bash
-ls deploy/Dockerfile deploy/docker-compose.yml 2>/dev/null
-```
-
-If both exist, use the current directory as `$CLAWVISOR_REPO`.
-
-If not, search common locations:
-
-```bash
-ls -d ~/code/clawvisor 2>/dev/null \
-  || ls -d ~/clawvisor 2>/dev/null \
-  || ls -d ~/projects/clawvisor 2>/dev/null
-```
-
-Also check for alternate naming (`clawvisor-public`, `clawvisor-oss`). The key
-indicator is a directory containing `deploy/Dockerfile`.
-
-If not found, ask the user where the repository is checked out — or offer to
-clone it:
-
-```bash
-git clone https://github.com/clawvisor/clawvisor.git
-```
+Store the answer — the deployment steps differ.
 
 ---
 
-## Step 2: Build the Docker image
-
-```bash
-cd "$CLAWVISOR_REPO" && docker build -f deploy/Dockerfile -t clawvisor .
-```
-
-This runs a multi-stage build: Node (frontend) → Go (binary) → distroless
-runtime. The final image is minimal and runs as a static binary.
-
-If the user wants to push to a registry, ask for the registry URL:
-
-```bash
-docker tag clawvisor <REGISTRY>/clawvisor:latest
-docker push <REGISTRY>/clawvisor:latest
-```
-
----
-
-## Step 3: Choose deployment method
-
-Ask the user: **"How would you like to deploy — Docker Compose on a server, or
-a container platform (Cloud Run, Fly.io, Railway, Render)?"**
-
-### Option A: Docker Compose
-
-Use `deploy/docker-compose.yml` as a starting point. It bundles Postgres and
-Clawvisor in a single stack.
-
-#### Collect configuration
+## Step 2: Collect configuration
 
 Ask the user for the following. Generate defaults where noted.
 
 **Required:**
 
+- **Public URL** — the HTTPS URL where Clawvisor will be accessible (e.g.
+  `https://clawvisor.example.com`). Ask the user. Store as `$PUBLIC_URL`.
+  If the user doesn't have a domain, they can use an SSH tunnel instead —
+  see Step 5.
 - **JWT secret** — generate one:
   ```bash
   openssl rand -hex 32
   ```
-- **Public URL** — the HTTPS URL users will access (e.g.
-  `https://clawvisor.example.com`). Ask the user.
 
 **Intent verification** — Clawvisor uses a lightweight LLM to verify that
 agent requests match their approved task scope. This is a core safety feature.
@@ -102,10 +62,6 @@ Ask which model the user wants to use and for their API key:
 | Gemini Flash | `openai` | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
 | GPT-4o Mini | `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` |
 
-Save as `CLAWVISOR_LLM_VERIFICATION_ENABLED=true`,
-`CLAWVISOR_LLM_VERIFICATION_PROVIDER`, `CLAWVISOR_LLM_VERIFICATION_ENDPOINT`,
-`CLAWVISOR_LLM_VERIFICATION_MODEL`, and `CLAWVISOR_LLM_VERIFICATION_API_KEY`.
-
 **Optional — ask the user:**
 
 - **"Do you want to restrict who can register?"** — if yes, collect email
@@ -114,41 +70,104 @@ Save as `CLAWVISOR_LLM_VERIFICATION_ENABLED=true`,
   Contacts)?"** — if yes, collect `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET`. Point to:
   https://github.com/clawvisor/clawvisor/blob/main/docs/GOOGLE_OAUTH_SETUP.md
+  The OAuth redirect URL will be `$PUBLIC_URL/api/oauth/callback`.
 
-#### Write the .env file
+---
+
+## Step 3: Build the Docker image
 
 ```bash
-cat > "$CLAWVISOR_REPO/.env.cloud" <<EOF
+cd "$CLAWVISOR_REPO" && docker build -f deploy/Dockerfile -t clawvisor .
+```
+
+This runs a multi-stage build: Node (frontend) → Go (binary) → distroless
+runtime. The final image is minimal and runs as a static binary.
+
+**Push to a registry** — the image needs to be accessible from the target
+platform. Ask the user for their registry:
+
+```bash
+docker tag clawvisor <REGISTRY>/clawvisor:latest
+docker push <REGISTRY>/clawvisor:latest
+```
+
+For **VPS deployments** where the user will build on the server itself, they
+can skip the push and clone + build directly on the server instead.
+
+---
+
+## Step 4: Deploy
+
+### Option A: VPS / dedicated server
+
+The user needs to run the following on their server. You cannot SSH into the
+server directly — present these as instructions for the user to execute on
+their remote machine, or help them construct an SSH command.
+
+#### Environment file
+
+Generate the `.env.cloud` contents for the user to place on their server.
+
+**If the user has an HTTPS domain:**
+
+```
 DATABASE_URL=postgres://clawvisor:clawvisor@postgres:5432/clawvisor
 DATABASE_DRIVER=postgres
-JWT_SECRET=<generated secret>
+JWT_SECRET=<generated secret from Step 2>
 SERVER_HOST=0.0.0.0
 AUTH_MODE=password
 VAULT_BACKEND=local
 CALLBACK_REQUIRE_HTTPS=true
 LOG_FORMAT=json
-PUBLIC_URL=<user's public URL>
+PUBLIC_URL=<PUBLIC_URL from Step 2>
 CLAWVISOR_LLM_VERIFICATION_ENABLED=true
-CLAWVISOR_LLM_VERIFICATION_PROVIDER=<from above>
-CLAWVISOR_LLM_VERIFICATION_ENDPOINT=<from above>
-CLAWVISOR_LLM_VERIFICATION_MODEL=<from above>
-CLAWVISOR_LLM_VERIFICATION_API_KEY=<from above>
+CLAWVISOR_LLM_VERIFICATION_PROVIDER=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_ENDPOINT=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_MODEL=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_API_KEY=<from Step 2>
 ALLOWED_EMAILS=<if provided, or remove this line>
 GOOGLE_CLIENT_ID=<if provided, or remove this line>
 GOOGLE_CLIENT_SECRET=<if provided, or remove this line>
-EOF
 ```
+
+**If the user will access via SSH tunnel** (no domain):
+
+```
+DATABASE_URL=postgres://clawvisor:clawvisor@postgres:5432/clawvisor
+DATABASE_DRIVER=postgres
+JWT_SECRET=<generated secret from Step 2>
+SERVER_HOST=0.0.0.0
+VAULT_BACKEND=local
+LOG_FORMAT=json
+CLAWVISOR_LLM_VERIFICATION_ENABLED=true
+CLAWVISOR_LLM_VERIFICATION_PROVIDER=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_ENDPOINT=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_MODEL=<from Step 2>
+CLAWVISOR_LLM_VERIFICATION_API_KEY=<from Step 2>
+GOOGLE_CLIENT_ID=<if provided, or remove this line>
+GOOGLE_CLIENT_SECRET=<if provided, or remove this line>
+```
+
+Note: `AUTH_MODE`, `PUBLIC_URL`, `CALLBACK_REQUIRE_HTTPS`, and
+`ALLOWED_EMAILS` are omitted — the defaults (magic link, no public URL,
+allow HTTP callbacks) are correct for SSH tunnel access.
 
 #### Start the stack
 
+Instruct the user to run on their server:
+
 ```bash
-cd "$CLAWVISOR_REPO" && docker compose -f deploy/docker-compose.yml --env-file .env.cloud up -d
+docker compose -f deploy/docker-compose.yml --env-file .env.cloud up -d
 ```
 
-Wait for it to become ready:
+If they built locally and pushed to a registry, they should update the
+`image` field in the compose file (or use an override) to pull from their
+registry instead of building on the server.
+
+#### Verify on the server
 
 ```bash
-until curl -sf http://localhost:25297/ready >/dev/null 2>&1; do sleep 1; done
+curl -sf http://localhost:25297/ready && echo "RUNNING" || echo "NOT RUNNING"
 ```
 
 Postgres data and the vault key are persisted in Docker volumes
@@ -160,9 +179,13 @@ Ask the user which platform they're using. The general steps are:
 
 1. Push the image to the platform's container registry
 2. Set environment variables (see the [reference table](#environment-variables)
-   below)
+   below) — all the values from Step 2
 3. Attach a managed Postgres instance and set `DATABASE_URL`
 4. Expose port `25297`
+
+Key env vars for all platforms: `DATABASE_URL`, `DATABASE_DRIVER=postgres`,
+`JWT_SECRET`, `SERVER_HOST=0.0.0.0`, `AUTH_MODE=password`,
+`CALLBACK_REQUIRE_HTTPS=true`, `PUBLIC_URL`, `LOG_FORMAT=json`.
 
 **Google Cloud Run example:**
 
@@ -171,7 +194,7 @@ gcloud builds submit --tag gcr.io/YOUR_PROJECT/clawvisor
 gcloud run deploy clawvisor \
   --image gcr.io/YOUR_PROJECT/clawvisor \
   --port 25297 \
-  --set-env-vars "DATABASE_URL=...,JWT_SECRET=...,SERVER_HOST=0.0.0.0,VAULT_BACKEND=local,AUTH_MODE=password"
+  --set-env-vars "DATABASE_URL=...,JWT_SECRET=...,SERVER_HOST=0.0.0.0,AUTH_MODE=password,PUBLIC_URL=..."
 ```
 
 **Vault considerations:**
@@ -182,9 +205,14 @@ gcloud run deploy clawvisor \
 
 ---
 
-## Step 4: HTTPS / TLS
+## Step 5: HTTPS / TLS
 
-Clawvisor does not terminate TLS itself. Ask the user how they handle HTTPS:
+Clawvisor does not terminate TLS itself. Ask the user: **"How will you
+access the Clawvisor dashboard?"**
+
+### Option A: HTTPS with a domain
+
+The user has a domain name and can set up TLS. Ask how:
 
 - **Reverse proxy** — nginx, Caddy, or Traefik in front of port 25297
 - **Platform-managed** — Cloud Run, Fly.io, Railway, and Render handle this
@@ -194,21 +222,75 @@ Clawvisor does not terminate TLS itself. Ask the user how they handle HTTPS:
 Ensure `PUBLIC_URL` is set to the HTTPS URL so Telegram notification links
 and OAuth redirects work correctly.
 
+### Option B: SSH tunnel (no domain required)
+
+If the user doesn't have an HTTPS hostname available, they can access the
+remote instance through an SSH tunnel. This forwards the server's port to
+their local machine, so the dashboard is available at `localhost` — no
+domain, no TLS, no public exposure.
+
+Instruct the user to run on their local machine:
+
+```bash
+ssh -L 25297:localhost:25297 user@<server-ip>
+```
+
+While the tunnel is open, Clawvisor is accessible at
+`http://localhost:25297`.
+
+When using an SSH tunnel, adjust the environment on the server:
+
+- Set `AUTH_MODE=magic_link` (or omit — it defaults to magic link when
+  accessed via localhost)
+- Remove `PUBLIC_URL` (not needed — the instance isn't publicly exposed)
+- Set `CALLBACK_REQUIRE_HTTPS=false` (callbacks go through localhost)
+
+This is a good option for getting started quickly or for single-user setups
+where the user always accesses the server via SSH.
+
 ---
 
-## Step 5: Create the first user
+## Step 6: Verify the deployment
 
-In production mode (`AUTH_MODE=password`), the user needs to register an
-account. Instruct them to open the dashboard at `$PUBLIC_URL` and register
-with their email and password.
+Confirm Clawvisor is reachable:
 
-If `ALLOWED_EMAILS` was set in Step 3, only those emails can register.
+- **HTTPS deployment:** `curl -sf "$PUBLIC_URL/ready"`
+- **SSH tunnel:** `curl -sf http://localhost:25297/ready` (with tunnel open)
 
-Wait for the user to confirm they've registered before proceeding.
+If this fails, troubleshoot:
+- Is the container running? (check platform logs or `docker ps` on the server)
+- Is port 25297 exposed and reachable?
+- Is HTTPS / reverse proxy configured correctly?
+- Is DNS pointing to the right IP?
+- Is the SSH tunnel open? (for tunnel deployments)
+
+Do not proceed until the deployment responds.
 
 ---
 
-## Step 6: Security checklist
+## Step 7: Create the first user
+
+**If using `AUTH_MODE=password`** (HTTPS deployments): instruct the user to
+open the dashboard at `$PUBLIC_URL` and register with their email and
+password. If `ALLOWED_EMAILS` was set in Step 2, only those emails can
+register.
+
+**If using `AUTH_MODE=magic_link`** (SSH tunnel): the magic link is printed
+to the container logs. Retrieve it:
+
+```bash
+docker compose -f deploy/docker-compose.yml logs app 2>&1 \
+  | grep -o 'http://[^ ]*magic-link?token=[^ ]*' | tail -1
+```
+
+Instruct the user to run this on the server (or via SSH), then open the
+magic link in their local browser (it will resolve through the tunnel).
+
+Wait for the user to confirm they've signed in before proceeding.
+
+---
+
+## Step 8: Security checklist
 
 Walk through these items with the user:
 
@@ -228,9 +310,9 @@ Walk through these items with the user:
 
 ---
 
-## Step 7: Summary
+## Step 9: Summary
 
-Present the user with:
+**HTTPS deployment:**
 
 ```
 Clawvisor Cloud Deployment Complete
@@ -238,13 +320,21 @@ Clawvisor Cloud Deployment Complete
 Dashboard:  <PUBLIC_URL>
 Auth mode:  password
 Database:   Postgres
+```
 
-To stop (Docker Compose):
-  docker compose -f deploy/docker-compose.yml down
+**SSH tunnel deployment:**
+
+```
+Clawvisor Cloud Deployment Complete
+─────────────────────────────────────
+Dashboard:  http://localhost:25297 (via SSH tunnel)
+Auth mode:  magic_link
+Database:   Postgres
+
+To connect:  ssh -L 25297:localhost:25297 user@<server-ip>
 ```
 
 Remind the user to:
-- Log into the dashboard at `<PUBLIC_URL>` with the credentials from Step 5
 - Connect services under the **Services** tab:
   - Google (Gmail, Calendar, Drive, Contacts) — one OAuth connection covers
     all four
