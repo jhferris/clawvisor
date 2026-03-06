@@ -184,42 +184,13 @@ func TestGateway_Block_AuditEntryRecorded(t *testing.T) {
 	}
 }
 
-func TestGateway_DefaultPending_NoTaskOrRestriction(t *testing.T) {
-	// Without any task or restriction, the default is per-request approval (pending).
+func TestGateway_NoTaskID_Rejected(t *testing.T) {
 	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
 	sc := newScenario(t, env, "bot")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
 
-	result := sc.gatewayRequest(env, "req-default-pending", "google.gmail", "send")
-	if result["status"] != "pending" {
-		t.Errorf("no task: expected status=pending, got %v", result["status"])
-	}
-}
-
-func TestGateway_Pending_QueuesPending(t *testing.T) {
-	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
-	sc := newScenario(t, env, "automation")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-
-	reqID := fmt.Sprintf("req-approve-%s", randSuffix())
-	result := sc.gatewayRequest(env, reqID, "google.gmail", "send")
-	if result["status"] != "pending" {
-		t.Errorf("default: expected status=pending, got %v", result["status"])
-	}
-	if result["request_id"] != reqID {
-		t.Errorf("default: request_id mismatch")
-	}
-
-	// Verify it shows up in approvals list
-	resp := sc.session.do("GET", "/api/approvals", nil)
-	apBody := mustStatus(t, resp, http.StatusOK)
-	entries := arr(t, apBody, "entries")
-	if len(entries) == 0 {
-		t.Fatal("approvals: expected pending entry in list")
+	result := sc.gatewayRequest(env, "req-no-task", "google.gmail", "send")
+	if result["code"] != "TASK_REQUIRED" {
+		t.Errorf("expected code=TASK_REQUIRED, got %v", result["code"])
 	}
 }
 
@@ -303,9 +274,10 @@ func TestApproval_AliasPreserved(t *testing.T) {
 		t.Fatalf("vault seed: %v", err)
 	}
 
-	// Gateway request for "mock.echo:work" without a task → per-request approval.
+	// Task with auto_execute=false for "mock.echo:work" → per-request approval.
+	taskID := sc.createApprovedTask(t, env, "mock.echo:work", "echo", false)
 	reqID := fmt.Sprintf("req-alias-%s", randSuffix())
-	result := sc.gatewayRequest(env, reqID, "mock.echo:work", "echo")
+	result := sc.gatewayRequestWithTask(env, reqID, "mock.echo:work", "echo", taskID)
 	if result["status"] != "pending" {
 		t.Fatalf("expected status=pending, got %v (full: %v)", result["status"], result)
 	}
@@ -331,7 +303,8 @@ func TestGateway_AliasNotFound(t *testing.T) {
 			t.Fatalf("vault seed: %v", err)
 		}
 
-		result := sc.gatewayRequest(env, fmt.Sprintf("req-noalias-%s", randSuffix()), "mock.echo:nonexistent", "echo")
+		taskID := sc.createApprovedTask(t, env, "mock.echo", "echo", true)
+		result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-noalias-%s", randSuffix()), "mock.echo:nonexistent", "echo", taskID)
 		if result["code"] != "ALIAS_NOT_FOUND" {
 			t.Errorf("expected code=ALIAS_NOT_FOUND, got %v", result["code"])
 		}
@@ -346,12 +319,20 @@ func TestGateway_AliasNotFound(t *testing.T) {
 
 	t.Run("default alias missing but other alias exists", func(t *testing.T) {
 		sc := newScenario(t, env, "automation")
-		// Activate only a non-default alias.
+		// Activate both aliases so task creation passes validation.
 		if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.echo:work", []byte("cred")); err != nil {
 			t.Fatalf("vault seed: %v", err)
 		}
 
-		result := sc.gatewayRequest(env, fmt.Sprintf("req-defmiss-%s", randSuffix()), "mock.echo", "echo")
+		// createApprovedTask activates "mock.echo" (default). Create task while it exists.
+		taskID := sc.createApprovedTask(t, env, "mock.echo", "echo", true)
+
+		// Remove the default alias — only :work remains.
+		if err := env.Vault.Delete(context.Background(), sc.session.UserID, "mock.echo"); err != nil {
+			t.Fatalf("vault delete: %v", err)
+		}
+
+		result := sc.gatewayRequestWithTask(env, fmt.Sprintf("req-defmiss-%s", randSuffix()), "mock.echo", "echo", taskID)
 		if result["code"] != "ALIAS_NOT_FOUND" {
 			t.Errorf("expected code=ALIAS_NOT_FOUND, got %v (full: %v)", result["code"], result)
 		}
@@ -459,17 +440,61 @@ func TestStandingTask_OutOfScope_MessageSuggestsNewTask(t *testing.T) {
 	strContains(t, msg, "cannot be expanded", "gateway out-of-scope message for standing task")
 }
 
+// ── Scope expansion ───────────────────────────────────────────────────────────
+
+func TestExpand_ReasonBecomesExpansionRationale(t *testing.T) {
+	adapter := newMockAdapter("mock.echo", "echo", "other")
+	env := newTestEnv(t, adapter)
+	sc := newScenario(t, env, "automation")
+	sc.activateService(t, env, "mock.echo")
+
+	taskID := sc.createApprovedTask(t, env, "mock.echo", "echo", true)
+
+	// Request expansion with a reason.
+	resp := env.do("POST", fmt.Sprintf("/api/tasks/%s/expand", taskID), sc.AgentToken, map[string]any{
+		"service": "mock.echo", "action": "other", "auto_execute": true,
+		"reason": "Need to run other action for analysis",
+	})
+	mustStatus(t, resp, http.StatusAccepted)
+
+	// Approve the expansion.
+	resp = sc.session.do("POST", fmt.Sprintf("/api/tasks/%s/expand/approve", taskID), nil)
+	mustStatus(t, resp, http.StatusOK)
+
+	// Fetch the task and verify the expanded action has expected_use set to the reason.
+	resp = env.do("GET", fmt.Sprintf("/api/tasks/%s", taskID), sc.AgentToken, nil)
+	body := mustStatus(t, resp, http.StatusOK)
+	actions := arr(t, body, "authorized_actions")
+
+	found := false
+	for _, raw := range actions {
+		a, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if a["action"] == "other" {
+			found = true
+			er, _ := a["expansion_rationale"].(string)
+			if er != "Need to run other action for analysis" {
+				t.Errorf("expansion_rationale: got %q, want expansion reason", er)
+			}
+		}
+	}
+	if !found {
+		t.Error("expanded action 'other' not found in authorized_actions")
+	}
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
 func TestApprovals_Deny(t *testing.T) {
-	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
+	env := newTestEnv(t, newMockAdapter("mock.deny", "run"))
 	sc := newScenario(t, env, "automation")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "google", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
+
+	taskID := sc.createApprovedTask(t, env, "mock.deny", "run", false)
 
 	reqID := fmt.Sprintf("req-deny-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "google.gmail", "send")
+	sc.gatewayRequestWithTask(env, reqID, "mock.deny", "run", taskID)
 
 	// Deny it
 	resp := sc.session.do("POST", fmt.Sprintf("/api/approvals/%s/deny", reqID), nil)
@@ -503,12 +528,10 @@ func TestApprovals_Approve_WithMockAdapter(t *testing.T) {
 
 	sc := newScenario(t, env, "ci")
 
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.ok", []byte("cred")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
+	taskID := sc.createApprovedTask(t, env, "mock.ok", "run", false)
 
 	reqID := fmt.Sprintf("req-app-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "mock.ok", "run")
+	sc.gatewayRequestWithTask(env, reqID, "mock.ok", "run", taskID)
 
 	// Approve it — should execute successfully
 	resp := sc.session.do("POST", fmt.Sprintf("/api/approvals/%s/approve", reqID), nil)
@@ -522,14 +545,13 @@ func TestApprovals_Approve_WithMockAdapter(t *testing.T) {
 }
 
 func TestApprovals_Approve_WrongUser_Forbidden(t *testing.T) {
-	env := newTestEnv(t, newMockAdapter("google.gmail", "send"))
+	env := newTestEnv(t, newMockAdapter("mock.forbidden", "run"))
 	sc1 := newScenario(t, env, "bot1")
-	if err := env.Vault.Set(context.Background(), sc1.session.UserID, "google", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
+
+	taskID := sc1.createApprovedTask(t, env, "mock.forbidden", "run", false)
 
 	reqID := fmt.Sprintf("req-forbidden-%s", randSuffix())
-	sc1.gatewayRequest(env, reqID, "google.gmail", "send")
+	sc1.gatewayRequestWithTask(env, reqID, "mock.forbidden", "run", taskID)
 
 	// Different user tries to approve
 	s2 := newSession(t, env)
@@ -628,9 +650,10 @@ func TestAudit_AllOutcomesRecorded(t *testing.T) {
 	// Block outcome
 	sc.gatewayRequest(env, fmt.Sprintf("req-blk-%s", randSuffix()), "mock.svc", "blocked-action")
 
-	// No restriction on approved-action → per-request approval (pending)
+	// Task with auto_execute=false → per-request approval (pending)
+	taskID := sc.createApprovedTask(t, env, "mock.svc", "approved-action", false)
 	reqID := fmt.Sprintf("req-pend-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "mock.svc", "approved-action")
+	sc.gatewayRequestWithTask(env, reqID, "mock.svc", "approved-action", taskID)
 
 	// Deny → denied
 	sc.session.do("POST", fmt.Sprintf("/api/approvals/%s/deny", reqID), nil)

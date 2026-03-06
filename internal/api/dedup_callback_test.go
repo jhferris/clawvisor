@@ -73,19 +73,17 @@ func TestGateway_Dedup_PendingRequest(t *testing.T) {
 	// status=pending without queueing a duplicate approval.
 	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "dedup-pend")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-	// No restriction, no task → default is per-request approval (pending)
+
+	taskID := sc.createApprovedTask(t, env, "mock.svc", "run", false)
 
 	reqID := fmt.Sprintf("dedup-pend-%s", randSuffix())
 
-	first := sc.gatewayRequest(env, reqID, "mock.svc", "run")
+	first := sc.gatewayRequestWithTask(env, reqID, "mock.svc", "run", taskID)
 	if first["status"] != "pending" {
 		t.Fatalf("first request: expected pending, got %v", first["status"])
 	}
 
-	second := sc.gatewayRequest(env, reqID, "mock.svc", "run")
+	second := sc.gatewayRequestWithTask(env, reqID, "mock.svc", "run", taskID)
 	if second["status"] != "pending" {
 		t.Errorf("dedup pending: expected status=pending, got %v", second["status"])
 	}
@@ -189,13 +187,11 @@ func TestGateway_Status_Blocked(t *testing.T) {
 func TestGateway_Status_Pending(t *testing.T) {
 	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "status-pend")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-	// No restriction, no task → default pending
+
+	taskID := sc.createApprovedTask(t, env, "mock.svc", "run", false)
 
 	reqID := fmt.Sprintf("status-pend-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "mock.svc", "run")
+	sc.gatewayRequestWithTask(env, reqID, "mock.svc", "run", taskID)
 
 	resp := env.do("GET", fmt.Sprintf("/api/gateway/request/%s/status", reqID), sc.AgentToken, nil)
 	body := mustStatus(t, resp, http.StatusOK)
@@ -228,13 +224,11 @@ func TestGateway_Status_UpdatesAfterDeny(t *testing.T) {
 	// A pending request, once denied, should show status=denied on the status endpoint.
 	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
 	sc := newScenario(t, env, "status-deny")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-	// No restriction, no task → default pending
+
+	taskID := sc.createApprovedTask(t, env, "mock.svc", "run", false)
 
 	reqID := fmt.Sprintf("status-deny-%s", randSuffix())
-	sc.gatewayRequest(env, reqID, "mock.svc", "run")
+	sc.gatewayRequestWithTask(env, reqID, "mock.svc", "run", taskID)
 
 	sc.session.do("POST", fmt.Sprintf("/api/approvals/%s/deny", reqID), nil)
 
@@ -355,10 +349,8 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 	adapter := newMockAdapter("mock.cb-approve", "run").withResult("approve-cb-ok", nil)
 	env := newTestEnv(t, adapter)
 	sc := newScenario(t, env, "cb-approve")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.cb-approve", []byte("cred")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-	// No restriction, no task → default pending
+
+	taskID := sc.createApprovedTask(t, env, "mock.cb-approve", "run", false)
 
 	// Register callback secret
 	cbSecret := registerCallbackSecret(t, env, sc.AgentToken)
@@ -366,13 +358,14 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-approve-%s", randSuffix())
 
-	// Submit → pending
+	// Submit → pending (task has auto_execute=false)
 	resp := env.do("POST", "/api/gateway/request", sc.AgentToken, map[string]any{
 		"service":    "mock.cb-approve",
 		"action":     "run",
 		"params":     map[string]any{},
 		"reason":     "test callback approve",
 		"request_id": reqID,
+		"task_id":    taskID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
 	})
 	firstBody := mustStatus(t, resp, http.StatusAccepted)
@@ -405,12 +398,10 @@ func TestApprovals_Approve_CallbackHMACSigned(t *testing.T) {
 
 func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 	// When a pending request is denied, the callback must be HMAC-signed.
-	env := newTestEnv(t, newMockAdapter("mock.svc", "run"))
+	env := newTestEnv(t, newMockAdapter("mock.cb-deny", "run"))
 	sc := newScenario(t, env, "cb-deny")
-	if err := env.Vault.Set(context.Background(), sc.session.UserID, "mock.svc", []byte("dummy")); err != nil {
-		t.Fatalf("vault seed: %v", err)
-	}
-	// No restriction, no task → default pending
+
+	taskID := sc.createApprovedTask(t, env, "mock.cb-deny", "run", false)
 
 	// Register callback secret
 	cbSecret := registerCallbackSecret(t, env, sc.AgentToken)
@@ -418,13 +409,14 @@ func TestApprovals_Deny_CallbackHMACSigned(t *testing.T) {
 	cbSrv, cbCh := newCallbackServer(t)
 	reqID := fmt.Sprintf("cb-deny-%s", randSuffix())
 
-	// Submit → pending
+	// Submit → pending (task has auto_execute=false)
 	resp := env.do("POST", "/api/gateway/request", sc.AgentToken, map[string]any{
-		"service":    "mock.svc",
+		"service":    "mock.cb-deny",
 		"action":     "run",
 		"params":     map[string]any{},
 		"reason":     "test callback deny",
 		"request_id": reqID,
+		"task_id":    taskID,
 		"context":    map[string]any{"callback_url": cbSrv.URL + "/inbound"},
 	})
 	firstBody := mustStatus(t, resp, http.StatusAccepted)

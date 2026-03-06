@@ -176,11 +176,12 @@ type AuditEntry struct {
 
 // TaskAction represents a single authorized action within a task scope.
 type TaskAction struct {
-	Service         string          `json:"service"`
-	Action          string          `json:"action"`          // specific action or "*"
-	AutoExecute     bool            `json:"auto_execute"`
-	ResponseFilters json.RawMessage `json:"response_filters,omitempty"`
-	ExpectedUse     string          `json:"expected_use,omitempty"`
+	Service            string          `json:"service"`
+	Action             string          `json:"action"`          // specific action or "*"
+	AutoExecute        bool            `json:"auto_execute"`
+	ResponseFilters    json.RawMessage `json:"response_filters,omitempty"`
+	ExpectedUse        string          `json:"expected_use,omitempty"`
+	ExpansionRationale string          `json:"expansion_rationale,omitempty"` // set from PendingReason when scope expansion is approved
 }
 
 // Task represents a task-scoped authorization.

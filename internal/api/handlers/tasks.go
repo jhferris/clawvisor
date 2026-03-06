@@ -606,6 +606,11 @@ func (h *TasksHandler) ExpandApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Carry the expansion rationale into the action for intent verification.
+	if task.PendingReason != "" {
+		task.PendingAction.ExpansionRationale = task.PendingReason
+	}
+
 	// Add the pending action to authorized_actions.
 	newActions := append(task.AuthorizedActions, *task.PendingAction)
 	expiresAt := time.Now().UTC().Add(time.Duration(task.ExpiresInSeconds) * time.Second)
@@ -788,6 +793,11 @@ func (h *TasksHandler) ExpandApproveByTaskID(ctx context.Context, taskID, userID
 	}
 	if task.Status != "pending_scope_expansion" || task.PendingAction == nil {
 		return fmt.Errorf("task has no pending scope expansion")
+	}
+
+	// Carry the expansion rationale into the action for intent verification.
+	if task.PendingReason != "" {
+		task.PendingAction.ExpansionRationale = task.PendingReason
 	}
 
 	newActions := append(task.AuthorizedActions, *task.PendingAction)

@@ -177,11 +177,18 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Step 2: Hardcoded approval check ─────────────────────────────────────
+	// ── Step 2: Task ID required ─────────────────────────────────────────────
+	if req.TaskID == "" {
+		writeError(w, http.StatusBadRequest, "TASK_REQUIRED",
+			"task_id is required; create a task first via POST /api/tasks")
+		return
+	}
+
+	// ── Step 3: Hardcoded approval check ─────────────────────────────────────
 	hardcoded := RequiresHardcodedApproval(serviceType, req.Action)
 
-	// ── Step 3: Task scope enforcement ───────────────────────────────────────
-	if req.TaskID != "" {
+	// ── Step 4: Task scope enforcement ───────────────────────────────────────
+	{
 		task, taskErr := h.store.GetTask(ctx, req.TaskID)
 		if taskErr != nil {
 			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "task not found")
@@ -231,18 +238,20 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			taskIDPtr := &req.TaskID
 
 			// ── Intent verification ──────────────────────────────────────
-			var expectedUse string
+			var expectedUse, expansionRationale string
 			if match.MatchedAction != nil {
 				expectedUse = match.MatchedAction.ExpectedUse
+				expansionRationale = match.MatchedAction.ExpansionRationale
 			}
 			verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
-				TaskPurpose: task.Purpose,
-				ExpectedUse: expectedUse,
-				Service:     req.Service,
-				Action:      req.Action,
-				Params:      req.Params,
-				Reason:      req.Reason,
-				TaskID:      req.TaskID,
+				TaskPurpose:        task.Purpose,
+				ExpectedUse:        expectedUse,
+				ExpansionRationale: expansionRationale,
+				Service:            req.Service,
+				Action:             req.Action,
+				Params:             req.Params,
+				Reason:             req.Reason,
+				TaskID:             req.TaskID,
 			})
 			if verdict != nil && !verdict.Allow {
 				dur := int(time.Since(start).Milliseconds())
@@ -380,8 +389,8 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// In scope + (!auto_execute || hardcoded) → falls through to per-request approval below
 	}
 
-	// ── Step 4: Per-request approval (default path) ──────────────────────────
-	// This covers: no task_id, or task in-scope but not auto-execute, or hardcoded approval.
+	// ── Step 5: Per-request approval ─────────────────────────────────────────
+	// Task in-scope but not auto-execute, or hardcoded approval.
 
 	// Reject unknown services immediately.
 	approveAdapter, ok := h.adapterReg.Get(serviceType)
@@ -438,10 +447,8 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Route to per-request approval.
 	middleware.AddLogField(ctx, "decision", "approve")
 	middleware.AddLogField(ctx, "outcome", "pending")
-	e := baseEntry("approve", "pending", nil)
-	if req.TaskID != "" {
-		e.TaskID = &req.TaskID
-	}
+	taskIDPtr := &req.TaskID
+	e := baseEntry("approve", "pending", taskIDPtr)
 	e.DurationMS = int(time.Since(start).Milliseconds())
 	if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 		h.logger.Warn("audit log failed", "err", logErr)

@@ -25,13 +25,14 @@ type VerificationVerdict struct {
 
 // VerifyRequest contains the data needed for intent verification.
 type VerifyRequest struct {
-	TaskPurpose string
-	ExpectedUse string // from task's authorized_actions; empty → check params against reason only
-	Service     string
-	Action      string
-	Params      map[string]any
-	Reason      string
-	TaskID      string // cache key component
+	TaskPurpose        string
+	ExpectedUse        string // from task's authorized_actions; empty → check params against reason only
+	ExpansionRationale string // from approved scope expansion; empty if action was in original task
+	Service            string
+	Action             string
+	Params             map[string]any
+	Reason             string
+	TaskID             string // cache key component
 }
 
 // Verifier checks whether a gateway request is consistent with the approved task.

@@ -93,6 +93,46 @@ func TestBuildVerificationUserMessage_MultiAccountAlias(t *testing.T) {
 	}
 }
 
+func TestBuildVerificationUserMessage_WithExpansionRationale(t *testing.T) {
+	req := VerifyRequest{
+		TaskPurpose:        "Manage email inbox",
+		ExpectedUse:        "Read individual emails",
+		ExpansionRationale: "Need to send replies to flagged emails",
+		Service:            "google.gmail",
+		Action:             "send",
+		Params:             map[string]any{"to": "bob@example.com"},
+		Reason:             "Replying to flagged email",
+	}
+	msg := buildVerificationUserMessage(req)
+	if !contains(msg, "Read individual emails") {
+		t.Error("expected expected_use in message")
+	}
+	if !contains(msg, "Need to send replies to flagged emails") {
+		t.Error("expected expansion rationale in message")
+	}
+	if !contains(msg, "Approved scope expansion rationale") {
+		t.Error("expected expansion rationale label in message")
+	}
+}
+
+func TestBuildVerificationUserMessage_ExpansionOnly(t *testing.T) {
+	req := VerifyRequest{
+		TaskPurpose:        "Manage email inbox",
+		ExpansionRationale: "Need to send replies to flagged emails",
+		Service:            "google.gmail",
+		Action:             "send",
+		Params:             map[string]any{"to": "bob@example.com"},
+		Reason:             "Replying to flagged email",
+	}
+	msg := buildVerificationUserMessage(req)
+	if !contains(msg, "not specified") {
+		t.Error("expected 'not specified' for missing expected_use")
+	}
+	if !contains(msg, "Need to send replies to flagged emails") {
+		t.Error("expected expansion rationale in message")
+	}
+}
+
 func TestBuildVerificationUserMessage_NoExpectedUse(t *testing.T) {
 	req := VerifyRequest{
 		TaskPurpose: "Check calendar",
