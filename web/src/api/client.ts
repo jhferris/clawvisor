@@ -488,6 +488,11 @@ export const api = {
     code_challenge: string
     scope: string
   }) => post<{ redirect_uri: string }>('/oauth/authorize', params),
+  oauthDeny: (params: {
+    client_id: string
+    redirect_uri: string
+    state: string
+  }) => post<{ redirect_uri: string }>('/oauth/deny', params),
   tasks: {
     list: () => get<{ tasks: Task[]; total: number }>('/api/tasks'),
     approve: (id: string) =>

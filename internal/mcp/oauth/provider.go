@@ -68,45 +68,6 @@ func (p *Provider) Register(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Authorize handles GET /oauth/authorize.
-// If the user is logged in (valid JWT cookie or bearer token), it redirects
-// to the frontend consent page. Otherwise it redirects to login first.
-func (p *Provider) Authorize(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	clientID := q.Get("client_id")
-	redirectURI := q.Get("redirect_uri")
-	state := q.Get("state")
-	codeChallenge := q.Get("code_challenge")
-	codeChallengeMethod := q.Get("code_challenge_method")
-	scope := q.Get("scope")
-
-	if clientID == "" || redirectURI == "" || codeChallenge == "" {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "missing required parameters")
-		return
-	}
-	if codeChallengeMethod != "S256" {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "only S256 code_challenge_method is supported")
-		return
-	}
-
-	// Validate client exists and redirect_uri is registered.
-	client, err := p.st.GetOAuthClient(r.Context(), clientID)
-	if err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown client_id")
-		return
-	}
-	if !uriRegistered(client.RedirectURIs, redirectURI) {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "redirect_uri not registered")
-		return
-	}
-
-	// Redirect to frontend consent page, preserving all OAuth params.
-	consentURL := p.baseURL + "/oauth/authorize?" + r.URL.RawQuery
-	_ = scope
-	_ = state
-	http.Redirect(w, r, consentURL, http.StatusFound)
-}
-
 // AuthorizeApprove handles POST /oauth/authorize (user approves the consent).
 // Expects a JSON body with the OAuth params + a valid user JWT in the Authorization header.
 func (p *Provider) AuthorizeApprove(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +145,44 @@ func (p *Provider) AuthorizeApprove(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AuthorizeDeny handles POST /oauth/deny (user denies consent).
+// Validates the redirect URI against the registered client before redirecting.
+func (p *Provider) AuthorizeDeny(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID    string `json:"client_id"`
+		RedirectURI string `json:"redirect_uri"`
+		State       string `json:"state"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	// Validate client + redirect URI to prevent open redirect.
+	client, err := p.st.GetOAuthClient(r.Context(), req.ClientID)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown client_id")
+		return
+	}
+	if !uriRegistered(client.RedirectURIs, req.RedirectURI) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "redirect_uri not registered")
+		return
+	}
+
+	redirectURL, _ := url.Parse(req.RedirectURI)
+	q := redirectURL.Query()
+	q.Set("error", "access_denied")
+	if req.State != "" {
+		q.Set("state", req.State)
+	}
+	redirectURL.RawQuery = q.Encode()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"redirect_uri": redirectURL.String(),
+	})
+}
+
 // Token handles POST /oauth/token (authorization code exchange).
 func (p *Provider) Token(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -206,16 +205,13 @@ func (p *Provider) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up and validate the authorization code.
+	// Atomically consume the authorization code (one-time use).
 	codeHash := auth.HashToken(code)
-	authCode, err := p.st.GetAuthorizationCode(r.Context(), codeHash)
+	authCode, err := p.st.ConsumeAuthorizationCode(r.Context(), codeHash)
 	if err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired authorization code")
 		return
 	}
-
-	// Delete the code immediately (one-time use).
-	p.st.DeleteAuthorizationCode(r.Context(), codeHash)
 
 	// Validate code hasn't expired.
 	if time.Now().After(authCode.ExpiresAt) {

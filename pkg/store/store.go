@@ -89,8 +89,9 @@ type Store interface {
 	CreateOAuthClient(ctx context.Context, client *OAuthClient) error
 	GetOAuthClient(ctx context.Context, clientID string) (*OAuthClient, error)
 	SaveAuthorizationCode(ctx context.Context, code *OAuthAuthorizationCode) error
-	GetAuthorizationCode(ctx context.Context, codeHash string) (*OAuthAuthorizationCode, error)
-	DeleteAuthorizationCode(ctx context.Context, codeHash string) error
+	// ConsumeAuthorizationCode atomically retrieves and deletes an authorization
+	// code. Returns ErrNotFound if the code does not exist (or was already consumed).
+	ConsumeAuthorizationCode(ctx context.Context, codeHash string) (*OAuthAuthorizationCode, error)
 
 	// Health
 	Ping(ctx context.Context) error

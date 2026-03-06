@@ -48,6 +48,12 @@ func executeTool(
 		internalReq.Header.Set("Authorization", auth)
 	}
 
+	// Set path values so handlers can use r.PathValue() (populated by ServeMux
+	// during normal routing, but we bypass the mux here).
+	for k, v := range route.pathValues {
+		internalReq.SetPathValue(k, v)
+	}
+
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, internalReq)
 
@@ -84,9 +90,10 @@ func executeTool(
 
 // internalRoute describes the HTTP method, path, and mux pattern for an internal request.
 type internalRoute struct {
-	method  string
-	path    string
-	pattern string // the ServeMux pattern used to look up the handler
+	method     string
+	path       string
+	pattern    string            // the ServeMux pattern used to look up the handler
+	pathValues map[string]string // path parameters for SetPathValue
 }
 
 // buildInternalRequest maps an MCP tool name + arguments to an HTTP route + body.
@@ -114,29 +121,31 @@ func buildInternalRequest(toolName string, arguments json.RawMessage) (internalR
 
 	switch toolName {
 	case "fetch_catalog":
-		return internalRoute{"GET", "/api/skill/catalog", "GET /api/skill/catalog"}, nil, nil
+		return internalRoute{"GET", "/api/skill/catalog", "GET /api/skill/catalog", nil}, nil, nil
 
 	case "create_task":
-		return internalRoute{"POST", "/api/tasks", "POST /api/tasks"}, arguments, nil
+		return internalRoute{"POST", "/api/tasks", "POST /api/tasks", nil}, arguments, nil
 
 	case "get_task":
 		id := getString("task_id")
-		if id == "" {
-			return internalRoute{}, nil, fmt.Errorf("task_id is required")
+		if err := validatePathParam(id, "task_id"); err != nil {
+			return internalRoute{}, nil, err
 		}
-		return internalRoute{"GET", "/api/tasks/" + id, "GET /api/tasks/{id}"}, nil, nil
+		return internalRoute{"GET", "/api/tasks/" + id, "GET /api/tasks/{id}",
+			map[string]string{"id": id}}, nil, nil
 
 	case "complete_task":
 		id := getString("task_id")
-		if id == "" {
-			return internalRoute{}, nil, fmt.Errorf("task_id is required")
+		if err := validatePathParam(id, "task_id"); err != nil {
+			return internalRoute{}, nil, err
 		}
-		return internalRoute{"POST", "/api/tasks/" + id + "/complete", "POST /api/tasks/{id}/complete"}, nil, nil
+		return internalRoute{"POST", "/api/tasks/" + id + "/complete", "POST /api/tasks/{id}/complete",
+			map[string]string{"id": id}}, nil, nil
 
 	case "expand_task":
 		id := getString("task_id")
-		if id == "" {
-			return internalRoute{}, nil, fmt.Errorf("task_id is required")
+		if err := validatePathParam(id, "task_id"); err != nil {
+			return internalRoute{}, nil, err
 		}
 		// Remove task_id from the body — the handler reads it from the path.
 		body := make(map[string]json.RawMessage)
@@ -146,12 +155,25 @@ func buildInternalRequest(toolName string, arguments json.RawMessage) (internalR
 			}
 		}
 		b, _ := json.Marshal(body)
-		return internalRoute{"POST", "/api/tasks/" + id + "/expand", "POST /api/tasks/{id}/expand"}, b, nil
+		return internalRoute{"POST", "/api/tasks/" + id + "/expand", "POST /api/tasks/{id}/expand",
+			map[string]string{"id": id}}, b, nil
 
 	case "gateway_request":
-		return internalRoute{"POST", "/api/gateway/request", "POST /api/gateway/request"}, arguments, nil
+		return internalRoute{"POST", "/api/gateway/request", "POST /api/gateway/request", nil}, arguments, nil
 
 	default:
 		return internalRoute{}, nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
+}
+
+// validatePathParam checks that a path parameter is non-empty and contains
+// no path separators or other metacharacters.
+func validatePathParam(value, name string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if strings.ContainsAny(value, "/\\..") {
+		return fmt.Errorf("%s contains invalid characters", name)
+	}
+	return nil
 }

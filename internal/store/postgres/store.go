@@ -1003,23 +1003,17 @@ func (s *Store) SaveAuthorizationCode(ctx context.Context, code *store.OAuthAuth
 	return err
 }
 
-func (s *Store) GetAuthorizationCode(ctx context.Context, codeHash string) (*store.OAuthAuthorizationCode, error) {
+func (s *Store) ConsumeAuthorizationCode(ctx context.Context, codeHash string) (*store.OAuthAuthorizationCode, error) {
 	c := &store.OAuthAuthorizationCode{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT code_hash, client_id, user_id, redirect_uri, code_challenge, scope, expires_at, created_at
-		 FROM oauth_authorization_codes WHERE code_hash = $1`,
+		`DELETE FROM oauth_authorization_codes WHERE code_hash = $1
+		 RETURNING code_hash, client_id, user_id, redirect_uri, code_challenge, scope, expires_at, created_at`,
 		codeHash,
 	).Scan(&c.CodeHash, &c.ClientID, &c.UserID, &c.RedirectURI, &c.CodeChallenge, &c.Scope, &c.ExpiresAt, &c.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}
 	return c, err
-}
-
-func (s *Store) DeleteAuthorizationCode(ctx context.Context, codeHash string) error {
-	_, err := s.pool.Exec(ctx,
-		`DELETE FROM oauth_authorization_codes WHERE code_hash = $1`, codeHash)
-	return err
 }
 
 func mustJSON(v any) string {

@@ -221,6 +221,9 @@ func (s *Server) routes() http.Handler {
 	oauthRL := newKeyedLimiterFromBucket(rlCfg.OAuth)
 	policyRL := newKeyedLimiterFromBucket(rlCfg.PolicyAPI)
 
+	ipKeyFn := func(r *http.Request) string {
+		return r.RemoteAddr
+	}
 	agentKeyFn := func(r *http.Request) string {
 		if a := middleware.AgentFromContext(r.Context()); a != nil {
 			return a.ID
@@ -364,13 +367,15 @@ func (s *Server) routes() http.Handler {
 		}
 
 		// Build handler map for tool execution — each tool calls an existing handler.
+		// No auth middleware here: the MCP handler already authenticates the agent
+		// and injects it into the context before tool execution.
 		mcpHandlers := map[string]http.Handler{
-			"GET /api/skill/catalog":       agent(skillHandler.Catalog),
-			"POST /api/tasks":              agent(tasksHandler.Create),
-			"GET /api/tasks/{id}":          agent(tasksHandler.Get),
-			"POST /api/tasks/{id}/complete": agent(tasksHandler.Complete),
-			"POST /api/tasks/{id}/expand":  agent(tasksHandler.Expand),
-			"POST /api/gateway/request":    agentRateLimited(gatewayHandler.HandleRequest),
+			"GET /api/skill/catalog":        http.HandlerFunc(skillHandler.Catalog),
+			"POST /api/tasks":               http.HandlerFunc(tasksHandler.Create),
+			"GET /api/tasks/{id}":           http.HandlerFunc(tasksHandler.Get),
+			"POST /api/tasks/{id}/complete": http.HandlerFunc(tasksHandler.Complete),
+			"POST /api/tasks/{id}/expand":   http.HandlerFunc(tasksHandler.Expand),
+			"POST /api/gateway/request":     http.HandlerFunc(gatewayHandler.HandleRequest),
 		}
 
 		mcpServer := mcp.NewServer(sessionTTL, mcpHandlers, s.logger)
@@ -379,14 +384,16 @@ func (s *Server) routes() http.Handler {
 		mcpHandler := handlers.NewMCPHandler(mcpServer, s.store, baseURL)
 		mux.HandleFunc("POST /mcp", mcpHandler.Handle)
 
-		// OAuth 2.1 (for MCP clients — no auth required on discovery/registration)
+		// OAuth 2.1 (for MCP clients)
 		oauthProvider := mcpoauth.NewProvider(s.store, s.jwtSvc, baseURL, s.logger)
 		mux.HandleFunc("GET /.well-known/oauth-protected-resource", oauthProvider.ProtectedResourceMetadata)
 		mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthProvider.AuthorizationServerMetadata)
-		mux.HandleFunc("POST /oauth/register", oauthProvider.Register)
+		// Rate limit registration to prevent database flooding.
+		mux.Handle("POST /oauth/register", middleware.RateLimit(oauthRL, ipKeyFn, rlCfg.OAuth.Limit)(http.HandlerFunc(oauthProvider.Register)))
 		// GET /oauth/authorize is handled by the SPA (React consent page).
 		// The frontend POSTs to POST /oauth/authorize on approval.
 		mux.HandleFunc("POST /oauth/authorize", oauthProvider.AuthorizeApprove)
+		mux.HandleFunc("POST /oauth/deny", oauthProvider.AuthorizeDeny)
 		mux.HandleFunc("POST /oauth/token", oauthProvider.Token)
 	}
 

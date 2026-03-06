@@ -1119,10 +1119,16 @@ func (s *Store) SaveAuthorizationCode(ctx context.Context, code *store.OAuthAuth
 	return err
 }
 
-func (s *Store) GetAuthorizationCode(ctx context.Context, codeHash string) (*store.OAuthAuthorizationCode, error) {
+func (s *Store) ConsumeAuthorizationCode(ctx context.Context, codeHash string) (*store.OAuthAuthorizationCode, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	c := &store.OAuthAuthorizationCode{}
 	var expiresAt, createdAt string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT code_hash, client_id, user_id, redirect_uri, code_challenge, scope, expires_at, created_at
 		 FROM oauth_authorization_codes WHERE code_hash = ?`,
 		codeHash,
@@ -1133,15 +1139,18 @@ func (s *Store) GetAuthorizationCode(ctx context.Context, codeHash string) (*sto
 	if err != nil {
 		return nil, err
 	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE code_hash = ?`, codeHash); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
 	c.ExpiresAt = parseTime(expiresAt)
 	c.CreatedAt = parseTime(createdAt)
 	return c, nil
-}
-
-func (s *Store) DeleteAuthorizationCode(ctx context.Context, codeHash string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM oauth_authorization_codes WHERE code_hash = ?`, codeHash)
-	return err
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
