@@ -6,7 +6,6 @@ export default function OAuthAuthorize() {
   const [searchParams] = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const [redirecting, setRedirecting] = useState(false)
-  const [showClose, setShowClose] = useState(false)
 
   const clientId = searchParams.get('client_id') ?? ''
   const redirectUri = searchParams.get('redirect_uri') ?? ''
@@ -14,11 +13,10 @@ export default function OAuthAuthorize() {
   const codeChallenge = searchParams.get('code_challenge') ?? ''
   const scope = searchParams.get('scope') ?? ''
 
-  // If the redirect opens another app (e.g. Claude), this tab stays open.
-  // Show "you can close this page" after a short delay.
+  const [showClose, setShowClose] = useState(false)
   useEffect(() => {
     if (!redirecting) return
-    const timer = setTimeout(() => setShowClose(true), 2000)
+    const timer = setTimeout(() => setShowClose(true), 5000)
     return () => clearTimeout(timer)
   }, [redirecting])
 
