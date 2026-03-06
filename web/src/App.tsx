@@ -8,6 +8,7 @@ import VerifyEmail from './pages/VerifyEmail'
 import SetupAuth from './pages/SetupAuth'
 import TOTPVerify from './pages/TOTPVerify'
 import Dashboard from './pages/Dashboard'
+import OAuthAuthorize from './pages/OAuthAuthorize'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, authMode } = useAuth()
@@ -43,6 +44,14 @@ export default function App() {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/setup-auth" element={<SetupAuth />} />
       <Route path="/totp-verify" element={<TOTPVerify />} />
+      <Route
+        path="/oauth/authorize"
+        element={
+          <RequireAuth>
+            <OAuthAuthorize />
+          </RequireAuth>
+        }
+      />
       <Route
         path="/dashboard/*"
         element={

@@ -481,6 +481,13 @@ export const api = {
   overview: {
     get: () => get<OverviewData>('/api/overview'),
   },
+  oauthApprove: (params: {
+    client_id: string
+    redirect_uri: string
+    state: string
+    code_challenge: string
+    scope: string
+  }) => post<{ redirect_uri: string }>('/oauth/authorize', params),
   tasks: {
     list: () => get<{ tasks: Task[]; total: number }>('/api/tasks'),
     approve: (id: string) =>

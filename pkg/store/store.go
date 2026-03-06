@@ -85,6 +85,13 @@ type Store interface {
 	SaveNotificationMessage(ctx context.Context, targetType, targetID, channel, messageID string) error
 	GetNotificationMessage(ctx context.Context, targetType, targetID, channel string) (string, error)
 
+	// OAuth (MCP client registration + authorization codes)
+	CreateOAuthClient(ctx context.Context, client *OAuthClient) error
+	GetOAuthClient(ctx context.Context, clientID string) (*OAuthClient, error)
+	SaveAuthorizationCode(ctx context.Context, code *OAuthAuthorizationCode) error
+	GetAuthorizationCode(ctx context.Context, codeHash string) (*OAuthAuthorizationCode, error)
+	DeleteAuthorizationCode(ctx context.Context, codeHash string) error
+
 	// Health
 	Ping(ctx context.Context) error
 	Close() error
@@ -240,4 +247,24 @@ type ActivityBucket struct {
 	Bucket  time.Time `json:"bucket"`
 	Outcome string    `json:"outcome"`
 	Count   int       `json:"count"`
+}
+
+// OAuthClient is a dynamically registered OAuth 2.1 client (RFC 7591).
+type OAuthClient struct {
+	ID           string    `json:"client_id"`
+	ClientName   string    `json:"client_name"`
+	RedirectURIs []string  `json:"redirect_uris"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// OAuthAuthorizationCode is a one-time-use authorization code for the OAuth 2.1 flow.
+type OAuthAuthorizationCode struct {
+	CodeHash      string    `json:"-"`
+	ClientID      string    `json:"client_id"`
+	UserID        string    `json:"user_id"`
+	RedirectURI   string    `json:"redirect_uri"`
+	CodeChallenge string    `json:"code_challenge"`
+	Scope         string    `json:"scope"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api/handlers"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
+	"github.com/clawvisor/clawvisor/internal/mcp"
+	mcpoauth "github.com/clawvisor/clawvisor/internal/mcp/oauth"
 	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
 	"github.com/clawvisor/clawvisor/pkg/config"
 	"github.com/clawvisor/clawvisor/internal/intent"
@@ -48,6 +50,8 @@ type Server struct {
 	// approvalsCleaner is used to stop the background goroutine.
 	approvalsHandler *handlers.ApprovalsHandler
 	tasksHandler     *handlers.TasksHandler
+
+	mcpServer *mcp.Server
 }
 
 // Dependencies is passed to ExtraRoutes so extension handlers can access shared services.
@@ -352,6 +356,39 @@ func (s *Server) routes() http.Handler {
 	})
 	mux.Handle("/skill/", skillFileHandler)
 
+	// MCP endpoint (agent token auth)
+	if s.cfg.MCP.Enabled {
+		sessionTTL := time.Duration(s.cfg.MCP.SessionTTL) * time.Minute
+		if sessionTTL <= 0 {
+			sessionTTL = 24 * time.Hour
+		}
+
+		// Build handler map for tool execution — each tool calls an existing handler.
+		mcpHandlers := map[string]http.Handler{
+			"GET /api/skill/catalog":       agent(skillHandler.Catalog),
+			"POST /api/tasks":              agent(tasksHandler.Create),
+			"GET /api/tasks/{id}":          agent(tasksHandler.Get),
+			"POST /api/tasks/{id}/complete": agent(tasksHandler.Complete),
+			"POST /api/tasks/{id}/expand":  agent(tasksHandler.Expand),
+			"POST /api/gateway/request":    agentRateLimited(gatewayHandler.HandleRequest),
+		}
+
+		mcpServer := mcp.NewServer(sessionTTL, mcpHandlers, s.logger)
+		s.mcpServer = mcpServer
+
+		mcpHandler := handlers.NewMCPHandler(mcpServer, baseURL)
+		mux.Handle("POST /mcp", agent(mcpHandler.Handle))
+
+		// OAuth 2.1 (for MCP clients — no auth required on discovery/registration)
+		oauthProvider := mcpoauth.NewProvider(s.store, s.jwtSvc, baseURL, s.logger)
+		mux.HandleFunc("GET /.well-known/oauth-protected-resource", oauthProvider.ProtectedResourceMetadata)
+		mux.HandleFunc("GET /.well-known/oauth-authorization-server", oauthProvider.AuthorizationServerMetadata)
+		mux.HandleFunc("POST /oauth/register", oauthProvider.Register)
+		mux.HandleFunc("GET /oauth/authorize", oauthProvider.Authorize)
+		mux.HandleFunc("POST /oauth/authorize", oauthProvider.AuthorizeApprove)
+		mux.HandleFunc("POST /oauth/token", oauthProvider.Token)
+	}
+
 	// Extension hook: let cloud/enterprise layers add additional routes.
 	if s.extraRoutes != nil {
 		s.extraRoutes(mux, Dependencies{
@@ -447,6 +484,11 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Run(ctx context.Context) error {
 	// Start background expiry cleanup.
 	go s.approvalsHandler.RunExpiryCleanup(ctx)
+
+	// Start MCP session cleanup.
+	if s.mcpServer != nil {
+		s.mcpServer.StartCleanup(ctx.Done())
+	}
 
 	// Start Telegram inline callback consumer and token cleanup.
 	if tg, ok := s.notifier.(interface {

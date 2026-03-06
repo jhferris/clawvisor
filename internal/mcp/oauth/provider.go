@@ -1,0 +1,299 @@
+package oauth
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/clawvisor/clawvisor/internal/auth"
+	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
+	"github.com/clawvisor/clawvisor/pkg/store"
+)
+
+// Provider implements OAuth 2.1 endpoints for MCP client authentication.
+type Provider struct {
+	st      store.Store
+	jwtSvc  pkgauth.TokenService
+	baseURL string
+	logger  *slog.Logger
+}
+
+// NewProvider creates an OAuth provider.
+func NewProvider(st store.Store, jwtSvc pkgauth.TokenService, baseURL string, logger *slog.Logger) *Provider {
+	return &Provider{st: st, jwtSvc: jwtSvc, baseURL: baseURL, logger: logger}
+}
+
+// Register handles POST /oauth/register (RFC 7591 Dynamic Client Registration).
+func (p *Provider) Register(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientName   string   `json:"client_name"`
+		RedirectURIs []string `json:"redirect_uris"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+	if req.ClientName == "" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "client_name is required")
+		return
+	}
+	if len(req.RedirectURIs) == 0 {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "redirect_uris is required")
+		return
+	}
+
+	client := &store.OAuthClient{
+		ID:           uuid.New().String(),
+		ClientName:   req.ClientName,
+		RedirectURIs: req.RedirectURIs,
+	}
+	if err := p.st.CreateOAuthClient(r.Context(), client); err != nil {
+		p.logger.Error("failed to create oauth client", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to register client")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"client_id":     client.ID,
+		"client_name":   client.ClientName,
+		"redirect_uris": client.RedirectURIs,
+	})
+}
+
+// Authorize handles GET /oauth/authorize.
+// If the user is logged in (valid JWT cookie or bearer token), it redirects
+// to the frontend consent page. Otherwise it redirects to login first.
+func (p *Provider) Authorize(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	clientID := q.Get("client_id")
+	redirectURI := q.Get("redirect_uri")
+	state := q.Get("state")
+	codeChallenge := q.Get("code_challenge")
+	codeChallengeMethod := q.Get("code_challenge_method")
+	scope := q.Get("scope")
+
+	if clientID == "" || redirectURI == "" || codeChallenge == "" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "missing required parameters")
+		return
+	}
+	if codeChallengeMethod != "S256" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "only S256 code_challenge_method is supported")
+		return
+	}
+
+	// Validate client exists and redirect_uri is registered.
+	client, err := p.st.GetOAuthClient(r.Context(), clientID)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown client_id")
+		return
+	}
+	if !uriRegistered(client.RedirectURIs, redirectURI) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "redirect_uri not registered")
+		return
+	}
+
+	// Redirect to frontend consent page, preserving all OAuth params.
+	consentURL := p.baseURL + "/oauth/authorize?" + r.URL.RawQuery
+	_ = scope
+	_ = state
+	http.Redirect(w, r, consentURL, http.StatusFound)
+}
+
+// AuthorizeApprove handles POST /oauth/authorize (user approves the consent).
+// Expects a JSON body with the OAuth params + a valid user JWT in the Authorization header.
+func (p *Provider) AuthorizeApprove(w http.ResponseWriter, r *http.Request) {
+	// Authenticate user via JWT.
+	token := bearerToken(r)
+	if token == "" {
+		writeOAuthError(w, http.StatusUnauthorized, "access_denied", "authentication required")
+		return
+	}
+	claims, err := p.jwtSvc.ValidateToken(token)
+	if err != nil || claims.Purpose != "" {
+		writeOAuthError(w, http.StatusUnauthorized, "access_denied", "invalid or expired token")
+		return
+	}
+
+	var req struct {
+		ClientID      string `json:"client_id"`
+		RedirectURI   string `json:"redirect_uri"`
+		State         string `json:"state"`
+		CodeChallenge string `json:"code_challenge"`
+		Scope         string `json:"scope"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	// Validate client + redirect URI.
+	client, err := p.st.GetOAuthClient(r.Context(), req.ClientID)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "unknown client_id")
+		return
+	}
+	if !uriRegistered(client.RedirectURIs, req.RedirectURI) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "redirect_uri not registered")
+		return
+	}
+
+	// Generate authorization code.
+	codeBytes := make([]byte, 32)
+	if _, err := rand.Read(codeBytes); err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to generate code")
+		return
+	}
+	code := hex.EncodeToString(codeBytes)
+
+	// Store hashed code.
+	authCode := &store.OAuthAuthorizationCode{
+		CodeHash:      auth.HashToken(code),
+		ClientID:      req.ClientID,
+		UserID:        claims.UserID,
+		RedirectURI:   req.RedirectURI,
+		CodeChallenge: req.CodeChallenge,
+		Scope:         req.Scope,
+		ExpiresAt:     time.Now().Add(5 * time.Minute),
+	}
+	if err := p.st.SaveAuthorizationCode(r.Context(), authCode); err != nil {
+		p.logger.Error("failed to save authorization code", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to save authorization code")
+		return
+	}
+
+	// Return the redirect URL for the frontend to navigate to.
+	redirectURL, _ := url.Parse(req.RedirectURI)
+	q := redirectURL.Query()
+	q.Set("code", code)
+	if req.State != "" {
+		q.Set("state", req.State)
+	}
+	redirectURL.RawQuery = q.Encode()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"redirect_uri": redirectURL.String(),
+	})
+}
+
+// Token handles POST /oauth/token (authorization code exchange).
+func (p *Provider) Token(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "invalid form body")
+		return
+	}
+
+	grantType := r.FormValue("grant_type")
+	code := r.FormValue("code")
+	clientID := r.FormValue("client_id")
+	redirectURI := r.FormValue("redirect_uri")
+	codeVerifier := r.FormValue("code_verifier")
+
+	if grantType != "authorization_code" {
+		writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "only authorization_code is supported")
+		return
+	}
+	if code == "" || clientID == "" || redirectURI == "" || codeVerifier == "" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "missing required parameters")
+		return
+	}
+
+	// Look up and validate the authorization code.
+	codeHash := auth.HashToken(code)
+	authCode, err := p.st.GetAuthorizationCode(r.Context(), codeHash)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "invalid or expired authorization code")
+		return
+	}
+
+	// Delete the code immediately (one-time use).
+	p.st.DeleteAuthorizationCode(r.Context(), codeHash)
+
+	// Validate code hasn't expired.
+	if time.Now().After(authCode.ExpiresAt) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "authorization code expired")
+		return
+	}
+
+	// Validate client_id and redirect_uri match.
+	if authCode.ClientID != clientID {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "client_id mismatch")
+		return
+	}
+	if authCode.RedirectURI != redirectURI {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "redirect_uri mismatch")
+		return
+	}
+
+	// Validate PKCE.
+	if !VerifyCodeChallenge(codeVerifier, authCode.CodeChallenge) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "PKCE verification failed")
+		return
+	}
+
+	// Generate an agent token (the access token IS a cvis_ agent token).
+	rawToken, err := auth.GenerateAgentToken()
+	if err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to generate token")
+		return
+	}
+
+	// Look up client name for the agent name.
+	client, _ := p.st.GetOAuthClient(r.Context(), clientID)
+	agentName := "MCP Client"
+	if client != nil {
+		agentName = client.ClientName + " (MCP)"
+	}
+
+	_, err = p.st.CreateAgent(r.Context(), authCode.UserID, agentName, auth.HashToken(rawToken))
+	if err != nil {
+		p.logger.Error("failed to create agent for oauth token", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to create agent")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(map[string]string{
+		"access_token": rawToken,
+		"token_type":   "Bearer",
+	})
+}
+
+// uriRegistered checks whether uri is in the registered list.
+func uriRegistered(registered []string, uri string) bool {
+	for _, r := range registered {
+		if r == uri {
+			return true
+		}
+	}
+	return false
+}
+
+// bearerToken extracts a Bearer token from the Authorization header.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) > len(prefix) && h[:len(prefix)] == prefix {
+		return h[len(prefix):]
+	}
+	return ""
+}
+
+// writeOAuthError writes an RFC 6749 error response.
+func writeOAuthError(w http.ResponseWriter, status int, errCode, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":             errCode,
+		"error_description": description,
+	})
+}

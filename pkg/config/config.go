@@ -101,9 +101,11 @@ type LLMConfig struct {
 	Verification VerificationConfig `yaml:"verification"` // Intent verification (runtime)
 }
 
-// MCPConfig holds settings for the MCP server (Phase 8).
+// MCPConfig holds settings for the MCP server.
 type MCPConfig struct {
-	ApprovalTimeout int `yaml:"approval_timeout"` // Reserved for Phase 8: MCP tool call approval timeout in seconds (default 240s)
+	Enabled         bool `yaml:"enabled"`          // default: true
+	ApprovalTimeout int  `yaml:"approval_timeout"` // MCP tool call approval timeout in seconds (default 240s)
+	SessionTTL      int  `yaml:"session_ttl"`      // session TTL in minutes (default: 1440 = 24h)
 }
 
 // RateLimitBucket configures a single rate limit bucket.
@@ -214,7 +216,9 @@ func Default() *Config {
 			},
 		},
 		MCP: MCPConfig{
+			Enabled:         true,
 			ApprovalTimeout: 240,
+			SessionTTL:      1440,
 		},
 		RateLimit: RateLimitConfig{
 			Gateway:   RateLimitBucket{Limit: 60, Window: 60},

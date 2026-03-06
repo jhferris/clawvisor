@@ -1078,6 +1078,72 @@ func (s *Store) GetNotificationMessage(ctx context.Context, targetType, targetID
 	return messageID, nil
 }
 
+// ── OAuth ────────────────────────────────────────────────────────────────────
+
+func (s *Store) CreateOAuthClient(ctx context.Context, client *store.OAuthClient) error {
+	urisJSON, _ := json.Marshal(client.RedirectURIs)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO oauth_clients (id, client_name, redirect_uris) VALUES (?, ?, ?)`,
+		client.ID, client.ClientName, string(urisJSON),
+	)
+	return err
+}
+
+func (s *Store) GetOAuthClient(ctx context.Context, clientID string) (*store.OAuthClient, error) {
+	c := &store.OAuthClient{}
+	var uris, createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, client_name, redirect_uris, created_at FROM oauth_clients WHERE id = ?`,
+		clientID,
+	).Scan(&c.ID, &c.ClientName, &uris, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.CreatedAt = parseTime(createdAt)
+	if err := json.Unmarshal([]byte(uris), &c.RedirectURIs); err != nil {
+		return nil, fmt.Errorf("parsing redirect_uris: %w", err)
+	}
+	return c, nil
+}
+
+func (s *Store) SaveAuthorizationCode(ctx context.Context, code *store.OAuthAuthorizationCode) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO oauth_authorization_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, scope, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		code.CodeHash, code.ClientID, code.UserID, code.RedirectURI, code.CodeChallenge, code.Scope,
+		code.ExpiresAt.UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+func (s *Store) GetAuthorizationCode(ctx context.Context, codeHash string) (*store.OAuthAuthorizationCode, error) {
+	c := &store.OAuthAuthorizationCode{}
+	var expiresAt, createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT code_hash, client_id, user_id, redirect_uri, code_challenge, scope, expires_at, created_at
+		 FROM oauth_authorization_codes WHERE code_hash = ?`,
+		codeHash,
+	).Scan(&c.CodeHash, &c.ClientID, &c.UserID, &c.RedirectURI, &c.CodeChallenge, &c.Scope, &expiresAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.ExpiresAt = parseTime(expiresAt)
+	c.CreatedAt = parseTime(createdAt)
+	return c, nil
+}
+
+func (s *Store) DeleteAuthorizationCode(ctx context.Context, codeHash string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM oauth_authorization_codes WHERE code_hash = ?`, codeHash)
+	return err
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func isDuplicate(err error) bool {
