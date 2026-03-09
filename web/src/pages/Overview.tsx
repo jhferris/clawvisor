@@ -44,11 +44,11 @@ export default function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Bundled overview data — 5s polling for live feel
+  // Bundled overview data (fallback polling; SSE pushes invalidations)
   const { data: overview } = useQuery({
     queryKey: ['overview'],
     queryFn: () => api.overview.get(),
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
   })
 
   // Agents for name resolution

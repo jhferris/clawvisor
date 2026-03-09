@@ -18,6 +18,20 @@ func (rw *responseWriter) WriteHeader(status int) {
 	rw.ResponseWriter.WriteHeader(status)
 }
 
+// Flush implements http.Flusher so SSE and other streaming handlers work
+// through the logging middleware.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying ResponseWriter
+// (needed for SetWriteDeadline on SSE connections).
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // Logging logs method, path, status, duration, and any fields accumulated by
 // handlers via AddLogField. It also sets X-Trace-Id on every response.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {

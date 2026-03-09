@@ -12,6 +12,7 @@ import (
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
+	"github.com/clawvisor/clawvisor/internal/events"
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/pkg/config"
 	"github.com/clawvisor/clawvisor/pkg/notify"
@@ -40,6 +41,7 @@ type TasksHandler struct {
 	cfg        config.Config
 	logger     *slog.Logger
 	baseURL    string
+	eventHub   *events.Hub
 }
 
 func NewTasksHandler(
@@ -50,9 +52,11 @@ func NewTasksHandler(
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
+	eventHub *events.Hub,
 ) *TasksHandler {
 	return &TasksHandler{
 		st: st, vault: v, adapterReg: adapterReg, notifier: notifier, cfg: cfg, logger: logger, baseURL: baseURL,
+		eventHub: eventHub,
 	}
 }
 
@@ -94,21 +98,27 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Validate each authorized action.
 	for _, a := range req.AuthorizedActions {
 		serviceType, serviceAlias := parseServiceAlias(a.Service)
-		adapter, ok := h.adapterReg.Get(serviceType)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-				fmt.Sprintf("unknown service %q", a.Service))
-			return
-		}
-		if !adapterSupportsAction(adapter, a.Action) {
-			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-				fmt.Sprintf("service %q does not support action %q", serviceType, a.Action))
-			return
-		}
-		if !h.serviceActivated(ctx, agent.UserID, serviceType, serviceAlias, adapter) {
-			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-				fmt.Sprintf("service %q is not activated — connect it in the Clawvisor dashboard first", a.Service))
-			return
+
+		// Guard virtual services (file, bash, search, web, agent, unknown) are
+		// scope-only markers used by permission hooks — they never execute
+		// through adapters, so skip adapter/activation validation.
+		if !isGuardVirtualService(serviceType) {
+			adapter, ok := h.adapterReg.Get(serviceType)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+					fmt.Sprintf("unknown service %q", a.Service))
+				return
+			}
+			if !adapterSupportsAction(adapter, a.Action) {
+				writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+					fmt.Sprintf("service %q does not support action %q", serviceType, a.Action))
+				return
+			}
+			if !h.serviceActivated(ctx, agent.UserID, serviceType, serviceAlias, adapter) {
+				writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+					fmt.Sprintf("service %q is not activated — connect it in the Clawvisor dashboard first", a.Service))
+				return
+			}
 		}
 		if a.AutoExecute && RequiresHardcodedApproval(a.Service, a.Action) {
 			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
@@ -181,6 +191,8 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 			_ = h.st.SaveNotificationMessage(ctx, "task", task.ID, "telegram", msgID)
 		}
 	}
+
+	h.publishTasksAndQueue(agent.UserID)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"task_id": task.ID,
@@ -346,6 +358,8 @@ func (h *TasksHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	h.publishTasksAndQueue(user.ID)
+
 	resp := map[string]any{
 		"task_id": taskID,
 		"status":  "active",
@@ -393,6 +407,8 @@ func (h *TasksHandler) Deny(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not deny task")
 		return
 	}
+
+	h.publishTasksAndQueue(user.ID)
 
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
@@ -450,6 +466,8 @@ func (h *TasksHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishTasksAndQueue(agent.UserID)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_id": taskID,
 		"status":  "completed",
@@ -487,23 +505,25 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate service and action exist.
+	// Validate service and action exist (skip for guard virtual services).
 	serviceType, serviceAlias := parseServiceAlias(req.Service)
-	adapter, ok := h.adapterReg.Get(serviceType)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-			fmt.Sprintf("unknown service %q", req.Service))
-		return
-	}
-	if !adapterSupportsAction(adapter, req.Action) {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-			fmt.Sprintf("service %q does not support action %q", serviceType, req.Action))
-		return
-	}
-	if !h.serviceActivated(ctx, agent.UserID, serviceType, serviceAlias, adapter) {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
-			fmt.Sprintf("service %q is not activated — connect it in the Clawvisor dashboard first", req.Service))
-		return
+	if !isGuardVirtualService(serviceType) {
+		adapter, ok := h.adapterReg.Get(serviceType)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+				fmt.Sprintf("unknown service %q", req.Service))
+			return
+		}
+		if !adapterSupportsAction(adapter, req.Action) {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+				fmt.Sprintf("service %q does not support action %q", serviceType, req.Action))
+			return
+		}
+		if !h.serviceActivated(ctx, agent.UserID, serviceType, serviceAlias, adapter) {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
+				fmt.Sprintf("service %q is not activated — connect it in the Clawvisor dashboard first", req.Service))
+			return
+		}
 	}
 
 	// Validate hardcode.
@@ -567,6 +587,8 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 			_ = h.st.SaveNotificationMessage(ctx, "task", taskID, "telegram", msgID)
 		}
 	}
+
+	h.publishTasksAndQueue(agent.UserID)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"task_id": taskID,
@@ -632,6 +654,8 @@ func (h *TasksHandler) ExpandApprove(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	h.publishTasksAndQueue(user.ID)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_id":    taskID,
 		"status":     "active",
@@ -691,6 +715,8 @@ func (h *TasksHandler) ExpandDeny(w http.ResponseWriter, r *http.Request) {
 		_ = h.st.UpdateTaskStatus(ctx, taskID, newStatus)
 	}
 
+	h.publishTasksAndQueue(user.ID)
+
 	// Deliver callback if set.
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -735,6 +761,7 @@ func (h *TasksHandler) ApproveByTaskID(ctx context.Context, taskID, userID strin
 	}
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "✅ <b>Approved</b> — task activated.")
+	h.publishTasksAndQueue(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -768,6 +795,7 @@ func (h *TasksHandler) DenyByTaskID(ctx context.Context, taskID, userID string) 
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "❌ <b>Denied</b> — task rejected.")
 	h.decrementNotifierPolling(userID)
+	h.publishTasksAndQueue(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -808,6 +836,7 @@ func (h *TasksHandler) ExpandApproveByTaskID(ctx context.Context, taskID, userID
 	}
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "✅ <b>Scope expanded</b>")
+	h.publishTasksAndQueue(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -853,6 +882,7 @@ func (h *TasksHandler) ExpandDenyByTaskID(ctx context.Context, taskID, userID st
 
 	h.updateNotificationMsg(ctx, "task", taskID, userID, "❌ <b>Scope expansion denied</b>")
 	h.decrementNotifierPolling(userID)
+	h.publishTasksAndQueue(userID)
 
 	if task.CallbackURL != nil && *task.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, task.AgentID)
@@ -892,6 +922,15 @@ func (h *TasksHandler) updateNotificationMsg(ctx context.Context, targetType, ta
 	}
 }
 
+// publishTasksAndQueue publishes SSE events for tasks and queue changes.
+func (h *TasksHandler) publishTasksAndQueue(userID string) {
+	if h.eventHub == nil {
+		return
+	}
+	h.eventHub.Publish(userID, events.Event{Type: "tasks"})
+	h.eventHub.Publish(userID, events.Event{Type: "queue"})
+}
+
 // ── Revoke ────────────────────────────────────────────────────────────────────
 
 // Revoke cancels an active (typically standing) task.
@@ -915,6 +954,8 @@ func (h *TasksHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not revoke task")
 		return
 	}
+
+	h.publishTasksAndQueue(user.ID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task_id": taskID,

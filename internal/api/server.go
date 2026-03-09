@@ -13,6 +13,7 @@ import (
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api/handlers"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
+	"github.com/clawvisor/clawvisor/internal/events"
 	"github.com/clawvisor/clawvisor/internal/mcp"
 	mcpoauth "github.com/clawvisor/clawvisor/internal/mcp/oauth"
 	pkgauth "github.com/clawvisor/clawvisor/pkg/auth"
@@ -51,6 +52,7 @@ type Server struct {
 	approvalsHandler *handlers.ApprovalsHandler
 	tasksHandler     *handlers.TasksHandler
 
+	eventHub  *events.Hub
 	mcpServer *mcp.Server
 }
 
@@ -138,6 +140,7 @@ func New(
 		llmCfg:     llmCfg,
 		magicStore: magicStore,
 		logger:     logger,
+		eventHub:   events.NewHub(),
 	}
 
 	// Apply optional configuration.
@@ -199,15 +202,16 @@ func (s *Server) routes() http.Handler {
 
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg,
-		s.notifier, verifier, *s.cfg, s.logger, baseURL,
+		s.notifier, verifier, *s.cfg, s.logger, baseURL, s.eventHub,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)
-	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.notifier, s.logger)
+	approvalsHandler := handlers.NewApprovalsHandler(s.store, s.vault, s.adapterReg, s.notifier, s.logger, s.eventHub)
 	s.approvalsHandler = approvalsHandler
 	tasksHandler := handlers.NewTasksHandler(s.store, s.vault, s.adapterReg,
-		s.notifier, *s.cfg, s.logger, baseURL)
+		s.notifier, *s.cfg, s.logger, baseURL, s.eventHub)
 	s.tasksHandler = tasksHandler
+	eventsHandler := handlers.NewEventsHandler(s.eventHub)
 
 	// Middleware
 	requireUser := middleware.RequireUser(s.jwtSvc, s.store)
@@ -299,6 +303,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /api/notifications/telegram/pair/{pairing_id}", user(notificationsHandler.PairingStatus))
 	mux.Handle("POST /api/notifications/telegram/pair/{pairing_id}/confirm", user(notificationsHandler.ConfirmPairing))
 
+	// Guard (agent token — Claude Code permission check)
+	guardHandler := handlers.NewGuardHandler(s.store, verifier, s.logger)
+	mux.Handle("POST /api/guard/check", agent(guardHandler.Check))
+
 	// Gateway (agent token, rate-limited)
 	mux.Handle("POST /api/gateway/request", agentRateLimited(gatewayHandler.HandleRequest))
 	mux.Handle("GET /api/gateway/request/{request_id}/status", agentRateLimited(gatewayHandler.HandleStatus))
@@ -348,6 +356,9 @@ func (s *Server) routes() http.Handler {
 	// Audit (user JWT)
 	mux.Handle("GET /api/audit", user(auditHandler.List))
 	mux.Handle("GET /api/audit/{id}", user(auditHandler.Get))
+
+	// SSE event stream (user JWT — token via query param for EventSource)
+	mux.Handle("GET /api/events", user(eventsHandler.Stream))
 
 	// Skill files (no auth — served so OpenClaw instances can install the skill)
 	// GET /skill         → redirects to /skill/SKILL.md
@@ -526,6 +537,8 @@ func (s *Server) Run(ctx context.Context) error {
 		} else {
 			s.logger.Info("shutting down server")
 		}
+		// Close SSE connections first so handlers return before Shutdown waits on them.
+		s.eventHub.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := s.http.Shutdown(shutdownCtx); err != nil {

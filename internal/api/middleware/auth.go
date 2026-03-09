@@ -60,11 +60,17 @@ func RequireUser(jwtSvc auth.TokenService, st store.Store) func(http.Handler) ht
 }
 
 // bearerToken extracts the token value from "Authorization: Bearer <token>".
+// Falls back to the "token" query parameter (used by EventSource/SSE which
+// cannot set custom headers).
 func bearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	const prefix = "Bearer "
-	if !strings.HasPrefix(h, prefix) {
-		return ""
+	if strings.HasPrefix(h, prefix) {
+		return strings.TrimSpace(h[len(prefix):])
 	}
-	return strings.TrimSpace(h[len(prefix):])
+	// Fallback for SSE: EventSource doesn't support custom headers.
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
+	return ""
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/auth"
 	"github.com/clawvisor/clawvisor/internal/callback"
+	"github.com/clawvisor/clawvisor/internal/events"
 	"github.com/clawvisor/clawvisor/internal/intent"
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/pkg/config"
@@ -49,6 +50,7 @@ type GatewayHandler struct {
 	cfg        config.Config
 	logger     *slog.Logger
 	baseURL    string
+	eventHub   *events.Hub
 }
 
 func NewGatewayHandler(
@@ -60,11 +62,13 @@ func NewGatewayHandler(
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
+	eventHub *events.Hub,
 ) *GatewayHandler {
 	return &GatewayHandler{
 		store: st, vault: v, adapterReg: adapterReg,
 		notifier: notifier, verifier: verifier,
 		cfg: cfg, logger: logger, baseURL: baseURL,
+		eventHub: eventHub,
 	}
 }
 
@@ -164,6 +168,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
+		h.publishAuditAndQueue(agent.UserID, "")
 		reason := restriction.Reason
 		if reason == "" {
 			reason = fmt.Sprintf("Restricted: %s:%s is blocked", restriction.Service, restriction.Action)
@@ -261,6 +266,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
+				h.publishAuditAndQueue(agent.UserID, req.TaskID)
 				// Alert on incoherent reason
 				if verdict.ReasonCoherence == "incoherent" && h.notifier != nil {
 					alertText := fmt.Sprintf(
@@ -295,6 +301,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 					if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 						h.logger.Warn("audit log failed", "err", logErr)
 					}
+					h.publishAuditAndQueue(agent.UserID, req.TaskID)
 					writeJSON(w, http.StatusBadRequest, map[string]any{
 						"status":     "error",
 						"request_id": req.RequestID,
@@ -323,6 +330,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 						if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 							h.logger.Warn("audit log failed", "err", logErr)
 						}
+						h.publishAuditAndQueue(agent.UserID, req.TaskID)
 						writeJSON(w, http.StatusBadRequest, map[string]any{
 							"status":     "error",
 							"request_id": req.RequestID,
@@ -340,6 +348,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 					h.logger.Warn("audit log failed", "err", logErr)
 				}
+				h.publishAuditAndQueue(agent.UserID, req.TaskID)
 				if req.Context.CallbackURL != "" {
 					cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 					go func() {
@@ -369,6 +378,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
+			h.publishAuditAndQueue(agent.UserID, req.TaskID)
 			if req.Context.CallbackURL != "" {
 				cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 				go func() {
@@ -402,6 +412,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 			h.logger.Warn("audit log failed", "err", logErr)
 		}
+		h.publishAuditAndQueue(agent.UserID, "")
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"status":     "error",
 			"request_id": req.RequestID,
@@ -433,6 +444,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
+			h.publishAuditAndQueue(agent.UserID, "")
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"status":     "error",
 				"request_id": req.RequestID,
@@ -453,6 +465,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 		h.logger.Warn("audit log failed", "err", logErr)
 	}
+	h.publishAuditAndQueue(agent.UserID, req.TaskID)
 	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
 	blob := buildRequestBlob(req, agent)
 	reason := ""
@@ -538,6 +551,15 @@ func (h *GatewayHandler) RegisterCallback(w http.ResponseWriter, r *http.Request
 	})
 }
 
+
+// publishAuditAndQueue publishes SSE events for audit and queue changes.
+func (h *GatewayHandler) publishAuditAndQueue(userID, taskID string) {
+	if h.eventHub == nil {
+		return
+	}
+	h.eventHub.Publish(userID, events.Event{Type: "audit", ID: taskID})
+	h.eventHub.Publish(userID, events.Event{Type: "queue"})
+}
 
 // ── Shared execution logic ────────────────────────────────────────────────────
 

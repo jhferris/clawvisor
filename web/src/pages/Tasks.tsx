@@ -61,7 +61,7 @@ export default function Tasks() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['tasks'],
     queryFn: () => api.tasks.list(),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 
   const { data: agentsData } = useQuery({

@@ -11,6 +11,7 @@ import (
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
+	"github.com/clawvisor/clawvisor/internal/events"
 	"github.com/clawvisor/clawvisor/pkg/notify"
 	"github.com/clawvisor/clawvisor/pkg/store"
 	"github.com/clawvisor/clawvisor/pkg/vault"
@@ -23,10 +24,11 @@ type ApprovalsHandler struct {
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier // may be nil
 	logger     *slog.Logger
+	eventHub   *events.Hub
 }
 
-func NewApprovalsHandler(st store.Store, v vault.Vault, adapterReg *adapters.Registry, notifier notify.Notifier, logger *slog.Logger) *ApprovalsHandler {
-	return &ApprovalsHandler{st: st, vault: v, adapterReg: adapterReg, notifier: notifier, logger: logger}
+func NewApprovalsHandler(st store.Store, v vault.Vault, adapterReg *adapters.Registry, notifier notify.Notifier, logger *slog.Logger, eventHub *events.Hub) *ApprovalsHandler {
+	return &ApprovalsHandler{st: st, vault: v, adapterReg: adapterReg, notifier: notifier, logger: logger, eventHub: eventHub}
 }
 
 // List returns pending approvals for the authenticated user.
@@ -86,6 +88,7 @@ func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, outcome, errMsg := h.executeApproval(r.Context(), pa)
+	h.publishQueueAndAudit(user.ID, pa.AuditID)
 
 	if outcome == "error" {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -120,6 +123,7 @@ func (h *ApprovalsHandler) ApproveByRequestID(ctx context.Context, requestID, us
 	}
 
 	h.executeApproval(ctx, pa)
+	h.publishQueueAndAudit(userID, pa.AuditID)
 	return nil
 }
 
@@ -142,6 +146,7 @@ func (h *ApprovalsHandler) DenyByRequestID(ctx context.Context, requestID, userI
 
 	h.updateNotificationMsg(ctx, "approval", requestID, pa.UserID, "❌ <b>Denied</b> — request rejected.")
 	h.decrementNotifierPolling(pa.UserID)
+	h.publishQueueAndAudit(userID, pa.AuditID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(ctx, denyBlob.AgentID)
@@ -193,6 +198,7 @@ func (h *ApprovalsHandler) Deny(w http.ResponseWriter, r *http.Request) {
 
 	h.updateNotificationMsg(r.Context(), "approval", requestID, pa.UserID, "❌ <b>Denied</b> — request rejected.")
 	h.decrementNotifierPolling(pa.UserID)
+	h.publishQueueAndAudit(user.ID, pa.AuditID)
 
 	if pa.CallbackURL != nil && *pa.CallbackURL != "" {
 		cbKey, _ := h.st.GetAgentCallbackSecret(r.Context(), denyBlob.AgentID)
@@ -310,6 +316,7 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 			}, cbKey)
 		}
 		h.decrementNotifierPolling(pa.UserID)
+		h.publishQueueAndAudit(pa.UserID, pa.AuditID)
 		h.logger.Info("pending approval expired", "request_id", pa.RequestID)
 	}
 
@@ -333,8 +340,27 @@ func (h *ApprovalsHandler) expireTimedOut(ctx context.Context) {
 			}, cbKey)
 		}
 		h.decrementNotifierPolling(task.UserID)
+		h.publishTasksAndQueue(task.UserID)
 		h.logger.Info("task expired", "task_id", task.ID)
 	}
+}
+
+// publishQueueAndAudit publishes SSE events for queue and audit changes.
+func (h *ApprovalsHandler) publishQueueAndAudit(userID, auditID string) {
+	if h.eventHub == nil {
+		return
+	}
+	h.eventHub.Publish(userID, events.Event{Type: "queue"})
+	h.eventHub.Publish(userID, events.Event{Type: "audit", ID: auditID})
+}
+
+// publishTasksAndQueue publishes SSE events for tasks and queue changes.
+func (h *ApprovalsHandler) publishTasksAndQueue(userID string) {
+	if h.eventHub == nil {
+		return
+	}
+	h.eventHub.Publish(userID, events.Event{Type: "tasks"})
+	h.eventHub.Publish(userID, events.Event{Type: "queue"})
 }
 
 // decrementNotifierPolling calls DecrementPolling on the notifier if it supports it.

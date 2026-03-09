@@ -1,6 +1,7 @@
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../hooks/useAuth'
+import { useEventStream } from '../hooks/useEventStream'
 import { api } from '../api/client'
 import Services from './Services'
 import Restrictions from './Restrictions'
@@ -23,11 +24,14 @@ const navItems = [
 export default function Dashboard() {
   const { user, logout } = useAuth()
 
-  // Poll queue count for sidebar badge
+  // SSE event stream for instant dashboard updates
+  useEventStream()
+
+  // Poll queue count for sidebar badge (fallback; SSE pushes invalidations)
   const { data: queueData } = useQuery({
     queryKey: ['queue'],
     queryFn: () => api.queue.list(),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   })
   const queueCount = queueData?.total ?? 0
 
