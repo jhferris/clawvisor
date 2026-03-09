@@ -9,6 +9,25 @@ import (
 	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
+// sanitizeNotificationConfig redacts secret fields (bot_token) from a
+// notification config before returning it to the browser.
+func sanitizeNotificationConfig(raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	if tok, ok := m["bot_token"].(string); ok && len(tok) > 4 {
+		m["bot_token"] = "***" + tok[len(tok)-4:]
+	} else if ok {
+		m["bot_token"] = "***"
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
 // NotificationsHandler manages per-user notification channel configuration.
 type NotificationsHandler struct {
 	st       store.Store
@@ -40,7 +59,7 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		configs = append(configs, map[string]any{
 			"channel":    cfg.Channel,
-			"config":     cfg.Config,
+			"config":     sanitizeNotificationConfig(cfg.Config),
 			"created_at": cfg.CreatedAt,
 			"updated_at": cfg.UpdatedAt,
 		})
@@ -94,6 +113,7 @@ func (h *NotificationsHandler) UpsertTelegram(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not retrieve saved config")
 		return
 	}
+	cfg.Config = sanitizeNotificationConfig(cfg.Config)
 	writeJSON(w, http.StatusOK, cfg)
 }
 
@@ -266,5 +286,6 @@ func (h *NotificationsHandler) ConfirmPairing(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, map[string]string{"status": "confirmed"})
 		return
 	}
+	cfg.Config = sanitizeNotificationConfig(cfg.Config)
 	writeJSON(w, http.StatusOK, cfg)
 }

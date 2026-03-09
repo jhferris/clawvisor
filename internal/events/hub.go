@@ -39,8 +39,11 @@ func (h *Hub) Subscribe(userID string) (<-chan Event, func()) {
 		if len(h.clients[userID]) == 0 {
 			delete(h.clients, userID)
 		}
+		// Close under the lock so Publish (which holds RLock for its
+		// entire iteration) can never send on a closed channel.
+		close(ch)
 		h.mu.Unlock()
-		// Drain channel to unblock any pending sends.
+		// Drain any buffered events.
 		for range ch {
 		}
 	}
@@ -52,10 +55,9 @@ func (h *Hub) Subscribe(userID string) (<-chan Event, func()) {
 // Slow clients whose buffer is full are skipped (non-blocking send).
 func (h *Hub) Publish(userID string, e Event) {
 	h.mu.RLock()
-	clients := h.clients[userID]
-	h.mu.RUnlock()
+	defer h.mu.RUnlock()
 
-	for ch := range clients {
+	for ch := range h.clients[userID] {
 		select {
 		case ch <- e:
 		default:
