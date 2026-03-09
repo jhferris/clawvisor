@@ -227,10 +227,19 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				msg = fmt.Sprintf("Action %s:%s is outside this standing task's scope. Standing tasks cannot be expanded — create a separate session task for this action, or revoke this task and create a new one with the additional actions.",
 					req.Service, req.Action)
 			}
+			taskIDPtr := &req.TaskID
+			e := baseEntry("out_of_scope", "blocked", taskIDPtr)
+			e.DurationMS = int(time.Since(start).Milliseconds())
+			e.ErrorMsg = &msg
+			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+				h.logger.Warn("audit log failed", "err", logErr)
+			}
+			h.publishAuditAndQueue(agent.UserID, req.TaskID)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status":     "pending_scope_expansion",
 				"task_id":    req.TaskID,
 				"request_id": req.RequestID,
+				"audit_id":   auditID,
 				"message":    msg,
 			})
 			return
