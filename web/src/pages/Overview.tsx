@@ -1,17 +1,49 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { api, type QueueItem, type Task, type AuditEntry, type Agent, type NotificationConfig, type ActivityBucket } from '../api/client'
-import { formatDistanceToNow, format } from 'date-fns'
+import { Link, useSearchParams } from 'react-router-dom'
+import { api, type QueueItem, type Agent, type NotificationConfig, type ActivityBucket } from '../api/client'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { serviceName, actionName, serviceBrand, formatServiceAction } from '../lib/services'
-import { summarizeActions, OUTCOME_STYLE } from '../lib/queue-helpers'
+import { serviceName } from '../lib/services'
 import CountdownTimer from '../components/CountdownTimer'
-import StatusBadge from '../components/StatusBadge'
-import LifetimeBadge from '../components/LifetimeBadge'
+import TaskCard from '../components/TaskCard'
 import Onboarding from './Onboarding'
 
 export default function Overview() {
+  const qc = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [deepLinkResult, setDeepLinkResult] = useState<string | null>(null)
+
+  // Deep link mutations for approval requests (moved from Queue)
+  const deepApproveRequest = useMutation({
+    mutationFn: (requestId: string) => api.approvals.approve(requestId),
+    onSuccess: (_data, requestId) => {
+      setDeepLinkResult(`Request ${requestId.slice(0, 8)}... approved.`)
+      qc.invalidateQueries({ queryKey: ['overview'] })
+    },
+    onError: (err: Error) => setDeepLinkResult(`Approve failed: ${err.message}`),
+  })
+  const deepDenyRequest = useMutation({
+    mutationFn: (requestId: string) => api.approvals.deny(requestId),
+    onSuccess: (_data, requestId) => {
+      setDeepLinkResult(`Request ${requestId.slice(0, 8)}... denied.`)
+      qc.invalidateQueries({ queryKey: ['overview'] })
+    },
+    onError: (err: Error) => setDeepLinkResult(`Deny failed: ${err.message}`),
+  })
+
+  // Handle deep link actions for approvals
+  useEffect(() => {
+    const action = searchParams.get('action')
+    const requestId = searchParams.get('request_id')
+    if (!action || !requestId) return
+
+    setSearchParams({}, { replace: true })
+
+    if (action === 'approve') deepApproveRequest.mutate(requestId)
+    else if (action === 'deny') deepDenyRequest.mutate(requestId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Bundled overview data — 5s polling for live feel
   const { data: overview } = useQuery({
     queryKey: ['overview'],
@@ -77,6 +109,14 @@ export default function Overview() {
     <div className="p-8 space-y-8">
       <h1 className="text-2xl font-bold text-text-primary">Dashboard</h1>
 
+      {/* Deep link result banner */}
+      {deepLinkResult && (
+        <div className="rounded-md border border-brand/30 bg-brand/10 px-5 py-3 flex items-center justify-between">
+          <span className="text-brand text-sm">{deepLinkResult}</span>
+          <button onClick={() => setDeepLinkResult(null)} className="text-brand text-xs hover:underline">Dismiss</button>
+        </div>
+      )}
+
       {/* Onboarding */}
       {showOnboarding && (
         <Onboarding
@@ -109,14 +149,14 @@ export default function Overview() {
           <div className="space-y-3">
             {queueItems.map(item =>
               item.type === 'approval' ? (
-                <OverviewApprovalCard key={item.id} item={item} />
-              ) : (
-                <OverviewTaskCard
+                <ApprovalCard key={item.id} item={item} />
+              ) : item.task ? (
+                <TaskCard
                   key={item.id}
-                  item={item}
-                  agentName={item.task ? (agentMap.get(item.task.agent_id) ?? item.task.agent_id.slice(0, 8)) : 'Unknown'}
+                  task={item.task}
+                  agentName={agentMap.get(item.task.agent_id) ?? item.task.agent_id.slice(0, 8)}
                 />
-              )
+              ) : null
             )}
           </div>
         )}
@@ -148,7 +188,7 @@ export default function Overview() {
           </div>
           <div className="space-y-3">
             {activeTasks.slice(0, 5).map(task => (
-              <OverviewActiveTaskCard
+              <TaskCard
                 key={task.id}
                 task={task}
                 agentName={agentMap.get(task.agent_id) ?? task.agent_id.slice(0, 8)}
@@ -228,225 +268,11 @@ function ActivityChart({ data }: { data: ActivityBucket[] }) {
   )
 }
 
-// ── Active task card (mirrors Tasks page TaskCard) ───────────────────────────
+// ── Approval card (standalone request approvals) ─────────────────────────────
 
-function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: string }) {
+function ApprovalCard({ item }: { item: QueueItem }) {
   const qc = useQueryClient()
   const [result, setResult] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
-  const isStanding = task.lifetime === 'standing'
-
-  const revokeMut = useMutation({
-    mutationFn: () => api.tasks.revoke(task.id),
-    onSuccess: () => {
-      setResult('Revoked')
-      qc.invalidateQueries({ queryKey: ['overview'] })
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-    },
-  })
-
-  const { data: auditData, isLoading: auditLoading } = useQuery({
-    queryKey: ['audit', { task_id: task.id }],
-    queryFn: () => api.audit.list({ task_id: task.id, limit: 50 }),
-    enabled: expanded,
-    refetchInterval: (query) => expanded && task.request_count !== (query.state.data?.entries?.length ?? 0) ? 1_000 : false,
-  })
-
-  const auditEntries = auditData?.entries ?? []
-
-  return (
-    <div className="border border-border-default rounded-md bg-surface-1">
-      {/* Clickable header */}
-      <div
-        className="p-5 space-y-3 cursor-pointer"
-        onClick={() => setExpanded(e => !e)}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-base font-semibold text-text-primary">{task.purpose}</p>
-            <div className="flex items-center gap-2 mt-1.5">
-              <StatusBadge status={task.status} />
-              <LifetimeBadge lifetime={task.lifetime} />
-              <span className="text-xs text-text-tertiary">
-                {agentName} &middot; {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
-              </span>
-            </div>
-          </div>
-          <div className="text-right shrink-0 space-y-1">
-            {!isStanding && task.expires_at && (
-              <CountdownTimer expiresAt={task.expires_at} showLabel />
-            )}
-            {isStanding && (
-              <span className="text-xs text-brand font-medium">No expiry</span>
-            )}
-            <div className="flex items-center gap-2 justify-end">
-              {task.request_count > 0 && (
-                <span className="text-xs text-text-tertiary">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
-              )}
-              <span className="text-xs text-text-secondary">{expanded ? '\u25B2' : '\u25BC'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Authorized scopes — structured list */}
-        <div className="space-y-1">
-          {task.authorized_actions.map(a => (
-            <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-sm">
-              <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${a.auto_execute ? 'bg-success' : 'bg-warning'}`} />
-              <span className="text-text-secondary">
-                {serviceName(a.service)}: {actionName(a.action)}
-                {!a.auto_execute && <span className="text-warning text-xs ml-1">(approval)</span>}
-              </span>
-              {a.expected_use && (
-                <span className="text-text-tertiary text-xs italic ml-auto">— {a.expected_use}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Result message */}
-      {result && (
-        <div className="px-5 pb-3">
-          <div className="p-2 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
-        </div>
-      )}
-
-      {/* Revoke button */}
-      {!result && task.status === 'active' && (
-        <div className="flex gap-2 px-5 pb-4">
-          <button
-            onClick={() => revokeMut.mutate()}
-            disabled={revokeMut.isPending}
-            className="py-1.5 px-4 text-sm rounded bg-surface-2 text-text-primary hover:bg-surface-3 disabled:opacity-50"
-          >
-            {revokeMut.isPending ? 'Revoking...' : 'Revoke'}
-          </button>
-        </div>
-      )}
-
-      {/* Expanded audit entries */}
-      {expanded && (
-        <div className="border-t border-border-default px-5 py-4 space-y-2">
-          <div className="text-xs font-medium text-text-tertiary uppercase tracking-wide">Actions</div>
-          {auditLoading && <div className="text-xs text-text-tertiary">Loading...</div>}
-          {!auditLoading && auditEntries.length === 0 && (
-            <div className="text-xs text-text-tertiary">No actions recorded yet.</div>
-          )}
-          {auditEntries.length > 0 && (
-            <div className="bg-surface-2 border border-border-default rounded-md overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-surface-2 text-xs text-text-tertiary font-medium">
-                  <tr>
-                    <th className="px-3 py-1.5 text-left">Time</th>
-                    <th className="px-3 py-1.5 text-left">Service</th>
-                    <th className="px-3 py-1.5 text-left">Action</th>
-                    <th className="px-3 py-1.5 text-left">Outcome</th>
-                    <th className="px-3 py-1.5 text-left">Duration</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditEntries.map(e => (
-                    <OverviewAuditRow key={e.id} entry={e} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OverviewAuditRow({ entry }: { entry: AuditEntry }) {
-  const [expanded, setExpanded] = useState(false)
-  return (
-    <>
-      <tr
-        className="border-t border-border-default hover:bg-surface-2 cursor-pointer text-xs"
-        onClick={ev => { ev.stopPropagation(); setExpanded(e => !e) }}
-      >
-        <td className="px-3 py-1.5 text-text-tertiary whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
-          {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
-        </td>
-        <td className="px-3 py-1.5">
-          <span className="inline-flex items-center gap-1">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${serviceBrand(entry.service).dot}`} />
-            {serviceName(entry.service)}
-          </span>
-        </td>
-        <td className="px-3 py-1.5">{actionName(entry.action)}</td>
-        <td className="px-3 py-1.5">
-          <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-surface-2 text-text-tertiary'}`}>
-            {entry.outcome}
-          </span>
-        </td>
-        <td className="px-3 py-1.5 text-text-tertiary">{entry.duration_ms}ms</td>
-      </tr>
-      {expanded && (
-        <tr className="border-t border-border-default bg-surface-1">
-          <td colSpan={5} className="px-3 py-2">
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <div className="text-text-tertiary font-medium mb-1">
-                  {formatServiceAction(entry.service, entry.action)}
-                </div>
-                <pre className="bg-surface-2 border border-border-default rounded p-2 overflow-auto max-h-32 text-text-secondary text-[11px]">
-                  {JSON.stringify(entry.params_safe, null, 2)}
-                </pre>
-              </div>
-              <div className="space-y-1.5">
-                {entry.reason && (
-                  <div className="bg-brand/10 rounded p-1.5">
-                    <div className="text-brand font-medium">Reason</div>
-                    <div className="text-text-secondary">{entry.reason}</div>
-                  </div>
-                )}
-                {entry.error_msg && (
-                  <div><span className="text-text-tertiary">Error:</span> <span className="text-danger">{entry.error_msg}</span></div>
-                )}
-                {entry.safety_flagged && (
-                  <div className="text-warning">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
-                )}
-                {entry.verification && (
-                  <div className="bg-warning/10 rounded p-1.5 space-y-1">
-                    <div className="text-warning font-medium">Intent Verification</div>
-                    <div className="flex gap-2 flex-wrap">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.param_scope === 'ok' ? 'bg-success/15 text-success'
-                        : entry.verification.param_scope === 'violation' ? 'bg-danger/15 text-danger'
-                        : 'bg-surface-2 text-text-tertiary'
-                      }`}>params: {entry.verification.param_scope}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.reason_coherence === 'ok' ? 'bg-success/15 text-success'
-                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-danger/15 text-danger'
-                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-warning/15 text-warning'
-                        : 'bg-surface-2 text-text-tertiary'
-                      }`}>reason: {entry.verification.reason_coherence}</span>
-                      {entry.verification.cached && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-brand/10 text-brand">cached</span>
-                      )}
-                    </div>
-                    <div className="text-text-secondary text-[11px]">{entry.verification.explanation}</div>
-                    <div className="text-text-tertiary text-[10px]">{entry.verification.model} &middot; {entry.verification.latency_ms}ms</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-// ── Queue cards (local, mutation wiring differs from Queue page) ─────────────
-
-function OverviewApprovalCard({ item }: { item: QueueItem }) {
-  const qc = useQueryClient()
-  const [result, setResult] = useState<string | null>(null)
-  const [paramsOpen, setParamsOpen] = useState(false)
   const a = item.approval!
 
   const approveMut = useMutation({
@@ -454,7 +280,6 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
     onSuccess: (res) => {
       setResult(res.status === 'executed' ? 'Approved & executed' : `Outcome: ${res.status}`)
       qc.invalidateQueries({ queryKey: ['overview'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
     },
   })
 
@@ -463,12 +288,12 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
     onSuccess: () => {
       setResult('Denied')
       qc.invalidateQueries({ queryKey: ['overview'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
     },
   })
 
   const isPending = approveMut.isPending || denyMut.isPending
-  const hasParams = Object.keys(a.params ?? {}).length > 0
+  const params = a.params ?? {}
+  const paramEntries = Object.entries(params)
 
   if (result) {
     return (
@@ -479,162 +304,57 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
   }
 
   return (
-    <div className="border border-border-default rounded-md bg-surface-1 p-5 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-text-primary">
-            {serviceName(a.service)} &middot; {actionName(a.action)}
-          </p>
-          {a.reason && (
-            <p className="text-sm text-text-tertiary italic mt-1">"{a.reason}"</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+    <div className="bg-surface-1 border border-border-default rounded-md border-l-[3px] border-l-warning overflow-hidden">
+      {/* Header */}
+      <div className="px-5 pt-5 pb-4">
+        <span className="font-mono text-lg font-semibold text-text-primary">{serviceName(a.service)}.{a.action}</span>
+        {a.reason && (
+          <p className="text-sm text-text-secondary mt-1.5">{a.reason}</p>
+        )}
+        <div className="flex items-center gap-2 mt-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-mono font-medium px-2 py-0.5 rounded bg-warning/15 text-warning">
+            <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+            approval
+          </span>
           {item.expires_at && <CountdownTimer expiresAt={item.expires_at} />}
-          <span className="text-xs px-2 py-0.5 rounded bg-brand/10 text-brand font-medium">Request</span>
         </div>
       </div>
 
-      {hasParams && (
-        <div>
-          <button
-            onClick={() => setParamsOpen(o => !o)}
-            className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1"
-          >
-            <span>{paramsOpen ? '\u25BC' : '\u25B6'}</span> Parameters
-          </button>
-          {paramsOpen && (
-            <pre className="mt-1 text-xs bg-surface-2 border border-border-default rounded p-3 overflow-auto max-h-64 font-mono text-text-secondary">
-              {JSON.stringify(a.params, null, 2)}
-            </pre>
-          )}
+      {/* Parameters */}
+      {paramEntries.length > 0 && (
+        <div className="px-5 pb-3">
+          <div className="bg-surface-0 border border-border-subtle rounded overflow-hidden">
+            <table className="w-full text-xs">
+              <tbody>
+                {paramEntries.map(([key, value], i) => (
+                  <tr key={key} className={i < paramEntries.length - 1 ? 'border-b border-border-subtle' : ''}>
+                    <td className="px-3 py-1.5 font-mono text-text-tertiary w-28 align-top">{key}</td>
+                    <td className="px-3 py-1.5 font-mono text-text-primary break-all">
+                      {typeof value === 'string' ? value : JSON.stringify(value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button
-          onClick={() => approveMut.mutate()}
-          disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50 font-medium"
-        >
-          {approveMut.isPending ? 'Approving...' : 'Approve'}
-        </button>
+      {/* Actions */}
+      <div className="px-4 py-3 border-t border-border-subtle flex items-center justify-end gap-2">
         <button
           onClick={() => denyMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50 font-medium"
+          className="rounded px-4 py-1.5 text-sm font-medium bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50"
         >
           Deny
         </button>
-      </div>
-    </div>
-  )
-}
-
-function OverviewTaskCard({ item, agentName }: { item: QueueItem; agentName: string }) {
-  const qc = useQueryClient()
-  const [result, setResult] = useState<string | null>(null)
-  const task = item.task!
-  const isExpansion = task.status === 'pending_scope_expansion'
-  const needsApproval = task.status === 'pending_approval'
-
-  const approveMut = useMutation({
-    mutationFn: () => isExpansion ? api.tasks.expandApprove(task.id) : api.tasks.approve(task.id),
-    onSuccess: () => {
-      setResult(isExpansion ? 'Expansion approved' : 'Approved')
-      qc.invalidateQueries({ queryKey: ['overview'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-    },
-  })
-
-  const denyMut = useMutation({
-    mutationFn: () => isExpansion ? api.tasks.expandDeny(task.id) : api.tasks.deny(task.id),
-    onSuccess: () => {
-      setResult(isExpansion ? 'Expansion denied' : 'Denied')
-      qc.invalidateQueries({ queryKey: ['overview'] })
-      qc.invalidateQueries({ queryKey: ['queue'] })
-      qc.invalidateQueries({ queryKey: ['tasks'] })
-    },
-  })
-
-  const isPending = approveMut.isPending || denyMut.isPending
-
-  if (result) {
-    return (
-      <div className="border border-border-default rounded-md bg-surface-1 p-5">
-        <div className="p-3 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="border border-warning/30 rounded-md bg-surface-1 p-5 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-text-primary">{task.purpose}</p>
-          <div className="flex items-center gap-2 mt-1.5">
-            <StatusBadge status={task.status} />
-            <LifetimeBadge lifetime={task.lifetime} />
-            <span className="text-xs text-text-tertiary">
-              {agentName} &middot; {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
-            </span>
-          </div>
-        </div>
-        <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${
-          isExpansion ? 'bg-warning/15 text-warning' : 'bg-brand-muted text-brand'
-        }`}>
-          {isExpansion ? 'Scope expansion' : 'New task'}
-        </span>
-      </div>
-
-      <p className="text-sm text-text-secondary">{summarizeActions(task.authorized_actions)}</p>
-
-      {isExpansion && task.pending_action && (
-        <div className="bg-warning/10 border border-warning/30 rounded-md p-3 space-y-2">
-          <div className="text-xs font-medium text-warning">Scope expansion requested</div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs bg-surface-1 border border-warning/30 rounded px-2 py-0.5 text-warning">
-              {serviceName(task.pending_action.service)}: {actionName(task.pending_action.action)}
-            </span>
-            {task.pending_action.auto_execute && (
-              <span className="text-xs text-success font-medium">auto-execute</span>
-            )}
-          </div>
-          {task.pending_reason && (
-            <p className="text-xs text-warning italic">"{task.pending_reason}"</p>
-          )}
-        </div>
-      )}
-
-      {needsApproval && task.authorized_actions.some(a => a.expected_use) && (
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-text-tertiary">Agent-declared expected use:</div>
-          {task.authorized_actions.filter(a => a.expected_use).map(a => (
-            <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-xs">
-              <span className="text-text-tertiary w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
-                {serviceName(a.service)}: {actionName(a.action)}
-              </span>
-              <span className="text-text-secondary italic">{a.expected_use}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-2">
         <button
           onClick={() => approveMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50 font-medium"
+          className="bg-brand text-surface-0 font-medium rounded px-5 py-1.5 text-sm hover:bg-brand-strong disabled:opacity-50"
         >
-          {approveMut.isPending ? 'Approving...' : isExpansion ? 'Approve Expansion' : 'Approve Task'}
-        </button>
-        <button
-          onClick={() => denyMut.mutate()}
-          disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50 font-medium"
-        >
-          {isExpansion ? 'Deny Expansion' : 'Deny'}
+          {approveMut.isPending ? 'Approving...' : 'Approve'}
         </button>
       </div>
     </div>
