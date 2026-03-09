@@ -65,17 +65,17 @@ function ActiveServiceRow({ svc }: { svc: ServiceInfo }) {
         {/* Name + meta */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-900 text-sm truncate">{serviceName(svc.id, svc.alias)}</span>
-            <span className="text-xs text-gray-400 shrink-0">
+            <span className="font-medium text-text-primary text-sm truncate">{serviceName(svc.id, svc.alias)}</span>
+            <span className="text-xs text-text-tertiary shrink-0">
               {svc.id}{svc.alias && svc.alias !== 'default' ? `:${svc.alias}` : ''}
             </span>
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">{svc.actions.map(a => actionName(a)).join(' · ')}</p>
+          <p className="text-xs text-text-tertiary mt-0.5">{svc.actions.map(a => actionName(a)).join(' · ')}</p>
         </div>
 
         {/* Activated time */}
         {svc.activated_at && (
-          <span className="text-xs text-gray-400 shrink-0 hidden sm:block">
+          <span className="text-xs text-text-tertiary shrink-0 hidden sm:block">
             {formatDistanceToNow(new Date(svc.activated_at), { addSuffix: true })}
           </span>
         )}
@@ -86,21 +86,21 @@ function ActiveServiceRow({ svc }: { svc: ServiceInfo }) {
             {!svc.credential_free && (svc.oauth ? (
               <button
                 onClick={handleReauth}
-                className="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                className="text-xs px-2.5 py-1 rounded border border-border-strong text-text-primary hover:bg-surface-2"
               >
                 Re-authorize
               </button>
             ) : (
               <button
                 onClick={() => { setShowKeyInput(v => !v); setError(null) }}
-                className="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                className="text-xs px-2.5 py-1 rounded border border-border-strong text-text-primary hover:bg-surface-2"
               >
                 Update token
               </button>
             ))}
             <button
               onClick={handleDeactivate}
-              className="text-xs px-2.5 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+              className="text-xs px-2.5 py-1 rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20"
             >
               Deactivate
             </button>
@@ -108,7 +108,7 @@ function ActiveServiceRow({ svc }: { svc: ServiceInfo }) {
         )}
       </div>
 
-      {error && <p className="text-xs text-red-500 px-4 pb-2">{error}</p>}
+      {error && <p className="text-xs text-danger px-4 pb-2">{error}</p>}
 
       {showKeyInput && (
         <div className="flex gap-2 px-4 pb-3">
@@ -118,13 +118,13 @@ function ActiveServiceRow({ svc }: { svc: ServiceInfo }) {
             onChange={e => setApiKeyInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
             placeholder="Paste your token…"
-            className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="flex-1 text-xs px-2 py-1.5 border border-border-default bg-surface-0 text-text-primary rounded focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
             autoFocus
           />
           <button
             onClick={handleSaveKey}
             disabled={saving || !apiKeyInput.trim()}
-            className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -273,34 +273,34 @@ function AddServiceModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Add Service</h2>
+      <div className="relative bg-surface-1 border border-border-default rounded-md w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border-default">
+          <h2 className="text-lg font-semibold text-text-primary">Add Service</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            className="text-text-tertiary hover:text-text-primary text-xl leading-none"
           >
             &times;
           </button>
         </div>
 
         <div className="px-6 py-4 overflow-y-auto space-y-3">
-          <p className="text-sm text-gray-500">Select a service to activate:</p>
+          <p className="text-sm text-text-tertiary">Select a service to activate:</p>
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
+          {error && <p className="text-xs text-danger">{error}</p>}
 
           {serviceTypes.map(st => {
             const isActivated = st.activatedCount > 0
             const desc = serviceDescription(st.baseId)
             return (
-              <div key={st.baseId} className="border rounded-lg p-4 space-y-2">
+              <div key={st.baseId} className="border border-border-default rounded-md p-4 space-y-2">
                 <div>
-                  <h3 className="font-semibold text-gray-900">{serviceName(st.baseId)}</h3>
-                  {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <h3 className="font-semibold text-text-primary">{serviceName(st.baseId)}</h3>
+                  {desc && <p className="text-xs text-text-tertiary mt-0.5">{desc}</p>}
+                  <p className="text-xs text-text-tertiary mt-0.5">
                     {st.credentialFree ? 'No credentials needed' : st.oauth ? 'Activate with OAuth' : 'Activate with API key'}
                   </p>
                 </div>
@@ -308,7 +308,7 @@ function AddServiceModal({
                 {/* Label input */}
                 {aliasInputFor === st.baseId && (
                   <div className="space-y-1.5">
-                    <p className="text-xs text-gray-500">Label this connection (leave blank for default):</p>
+                    <p className="text-xs text-text-tertiary">Label this connection (leave blank for default):</p>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -316,18 +316,18 @@ function AddServiceModal({
                         onChange={e => setAliasValue(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && confirmAlias(st)}
                         placeholder="e.g. personal, work"
-                        className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="flex-1 text-xs px-2 py-1.5 border border-border-default bg-surface-0 text-text-primary rounded focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
                         autoFocus
                       />
                       <button
                         onClick={() => confirmAlias(st)}
-                        className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                        className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong"
                       >
                         Continue
                       </button>
                       <button
                         onClick={() => setAliasInputFor(null)}
-                        className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                        className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-primary hover:bg-surface-2"
                       >
                         Cancel
                       </button>
@@ -344,19 +344,19 @@ function AddServiceModal({
                       onChange={e => setKeyValue(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
                       placeholder="Paste your token…"
-                      className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="flex-1 text-xs px-2 py-1.5 border border-border-default bg-surface-0 text-text-primary rounded focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
                       autoFocus
                     />
                     <button
                       onClick={handleSaveKey}
                       disabled={saving || !keyValue.trim()}
-                      className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
                     >
                       {saving ? 'Saving…' : 'Save'}
                     </button>
                     <button
                       onClick={() => { setKeyInputFor(null); setKeyValue('') }}
-                      className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-primary hover:bg-surface-2"
                     >
                       Cancel
                     </button>
@@ -368,8 +368,8 @@ function AddServiceModal({
                   <button
                     onClick={() => st.credentialFree ? handleActivateCredentialFree(st.baseId) : showAliasPrompt(st)}
                     className={`text-xs px-3 py-1.5 rounded ${isActivated
-                      ? 'border border-gray-300 text-gray-600 hover:bg-gray-50'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      ? 'border border-border-strong text-text-primary hover:bg-surface-2'
+                      : 'bg-brand text-surface-0 hover:bg-brand-strong'
                     }`}
                   >
                     {isActivated ? '+ Add account' : 'Activate'}
@@ -380,7 +380,7 @@ function AddServiceModal({
           })}
 
           {serviceTypes.length === 0 && (
-            <p className="text-sm text-gray-400">No services available to activate.</p>
+            <p className="text-sm text-text-tertiary">No services available to activate.</p>
           )}
         </div>
       </div>
@@ -417,27 +417,27 @@ export default function Services() {
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Services</h1>
-          <p className="text-sm text-gray-500 mt-1">Your activated services.</p>
+          <h1 className="text-2xl font-bold text-text-primary">Services</h1>
+          <p className="text-sm text-text-tertiary mt-1">Your activated services.</p>
         </div>
         <button
           onClick={() => setShowModal(true)}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+          className="px-4 py-2 rounded bg-brand text-surface-0 text-sm font-medium hover:bg-brand-strong"
         >
           + Add service
         </button>
       </div>
 
-      {isLoading && <div className="text-sm text-gray-400">Loading…</div>}
-      {error && <div className="text-sm text-red-500">Failed to load services.</div>}
+      {isLoading && <div className="text-sm text-text-tertiary">Loading…</div>}
+      {error && <div className="text-sm text-danger">Failed to load services.</div>}
 
       {!isLoading && !error && activeServices.length === 0 && (
-        <p className="text-sm text-gray-400">
+        <p className="text-sm text-text-tertiary">
           No services activated yet. Click "Add service" above to get started.
         </p>
       )}
 
-      <div className="bg-white border rounded-lg divide-y">
+      <div className="bg-surface-1 border border-border-default rounded-md divide-y divide-border-subtle">
         {activeServices.map(svc => (
           <ActiveServiceRow key={`${svc.id}:${svc.alias ?? 'default'}`} svc={svc} />
         ))}

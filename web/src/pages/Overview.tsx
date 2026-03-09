@@ -75,7 +75,7 @@ export default function Overview() {
 
   return (
     <div className="p-8 space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+      <h1 className="text-2xl font-bold text-text-primary">Dashboard</h1>
 
       {/* Onboarding */}
       {showOnboarding && (
@@ -89,21 +89,21 @@ export default function Overview() {
       {/* Queue section */}
       <section>
         <div className="flex items-center gap-3 mb-3">
-          <h2 className="text-lg font-semibold text-gray-800">Needs your attention</h2>
+          <h2 className="text-lg font-semibold text-text-primary">Needs your attention</h2>
           {queueItems.length > 0 && (
-            <span className="bg-orange-500 text-white text-xs font-bold rounded-full px-2.5 py-0.5">
+            <span className="bg-warning text-surface-0 text-xs font-bold rounded px-2.5 py-0.5 font-mono">
               {queueItems.length}
             </span>
           )}
         </div>
 
         {queueItems.length === 0 ? (
-          <div className="rounded-lg border border-green-200 bg-green-50 px-5 py-4 flex items-center gap-3">
-            <svg className="w-5 h-5 text-green-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="rounded-md border border-success/30 bg-success/10 px-5 py-4 flex items-center gap-3">
+            <svg className="w-5 h-5 text-success shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
-            <span className="text-green-800 font-medium">All clear — nothing needs your attention</span>
+            <span className="text-success font-medium">All clear — nothing needs your attention</span>
           </div>
         ) : (
           <div className="space-y-3">
@@ -124,9 +124,9 @@ export default function Overview() {
 
       {/* Activity graph */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">Activity (last 60 min)</h2>
+        <h2 className="text-lg font-semibold text-text-primary mb-3">Activity (last 60 min)</h2>
         {activity.length === 0 ? (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-5 py-8 text-center text-sm text-gray-400">
+          <div className="rounded-md border border-border-subtle bg-surface-1 px-5 py-8 text-center text-sm text-text-tertiary">
             No activity in the last 60 minutes
           </div>
         ) : (
@@ -138,11 +138,11 @@ export default function Overview() {
       {activeTasks.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-800">
+            <h2 className="text-lg font-semibold text-text-primary">
               Active tasks
-              <span className="ml-2 text-sm font-normal text-gray-400">{activeTasks.length}</span>
+              <span className="ml-2 text-sm font-normal text-text-tertiary">{activeTasks.length}</span>
             </h2>
-            <Link to="/dashboard/tasks" className="text-sm text-blue-600 hover:underline">
+            <Link to="/dashboard/tasks" className="text-sm text-brand hover:underline">
               View all
             </Link>
           </div>
@@ -155,7 +155,7 @@ export default function Overview() {
               />
             ))}
             {activeTasks.length > 5 && (
-              <Link to="/dashboard/tasks" className="block text-center text-sm text-blue-600 hover:underline py-1">
+              <Link to="/dashboard/tasks" className="block text-center text-sm text-brand hover:underline py-1">
                 +{activeTasks.length - 5} more
               </Link>
             )}
@@ -211,13 +211,13 @@ function ActivityChart({ data }: { data: ActivityBucket[] }) {
   }, [data])
 
   return (
-    <div className="bg-white border rounded-lg p-4">
+    <div className="bg-surface-1 border border-border-default rounded-md p-4">
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={rows}>
-          <XAxis dataKey="time" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-          <YAxis allowDecimals={false} tick={{ fontSize: 11 }} width={30} />
+          <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#6b7280' }} interval="preserveStartEnd" />
+          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6b7280' }} width={30} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+            contentStyle={{ fontSize: 12, borderRadius: 6, border: '1px solid #1f2937', backgroundColor: '#161923', color: '#f0f1f3' }}
           />
           <Bar dataKey="executed" stackId="1" stroke={OUTCOME_COLORS.executed} fill={OUTCOME_COLORS.executed} fillOpacity={0.85} name="Executed" />
           <Bar dataKey="blocked" stackId="1" stroke={OUTCOME_COLORS.blocked} fill={OUTCOME_COLORS.blocked} fillOpacity={0.85} name="Blocked" />
@@ -255,7 +255,7 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
   const auditEntries = auditData?.entries ?? []
 
   return (
-    <div className="border rounded-lg bg-white">
+    <div className="border border-border-default rounded-md bg-surface-1">
       {/* Clickable header */}
       <div
         className="p-5 space-y-3 cursor-pointer"
@@ -263,11 +263,11 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-base font-semibold text-gray-900">{task.purpose}</p>
+            <p className="text-base font-semibold text-text-primary">{task.purpose}</p>
             <div className="flex items-center gap-2 mt-1.5">
               <StatusBadge status={task.status} />
               <LifetimeBadge lifetime={task.lifetime} />
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-text-tertiary">
                 {agentName} &middot; {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
               </span>
             </div>
@@ -277,13 +277,13 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
               <CountdownTimer expiresAt={task.expires_at} showLabel />
             )}
             {isStanding && (
-              <span className="text-xs text-purple-600 font-medium">No expiry</span>
+              <span className="text-xs text-brand font-medium">No expiry</span>
             )}
             <div className="flex items-center gap-2 justify-end">
               {task.request_count > 0 && (
-                <span className="text-xs text-gray-400">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
+                <span className="text-xs text-text-tertiary">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
               )}
-              <span className="text-xs text-gray-300">{expanded ? '\u25B2' : '\u25BC'}</span>
+              <span className="text-xs text-text-secondary">{expanded ? '\u25B2' : '\u25BC'}</span>
             </div>
           </div>
         </div>
@@ -292,13 +292,13 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
         <div className="space-y-1">
           {task.authorized_actions.map(a => (
             <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-sm">
-              <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${a.auto_execute ? 'bg-green-400' : 'bg-orange-400'}`} />
-              <span className="text-gray-700">
+              <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${a.auto_execute ? 'bg-success' : 'bg-warning'}`} />
+              <span className="text-text-secondary">
                 {serviceName(a.service)}: {actionName(a.action)}
-                {!a.auto_execute && <span className="text-orange-600 text-xs ml-1">(approval)</span>}
+                {!a.auto_execute && <span className="text-warning text-xs ml-1">(approval)</span>}
               </span>
               {a.expected_use && (
-                <span className="text-gray-400 text-xs italic ml-auto">— {a.expected_use}</span>
+                <span className="text-text-tertiary text-xs italic ml-auto">— {a.expected_use}</span>
               )}
             </div>
           ))}
@@ -308,7 +308,7 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
       {/* Result message */}
       {result && (
         <div className="px-5 pb-3">
-          <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+          <div className="p-2 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
         </div>
       )}
 
@@ -318,7 +318,7 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
           <button
             onClick={() => revokeMut.mutate()}
             disabled={revokeMut.isPending}
-            className="py-1.5 px-4 text-sm rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+            className="py-1.5 px-4 text-sm rounded bg-surface-2 text-text-primary hover:bg-surface-3 disabled:opacity-50"
           >
             {revokeMut.isPending ? 'Revoking...' : 'Revoke'}
           </button>
@@ -327,16 +327,16 @@ function OverviewActiveTaskCard({ task, agentName }: { task: Task; agentName: st
 
       {/* Expanded audit entries */}
       {expanded && (
-        <div className="border-t px-5 py-4 space-y-2">
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</div>
-          {auditLoading && <div className="text-xs text-gray-400">Loading...</div>}
+        <div className="border-t border-border-default px-5 py-4 space-y-2">
+          <div className="text-xs font-medium text-text-tertiary uppercase tracking-wide">Actions</div>
+          {auditLoading && <div className="text-xs text-text-tertiary">Loading...</div>}
           {!auditLoading && auditEntries.length === 0 && (
-            <div className="text-xs text-gray-400">No actions recorded yet.</div>
+            <div className="text-xs text-text-tertiary">No actions recorded yet.</div>
           )}
           {auditEntries.length > 0 && (
-            <div className="bg-gray-50 border rounded-lg overflow-hidden">
+            <div className="bg-surface-2 border border-border-default rounded-md overflow-hidden">
               <table className="w-full">
-                <thead className="bg-gray-100 text-xs text-gray-500 font-medium">
+                <thead className="bg-surface-2 text-xs text-text-tertiary font-medium">
                   <tr>
                     <th className="px-3 py-1.5 text-left">Time</th>
                     <th className="px-3 py-1.5 text-left">Service</th>
@@ -364,10 +364,10 @@ function OverviewAuditRow({ entry }: { entry: AuditEntry }) {
   return (
     <>
       <tr
-        className="border-t hover:bg-white cursor-pointer text-xs"
+        className="border-t border-border-default hover:bg-surface-2 cursor-pointer text-xs"
         onClick={ev => { ev.stopPropagation(); setExpanded(e => !e) }}
       >
-        <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
+        <td className="px-3 py-1.5 text-text-tertiary whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
           {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
         </td>
         <td className="px-3 py-1.5">
@@ -378,58 +378,58 @@ function OverviewAuditRow({ entry }: { entry: AuditEntry }) {
         </td>
         <td className="px-3 py-1.5">{actionName(entry.action)}</td>
         <td className="px-3 py-1.5">
-          <span className={`inline-block px-1.5 py-0.5 rounded-full text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-gray-100 text-gray-600'}`}>
+          <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-surface-2 text-text-tertiary'}`}>
             {entry.outcome}
           </span>
         </td>
-        <td className="px-3 py-1.5 text-gray-400">{entry.duration_ms}ms</td>
+        <td className="px-3 py-1.5 text-text-tertiary">{entry.duration_ms}ms</td>
       </tr>
       {expanded && (
-        <tr className="border-t bg-white">
+        <tr className="border-t border-border-default bg-surface-1">
           <td colSpan={5} className="px-3 py-2">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <div className="text-gray-500 font-medium mb-1">
+                <div className="text-text-tertiary font-medium mb-1">
                   {formatServiceAction(entry.service, entry.action)}
                 </div>
-                <pre className="bg-gray-50 border rounded p-2 overflow-auto max-h-32 text-gray-700 text-[11px]">
+                <pre className="bg-surface-2 border border-border-default rounded p-2 overflow-auto max-h-32 text-text-secondary text-[11px]">
                   {JSON.stringify(entry.params_safe, null, 2)}
                 </pre>
               </div>
               <div className="space-y-1.5">
                 {entry.reason && (
-                  <div className="bg-blue-50 rounded p-1.5">
-                    <div className="text-blue-600 font-medium">Reason</div>
-                    <div className="text-gray-700">{entry.reason}</div>
+                  <div className="bg-brand/10 rounded p-1.5">
+                    <div className="text-brand font-medium">Reason</div>
+                    <div className="text-text-secondary">{entry.reason}</div>
                   </div>
                 )}
                 {entry.error_msg && (
-                  <div><span className="text-gray-500">Error:</span> <span className="text-red-600">{entry.error_msg}</span></div>
+                  <div><span className="text-text-tertiary">Error:</span> <span className="text-danger">{entry.error_msg}</span></div>
                 )}
                 {entry.safety_flagged && (
-                  <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                  <div className="text-warning">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
                 )}
                 {entry.verification && (
-                  <div className="bg-orange-50 rounded p-1.5 space-y-1">
-                    <div className="text-orange-700 font-medium">Intent Verification</div>
+                  <div className="bg-warning/10 rounded p-1.5 space-y-1">
+                    <div className="text-warning font-medium">Intent Verification</div>
                     <div className="flex gap-2 flex-wrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.param_scope === 'ok' ? 'bg-green-100 text-green-700'
-                        : entry.verification.param_scope === 'violation' ? 'bg-red-100 text-red-700'
-                        : 'bg-gray-100 text-gray-500'
+                        entry.verification.param_scope === 'ok' ? 'bg-success/15 text-success'
+                        : entry.verification.param_scope === 'violation' ? 'bg-danger/15 text-danger'
+                        : 'bg-surface-2 text-text-tertiary'
                       }`}>params: {entry.verification.param_scope}</span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.reason_coherence === 'ok' ? 'bg-green-100 text-green-700'
-                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-red-100 text-red-700'
-                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-yellow-100 text-yellow-700'
-                        : 'bg-gray-100 text-gray-500'
+                        entry.verification.reason_coherence === 'ok' ? 'bg-success/15 text-success'
+                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-danger/15 text-danger'
+                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-warning/15 text-warning'
+                        : 'bg-surface-2 text-text-tertiary'
                       }`}>reason: {entry.verification.reason_coherence}</span>
                       {entry.verification.cached && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-600">cached</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-brand/10 text-brand">cached</span>
                       )}
                     </div>
-                    <div className="text-gray-600 text-[11px]">{entry.verification.explanation}</div>
-                    <div className="text-gray-400 text-[10px]">{entry.verification.model} &middot; {entry.verification.latency_ms}ms</div>
+                    <div className="text-text-secondary text-[11px]">{entry.verification.explanation}</div>
+                    <div className="text-text-tertiary text-[10px]">{entry.verification.model} &middot; {entry.verification.latency_ms}ms</div>
                   </div>
                 )}
               </div>
@@ -472,26 +472,26 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
 
   if (result) {
     return (
-      <div className="border rounded-lg bg-white p-5">
-        <div className="p-3 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+      <div className="border border-border-default rounded-md bg-surface-1 p-5">
+        <div className="p-3 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
       </div>
     )
   }
 
   return (
-    <div className="border rounded-lg bg-white p-5 space-y-3">
+    <div className="border border-border-default rounded-md bg-surface-1 p-5 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-gray-900">
+          <p className="text-base font-semibold text-text-primary">
             {serviceName(a.service)} &middot; {actionName(a.action)}
           </p>
           {a.reason && (
-            <p className="text-sm text-gray-500 italic mt-1">"{a.reason}"</p>
+            <p className="text-sm text-text-tertiary italic mt-1">"{a.reason}"</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {item.expires_at && <CountdownTimer expiresAt={item.expires_at} />}
-          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">Request</span>
+          <span className="text-xs px-2 py-0.5 rounded bg-brand/10 text-brand font-medium">Request</span>
         </div>
       </div>
 
@@ -499,12 +499,12 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
         <div>
           <button
             onClick={() => setParamsOpen(o => !o)}
-            className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+            className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1"
           >
             <span>{paramsOpen ? '\u25BC' : '\u25B6'}</span> Parameters
           </button>
           {paramsOpen && (
-            <pre className="mt-1 text-xs bg-gray-50 border rounded p-3 overflow-auto max-h-64 font-mono text-gray-700">
+            <pre className="mt-1 text-xs bg-surface-2 border border-border-default rounded p-3 overflow-auto max-h-64 font-mono text-text-secondary">
               {JSON.stringify(a.params, null, 2)}
             </pre>
           )}
@@ -515,14 +515,14 @@ function OverviewApprovalCard({ item }: { item: QueueItem }) {
         <button
           onClick={() => approveMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
+          className="flex-1 py-2 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50 font-medium"
         >
           {approveMut.isPending ? 'Approving...' : 'Approve'}
         </button>
         <button
           onClick={() => denyMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 font-medium"
+          className="flex-1 py-2 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50 font-medium"
         >
           Deny
         </button>
@@ -562,60 +562,60 @@ function OverviewTaskCard({ item, agentName }: { item: QueueItem; agentName: str
 
   if (result) {
     return (
-      <div className="border rounded-lg bg-white p-5">
-        <div className="p-3 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+      <div className="border border-border-default rounded-md bg-surface-1 p-5">
+        <div className="p-3 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
       </div>
     )
   }
 
   return (
-    <div className="border border-orange-200 rounded-lg bg-white p-5 space-y-3">
+    <div className="border border-warning/30 rounded-md bg-surface-1 p-5 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-gray-900">{task.purpose}</p>
+          <p className="text-base font-semibold text-text-primary">{task.purpose}</p>
           <div className="flex items-center gap-2 mt-1.5">
             <StatusBadge status={task.status} />
             <LifetimeBadge lifetime={task.lifetime} />
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-text-tertiary">
               {agentName} &middot; {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
             </span>
           </div>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
-          isExpansion ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'
+        <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${
+          isExpansion ? 'bg-warning/15 text-warning' : 'bg-brand-muted text-brand'
         }`}>
           {isExpansion ? 'Scope expansion' : 'New task'}
         </span>
       </div>
 
-      <p className="text-sm text-gray-600">{summarizeActions(task.authorized_actions)}</p>
+      <p className="text-sm text-text-secondary">{summarizeActions(task.authorized_actions)}</p>
 
       {isExpansion && task.pending_action && (
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
-          <div className="text-xs font-medium text-orange-800">Scope expansion requested</div>
+        <div className="bg-warning/10 border border-warning/30 rounded-md p-3 space-y-2">
+          <div className="text-xs font-medium text-warning">Scope expansion requested</div>
           <div className="flex items-center gap-2">
-            <span className="text-xs bg-white border border-orange-200 rounded px-2 py-0.5 text-orange-700">
+            <span className="text-xs bg-surface-1 border border-warning/30 rounded px-2 py-0.5 text-warning">
               {serviceName(task.pending_action.service)}: {actionName(task.pending_action.action)}
             </span>
             {task.pending_action.auto_execute && (
-              <span className="text-xs text-green-600 font-medium">auto-execute</span>
+              <span className="text-xs text-success font-medium">auto-execute</span>
             )}
           </div>
           {task.pending_reason && (
-            <p className="text-xs text-orange-700 italic">"{task.pending_reason}"</p>
+            <p className="text-xs text-warning italic">"{task.pending_reason}"</p>
           )}
         </div>
       )}
 
       {needsApproval && task.authorized_actions.some(a => a.expected_use) && (
         <div className="space-y-1">
-          <div className="text-xs font-medium text-gray-500">Agent-declared expected use:</div>
+          <div className="text-xs font-medium text-text-tertiary">Agent-declared expected use:</div>
           {task.authorized_actions.filter(a => a.expected_use).map(a => (
             <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-xs">
-              <span className="text-gray-500 w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
+              <span className="text-text-tertiary w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
                 {serviceName(a.service)}: {actionName(a.action)}
               </span>
-              <span className="text-gray-700 italic">{a.expected_use}</span>
+              <span className="text-text-secondary italic">{a.expected_use}</span>
             </div>
           ))}
         </div>
@@ -625,14 +625,14 @@ function OverviewTaskCard({ item, agentName }: { item: QueueItem; agentName: str
         <button
           onClick={() => approveMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
+          className="flex-1 py-2 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50 font-medium"
         >
           {approveMut.isPending ? 'Approving...' : isExpansion ? 'Approve Expansion' : 'Approve Task'}
         </button>
         <button
           onClick={() => denyMut.mutate()}
           disabled={isPending}
-          className="flex-1 py-2 text-sm rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 font-medium"
+          className="flex-1 py-2 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50 font-medium"
         >
           {isExpansion ? 'Deny Expansion' : 'Deny'}
         </button>

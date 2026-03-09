@@ -39,23 +39,23 @@ export default function VerifyEmail() {
   }, [token, navigate])
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow text-center">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-6 p-8 bg-surface-1 border border-border-default rounded-md text-center">
         {verifying ? (
           <>
-            <h1 className="text-2xl font-bold text-gray-900">Verifying your email...</h1>
-            <p className="text-gray-500">Please wait a moment.</p>
+            <h1 className="text-2xl font-bold text-text-primary">Verifying your email...</h1>
+            <p className="text-text-tertiary">Please wait a moment.</p>
           </>
         ) : error ? (
           <>
-            <h1 className="text-2xl font-bold text-gray-900">Verification failed</h1>
-            <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
-            <p className="text-sm text-gray-500">
+            <h1 className="text-2xl font-bold text-text-primary">Verification failed</h1>
+            <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
+            <p className="text-sm text-text-tertiary">
               The link may have expired or already been used.
             </p>
             <Link
               to="/register"
-              className="inline-block mt-2 text-blue-600 hover:underline text-sm"
+              className="inline-block mt-2 text-brand hover:underline text-sm"
             >
               Register again
             </Link>

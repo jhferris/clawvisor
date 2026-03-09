@@ -83,13 +83,13 @@ export default function SetupAuth() {
 
   if (!setupToken) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full p-8 bg-white rounded-lg shadow text-center">
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Session expired</h2>
-          <p className="text-sm text-gray-600 mb-4">Please sign in again.</p>
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="max-w-md w-full p-8 bg-surface-1 border border-border-default rounded-md text-center">
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Session expired</h2>
+          <p className="text-sm text-text-secondary mb-4">Please sign in again.</p>
           <button
             onClick={() => navigate('/login')}
-            className="py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
+            className="py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong"
           >
             Go to login
           </button>
@@ -99,22 +99,22 @@ export default function SetupAuth() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-6 p-8 bg-surface-1 border border-border-default rounded-md">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Clawvisor</h1>
-          <h2 className="mt-2 text-lg text-gray-600">
+          <h1 className="text-3xl font-bold text-text-primary">Clawvisor</h1>
+          <h2 className="mt-2 text-lg text-text-secondary">
             {isUpgrade ? 'Secure your account' : 'Set up authentication'}
           </h2>
           {isUpgrade && (
-            <p className="mt-1 text-sm text-amber-600">
+            <p className="mt-1 text-sm text-warning">
               Password-only login is no longer supported. Please add a passkey or enable TOTP.
             </p>
           )}
         </div>
 
         {error && (
-          <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+          <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
         )}
 
         {step === 'choose' && (
@@ -123,18 +123,18 @@ export default function SetupAuth() {
               <button
                 onClick={handlePasskey}
                 disabled={isSubmitting}
-                className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 text-left"
+                className="w-full py-3 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50 text-left"
               >
                 <div className="font-medium">Set up passkey</div>
-                <div className="text-sm text-blue-200 mt-0.5">Recommended &mdash; use Face ID, Touch ID, or your security key</div>
+                <div className="text-sm text-brand-strong mt-0.5">Recommended &mdash; use Face ID, Touch ID, or your security key</div>
               </button>
             )}
             <button
               onClick={() => setStep('password')}
-              className="w-full py-3 px-4 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 text-left"
+              className="w-full py-3 px-4 bg-surface-2 text-text-primary rounded font-medium hover:bg-surface-3 text-left"
             >
               <div className="font-medium">Use password instead</div>
-              <div className="text-sm text-gray-500 mt-0.5">Requires TOTP authenticator app for 2FA</div>
+              <div className="text-sm text-text-tertiary mt-0.5">Requires TOTP authenticator app for 2FA</div>
             </button>
           </div>
         )}
@@ -142,7 +142,7 @@ export default function SetupAuth() {
         {step === 'password' && (
           <form className="space-y-4" onSubmit={handleSetPassword}>
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-text-secondary">
                 Create a password
               </label>
               <input
@@ -152,21 +152,21 @@ export default function SetupAuth() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
               />
-              <p className="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
+              <p className="mt-1 text-xs text-text-tertiary">Minimum 8 characters</p>
             </div>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
             >
               {isSubmitting ? 'Setting up...' : 'Continue to TOTP setup'}
             </button>
             <button
               type="button"
               onClick={() => setStep('choose')}
-              className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+              className="w-full py-2 text-sm text-text-tertiary hover:text-text-primary"
             >
               Back
             </button>
@@ -175,7 +175,7 @@ export default function SetupAuth() {
 
         {step === 'totp' && (
           <form className="space-y-4" onSubmit={handleConfirmTOTP}>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-text-secondary">
               Scan this QR code with your authenticator app (Google Authenticator, 1Password, etc.)
             </p>
             {totpQR && (
@@ -185,12 +185,12 @@ export default function SetupAuth() {
             )}
             {totpSecret && (
               <div className="text-center">
-                <p className="text-xs text-gray-500 mb-1">Or enter this code manually:</p>
-                <code className="text-sm bg-gray-100 px-3 py-1 rounded font-mono select-all">{totpSecret}</code>
+                <p className="text-xs text-text-tertiary mb-1">Or enter this code manually:</p>
+                <code className="text-sm bg-surface-2 px-3 py-1 rounded font-mono select-all">{totpSecret}</code>
               </div>
             )}
             <div>
-              <label htmlFor="totp-code" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="totp-code" className="block text-sm font-medium text-text-secondary">
                 Enter 6-digit code
               </label>
               <input
@@ -202,14 +202,14 @@ export default function SetupAuth() {
                 required
                 value={totpCode}
                 onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-                className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 text-center text-2xl tracking-widest focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
                 autoComplete="one-time-code"
               />
             </div>
             <button
               type="submit"
               disabled={isSubmitting || totpCode.length !== 6}
-              className="w-full py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
             >
               {isSubmitting ? 'Verifying...' : 'Verify and finish'}
             </button>

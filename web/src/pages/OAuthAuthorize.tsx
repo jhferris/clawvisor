@@ -22,10 +22,10 @@ export default function OAuthAuthorize() {
 
   if (!clientId || !redirectUri || !codeChallenge) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 max-w-md w-full">
-          <h1 className="text-xl font-semibold text-red-400 mb-2">Authorization Error</h1>
-          <p className="text-gray-400">Missing required OAuth parameters.</p>
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="bg-surface-1 border border-border-default rounded-md p-8 max-w-md w-full">
+          <h1 className="text-xl font-semibold text-danger mb-2">Authorization Error</h1>
+          <p className="text-text-secondary">Missing required OAuth parameters.</p>
         </div>
       </div>
     )
@@ -63,17 +63,17 @@ export default function OAuthAuthorize() {
 
   if (redirecting) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 max-w-md w-full text-center">
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="bg-surface-1 border border-border-default rounded-md p-8 max-w-md w-full text-center">
           {showClose ? (
             <>
-              <h1 className="text-xl font-semibold text-gray-100 mb-2">Authorization Complete</h1>
-              <p className="text-gray-400 text-sm">You can close this page now.</p>
+              <h1 className="text-xl font-semibold text-text-primary mb-2">Authorization Complete</h1>
+              <p className="text-text-secondary text-sm">You can close this page now.</p>
             </>
           ) : (
             <>
-              <h1 className="text-xl font-semibold text-gray-100 mb-2">Redirecting...</h1>
-              <p className="text-gray-400 text-sm">Completing authorization.</p>
+              <h1 className="text-xl font-semibold text-text-primary mb-2">Redirecting...</h1>
+              <p className="text-text-secondary text-sm">Completing authorization.</p>
             </>
           )}
         </div>
@@ -83,28 +83,28 @@ export default function OAuthAuthorize() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 max-w-md w-full">
-          <h1 className="text-xl font-semibold text-red-400 mb-2">Authorization Error</h1>
-          <p className="text-gray-400">{error}</p>
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="bg-surface-1 border border-border-default rounded-md p-8 max-w-md w-full">
+          <h1 className="text-xl font-semibold text-danger mb-2">Authorization Error</h1>
+          <p className="text-text-secondary">{error}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-8 max-w-md w-full">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="bg-surface-1 border border-border-default rounded-md p-8 max-w-md w-full">
         <div className="text-center mb-6">
-          <h1 className="text-xl font-semibold text-gray-100 mb-2">Authorize Connection</h1>
-          <p className="text-gray-400 text-sm">
+          <h1 className="text-xl font-semibold text-text-primary mb-2">Authorize Connection</h1>
+          <p className="text-text-secondary text-sm">
             An application wants to connect as an agent to your Clawvisor instance.
           </p>
         </div>
 
-        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 mb-6">
-          <p className="text-sm text-gray-400 mb-2">This will allow the application to:</p>
-          <ul className="text-sm text-gray-300 space-y-1">
+        <div className="bg-surface-2 border border-border-strong rounded-md p-4 mb-6">
+          <p className="text-sm text-text-secondary mb-2">This will allow the application to:</p>
+          <ul className="text-sm text-text-secondary space-y-1">
             <li>View your service catalog</li>
             <li>Create and manage tasks</li>
             <li>Make gateway requests (subject to your approval settings)</li>
@@ -114,13 +114,13 @@ export default function OAuthAuthorize() {
         <div className="flex gap-3">
           <button
             onClick={handleDeny}
-            className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg border border-gray-700 text-sm font-medium transition-colors"
+            className="flex-1 px-4 py-2 bg-surface-2 hover:bg-surface-3 text-text-secondary rounded border border-border-strong text-sm font-medium transition-colors"
           >
             Deny
           </button>
           <button
             onClick={handleApprove}
-            className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+            className="flex-1 px-4 py-2 bg-brand hover:bg-brand-strong text-surface-0 rounded text-sm font-medium transition-colors"
           >
             Authorize
           </button>

@@ -23,7 +23,7 @@ function Toggle({
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
         disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-      } ${loading ? 'opacity-60' : ''} ${checked ? 'bg-red-500' : 'bg-gray-300'}`}
+      } ${loading ? 'opacity-60' : ''} ${checked ? 'bg-danger' : 'bg-border-strong'}`}
     >
       <span
         className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
@@ -88,11 +88,11 @@ function ActionRow({
         loading={loading}
         onChange={handleToggle}
       />
-      <span className={`text-sm flex-1 ${isBlocked ? 'text-red-700 font-medium' : 'text-gray-700'}`}>
+      <span className={`text-sm flex-1 ${isBlocked ? 'text-danger font-medium' : 'text-text-secondary'}`}>
         {actionName(action)}
       </span>
       {isBlocked && !showReason && (
-        <span className="text-xs text-red-400">Blocked</span>
+        <span className="text-xs text-danger">Blocked</span>
       )}
       {showReason && !isBlocked && (
         <div className="flex items-center gap-2">
@@ -102,19 +102,19 @@ function ActionRow({
             onChange={e => setReason(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleConfirmBlock()}
             placeholder="Reason (optional)"
-            className="text-xs rounded border border-gray-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-red-400 w-44"
+            className="text-xs rounded border border-border-default bg-surface-0 text-text-primary px-2 py-1 focus:outline-none focus:ring-1 focus:ring-danger/30 focus:border-danger w-44 placeholder:text-text-tertiary"
             autoFocus
           />
           <button
             onClick={handleConfirmBlock}
             disabled={createMut.isPending}
-            className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            className="text-xs px-2 py-1 rounded bg-danger text-surface-0 hover:bg-red-500 disabled:opacity-50"
           >
             Block
           </button>
           <button
             onClick={() => setShowReason(false)}
-            className="text-xs text-gray-400 hover:text-gray-600"
+            className="text-xs text-text-tertiary hover:text-text-primary"
           >
             Cancel
           </button>
@@ -169,7 +169,7 @@ function WildcardToggle({
   return (
     <div className={`flex items-center gap-3 ${loading ? 'opacity-60' : ''}`}>
       <Toggle checked={isBlocked} loading={loading} onChange={handleToggle} />
-      <span className={`text-xs font-medium ${isBlocked ? 'text-red-600' : 'text-gray-500'}`}>
+      <span className={`text-xs font-medium ${isBlocked ? 'text-danger' : 'text-text-tertiary'}`}>
         Block all actions
       </span>
       {showReason && !isBlocked && (
@@ -180,19 +180,19 @@ function WildcardToggle({
             onChange={e => setReason(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleConfirmBlock()}
             placeholder="Reason (optional)"
-            className="text-xs rounded border border-gray-300 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-red-400 w-44"
+            className="text-xs rounded border border-border-default bg-surface-0 text-text-primary px-2 py-1 focus:outline-none focus:ring-1 focus:ring-danger/30 focus:border-danger w-44 placeholder:text-text-tertiary"
             autoFocus
           />
           <button
             onClick={handleConfirmBlock}
             disabled={createMut.isPending}
-            className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            className="text-xs px-2 py-1 rounded bg-danger text-surface-0 hover:bg-red-500 disabled:opacity-50"
           >
             Block
           </button>
           <button
             onClick={() => setShowReason(false)}
-            className="text-xs text-gray-400 hover:text-gray-600"
+            className="text-xs text-text-tertiary hover:text-text-primary"
           >
             Cancel
           </button>
@@ -225,15 +225,15 @@ function ServiceGroup({
   const hasWildcard = !!wildcardId
 
   return (
-    <div className={`bg-white border rounded-lg overflow-hidden border-l-4 ${brand.border}`}>
+    <div className={`bg-surface-1 border border-border-default rounded-md overflow-hidden border-l-4 ${brand.border}`}>
       <div className="px-4 py-3 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">{serviceName(svc.id, svc.alias)}</h3>
-          <p className="text-xs text-gray-400">{svcKey}</p>
+          <h3 className="text-sm font-semibold text-text-primary">{serviceName(svc.id, svc.alias)}</h3>
+          <p className="text-xs text-text-tertiary">{svcKey}</p>
         </div>
         <WildcardToggle serviceId={svcKey} restrictionId={wildcardId} />
       </div>
-      <div className="border-t divide-y divide-gray-100">
+      <div className="border-t border-border-default divide-y divide-border-subtle">
         {svc.actions.map(action => (
           <ActionRow
             key={action}
@@ -270,23 +270,23 @@ export default function Restrictions() {
 
   return (
     <div className="p-8 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Restrictions</h1>
-      <p className="text-sm text-gray-500">
+      <h1 className="text-2xl font-bold text-text-primary">Restrictions</h1>
+      <p className="text-sm text-text-tertiary">
         Block specific service actions. Any agent request matching a restriction is rejected immediately.
       </p>
 
-      {isLoading && <div className="text-sm text-gray-400">Loading...</div>}
+      {isLoading && <div className="text-sm text-text-tertiary">Loading...</div>}
 
       {!isLoading && allServices.length === 0 && (
-        <div className="text-sm text-gray-400 py-8 text-center">
+        <div className="text-sm text-text-tertiary py-8 text-center">
           No services registered. Add adapters in the server configuration to manage restrictions.
         </div>
       )}
 
       {!isLoading && allServices.length > 0 && activated.length === 0 && (
-        <div className="text-sm text-gray-400 py-8 text-center">
+        <div className="text-sm text-text-tertiary py-8 text-center">
           Activate a service first to manage restrictions.{' '}
-          <Link to="/dashboard/services" className="text-blue-600 hover:underline">Go to Services</Link>
+          <Link to="/dashboard/services" className="text-brand hover:underline">Go to Services</Link>
         </div>
       )}
 
@@ -304,7 +304,7 @@ export default function Restrictions() {
         <div className="space-y-4">
           <button
             onClick={() => setShowAll(s => !s)}
-            className="text-sm text-gray-400 hover:text-gray-600"
+            className="text-sm text-text-tertiary hover:text-text-primary"
           >
             {showAll ? 'Hide unactivated services' : `Show all services (${unactivated.length} not activated)`}
           </button>

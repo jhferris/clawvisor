@@ -61,15 +61,15 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-8 p-8 bg-surface-1 border border-border-default rounded-md">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Clawvisor</h1>
-          <h2 className="mt-2 text-lg text-gray-600">Sign in to your account</h2>
+          <h1 className="text-3xl font-bold text-text-primary">Clawvisor</h1>
+          <h2 className="mt-2 text-lg text-text-secondary">Sign in to your account</h2>
         </div>
 
         {error && (
-          <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+          <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
         )}
 
         {passkeysEnabled && (
@@ -77,16 +77,16 @@ export default function Login() {
             <button
               onClick={handlePasskeyLogin}
               disabled={isSubmitting}
-              className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full py-3 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
             >
               {isSubmitting ? 'Authenticating...' : 'Sign in with passkey'}
             </button>
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
+                <div className="w-full border-t border-border-subtle" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">or sign in with password</span>
+                <span className="px-2 bg-surface-1 text-text-tertiary">or sign in with password</span>
               </div>
             </div>
           </div>
@@ -94,7 +94,7 @@ export default function Login() {
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="email" className="block text-sm font-medium text-text-secondary">
               Email
             </label>
             <input
@@ -103,12 +103,12 @@ export default function Login() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="password" className="block text-sm font-medium text-text-secondary">
               Password
             </label>
             <input
@@ -117,22 +117,22 @@ export default function Login() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="w-full py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
           >
             {isSubmitting ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-600">
+        <p className="text-center text-sm text-text-secondary">
           Don't have an account?{' '}
-          <Link to="/register" className="text-blue-600 hover:underline">
+          <Link to="/register" className="text-brand hover:underline">
             Register
           </Link>
         </p>

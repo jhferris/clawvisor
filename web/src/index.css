@@ -1,3 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background-color: #0a0c10;
+    color: #f0f1f3;
+  }
+  body {
+    @apply bg-surface-0 text-text-primary antialiased;
+  }
+}

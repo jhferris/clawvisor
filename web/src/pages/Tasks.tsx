@@ -69,8 +69,8 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
   const auditEntries = auditData?.entries ?? []
 
   return (
-    <div className={`border rounded-lg bg-white ${
-      needsApproval || needsExpansion ? 'border-orange-200' : ''
+    <div className={`border rounded-md bg-surface-1 ${
+      needsApproval || needsExpansion ? 'border-warning/30' : 'border-border-default'
     }`}>
       {/* Clickable header */}
       <div
@@ -80,11 +80,11 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
       {/* Header — purpose as hero */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-gray-900">{task.purpose}</p>
+          <p className="text-base font-semibold text-text-primary">{task.purpose}</p>
           <div className="flex items-center gap-2 mt-1.5">
             <StatusBadge status={task.status} />
             <LifetimeBadge lifetime={task.lifetime} />
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-text-tertiary">
               {agentName} · {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
             </span>
           </div>
@@ -94,34 +94,34 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
             <CountdownTimer expiresAt={task.expires_at} showLabel />
           )}
           {task.status === 'active' && isStanding && (
-            <span className="text-xs text-purple-600 font-medium">No expiry</span>
+            <span className="text-xs text-brand font-medium">No expiry</span>
           )}
           <div className="flex items-center gap-2 justify-end">
             {task.request_count > 0 && (
-              <span className="text-xs text-gray-400">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-text-tertiary">{task.request_count} request{task.request_count !== 1 ? 's' : ''}</span>
             )}
-            <span className="text-xs text-gray-300">{expanded ? '▲' : '▼'}</span>
+            <span className="text-xs text-text-secondary">{expanded ? '▲' : '▼'}</span>
           </div>
         </div>
       </div>
 
       {/* Authorized actions — prose summary */}
-      <p className="text-sm text-gray-600">{summarizeActions(task.authorized_actions)}</p>
+      <p className="text-sm text-text-secondary">{summarizeActions(task.authorized_actions)}</p>
 
       {/* Scope expansion detail */}
       {needsExpansion && task.pending_action && (
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
-          <div className="text-xs font-medium text-orange-800">Scope expansion requested</div>
+        <div className="bg-warning/10 border border-warning/30 rounded-md p-3 space-y-2">
+          <div className="text-xs font-medium text-warning">Scope expansion requested</div>
           <div className="flex items-center gap-2">
-            <span className="text-xs bg-white border border-orange-200 rounded px-2 py-0.5 text-orange-700">
+            <span className="text-xs bg-surface-1 border border-warning/30 rounded px-2 py-0.5 text-warning">
               {serviceName(task.pending_action.service)}: {actionName(task.pending_action.action)}
             </span>
             {task.pending_action.auto_execute && (
-              <span className="text-xs text-green-600 font-medium">auto-execute</span>
+              <span className="text-xs text-success font-medium">auto-execute</span>
             )}
           </div>
           {task.pending_reason && (
-            <p className="text-xs text-orange-700 italic">"{task.pending_reason}"</p>
+            <p className="text-xs text-warning italic">"{task.pending_reason}"</p>
           )}
         </div>
       )}
@@ -130,20 +130,20 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
       {/* Result message */}
       {result && (
         <div className="px-5 pb-3">
-          <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">{result}</div>
+          <div className="p-2 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
         </div>
       )}
 
       {/* Agent-declared expected use (read-only, shown when present) */}
       {!result && needsApproval && task.authorized_actions.some(a => a.expected_use) && (
         <div className="px-5 pb-2 space-y-1">
-          <div className="text-xs font-medium text-gray-500">Agent-declared expected use:</div>
+          <div className="text-xs font-medium text-text-tertiary">Agent-declared expected use:</div>
           {task.authorized_actions.filter(a => a.expected_use).map(a => (
             <div key={`${a.service}|${a.action}`} className="flex items-start gap-2 text-xs">
-              <span className="text-gray-500 w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
+              <span className="text-text-tertiary w-40 shrink-0 truncate" title={`${a.service}:${a.action}`}>
                 {serviceName(a.service)}: {actionName(a.action)}
               </span>
-              <span className="text-gray-700 italic">{a.expected_use}</span>
+              <span className="text-text-secondary italic">{a.expected_use}</span>
             </div>
           ))}
         </div>
@@ -155,14 +155,14 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           <button
             onClick={() => approveMut.mutate()}
             disabled={isPending}
-            className="flex-1 py-1.5 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex-1 py-1.5 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50"
           >
             {approveMut.isPending ? 'Approving...' : 'Approve Task'}
           </button>
           <button
             onClick={() => denyMut.mutate()}
             disabled={isPending}
-            className="flex-1 py-1.5 text-sm rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+            className="flex-1 py-1.5 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50"
           >
             Deny
           </button>
@@ -174,14 +174,14 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           <button
             onClick={() => expandApproveMut.mutate()}
             disabled={isPending}
-            className="flex-1 py-1.5 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+            className="flex-1 py-1.5 text-sm rounded bg-success text-surface-0 hover:bg-green-400 disabled:opacity-50"
           >
             {expandApproveMut.isPending ? 'Approving...' : 'Approve Expansion'}
           </button>
           <button
             onClick={() => expandDenyMut.mutate()}
             disabled={isPending}
-            className="flex-1 py-1.5 text-sm rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+            className="flex-1 py-1.5 text-sm rounded bg-danger/10 text-danger border border-danger/20 hover:bg-danger/20 disabled:opacity-50"
           >
             Deny Expansion
           </button>
@@ -194,7 +194,7 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
           <button
             onClick={() => revokeMut.mutate()}
             disabled={isPending}
-            className="py-1.5 px-4 text-sm rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+            className="py-1.5 px-4 text-sm rounded bg-surface-2 text-text-primary hover:bg-surface-3 disabled:opacity-50"
           >
             {revokeMut.isPending ? 'Revoking...' : 'Revoke'}
           </button>
@@ -203,16 +203,16 @@ function TaskCard({ task, agentName }: { task: Task; agentName: string }) {
 
       {/* Expanded audit entries */}
       {expanded && (
-        <div className="border-t px-5 py-4 space-y-2">
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Actions</div>
-          {auditLoading && <div className="text-xs text-gray-400">Loading...</div>}
+        <div className="border-t border-border-default px-5 py-4 space-y-2">
+          <div className="text-xs font-medium text-text-tertiary uppercase tracking-wide">Actions</div>
+          {auditLoading && <div className="text-xs text-text-tertiary">Loading...</div>}
           {!auditLoading && auditEntries.length === 0 && (
-            <div className="text-xs text-gray-400">No actions recorded yet.</div>
+            <div className="text-xs text-text-tertiary">No actions recorded yet.</div>
           )}
           {auditEntries.length > 0 && (
-            <div className="bg-gray-50 border rounded-lg overflow-hidden">
+            <div className="bg-surface-2 border border-border-default rounded-md overflow-hidden">
               <table className="w-full">
-                <thead className="bg-gray-100 text-xs text-gray-500 font-medium">
+                <thead className="bg-surface-2 text-xs text-text-tertiary font-medium">
                   <tr>
                     <th className="px-3 py-1.5 text-left">Time</th>
                     <th className="px-3 py-1.5 text-left">Service</th>
@@ -240,10 +240,10 @@ function TaskAuditRow({ entry }: { entry: AuditEntry }) {
   return (
     <>
       <tr
-        className="border-t hover:bg-white cursor-pointer text-xs"
+        className="border-t border-border-default hover:bg-surface-2 cursor-pointer text-xs"
         onClick={ev => { ev.stopPropagation(); setExpanded(e => !e) }}
       >
-        <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
+        <td className="px-3 py-1.5 text-text-tertiary whitespace-nowrap" title={format(new Date(entry.timestamp), 'PPpp')}>
           {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
         </td>
         <td className="px-3 py-1.5">
@@ -254,58 +254,58 @@ function TaskAuditRow({ entry }: { entry: AuditEntry }) {
         </td>
         <td className="px-3 py-1.5">{actionName(entry.action)}</td>
         <td className="px-3 py-1.5">
-          <span className={`inline-block px-1.5 py-0.5 rounded-full text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-gray-100 text-gray-600'}`}>
+          <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${OUTCOME_STYLE[entry.outcome] ?? 'bg-surface-2 text-text-tertiary'}`}>
             {entry.outcome}
           </span>
         </td>
-        <td className="px-3 py-1.5 text-gray-400">{entry.duration_ms}ms</td>
+        <td className="px-3 py-1.5 text-text-tertiary">{entry.duration_ms}ms</td>
       </tr>
       {expanded && (
-        <tr className="border-t bg-white">
+        <tr className="border-t border-border-default bg-surface-1">
           <td colSpan={5} className="px-3 py-2">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <div className="text-gray-500 font-medium mb-1">
+                <div className="text-text-tertiary font-medium mb-1">
                   {formatServiceAction(entry.service, entry.action)}
                 </div>
-                <pre className="bg-gray-50 border rounded p-2 overflow-auto max-h-32 text-gray-700 text-[11px]">
+                <pre className="bg-surface-2 border border-border-default rounded p-2 overflow-auto max-h-32 text-text-secondary text-[11px]">
                   {JSON.stringify(entry.params_safe, null, 2)}
                 </pre>
               </div>
               <div className="space-y-1.5">
                 {entry.reason && (
-                  <div className="bg-blue-50 rounded p-1.5">
-                    <div className="text-blue-600 font-medium">Reason</div>
-                    <div className="text-gray-700">{entry.reason}</div>
+                  <div className="bg-brand/10 rounded p-1.5">
+                    <div className="text-brand font-medium">Reason</div>
+                    <div className="text-text-secondary">{entry.reason}</div>
                   </div>
                 )}
                 {entry.error_msg && (
-                  <div><span className="text-gray-500">Error:</span> <span className="text-red-600">{entry.error_msg}</span></div>
+                  <div><span className="text-text-tertiary">Error:</span> <span className="text-danger">{entry.error_msg}</span></div>
                 )}
                 {entry.safety_flagged && (
-                  <div className="text-orange-600">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
+                  <div className="text-warning">Safety flagged{entry.safety_reason ? `: ${entry.safety_reason}` : ''}</div>
                 )}
                 {entry.verification && (
-                  <div className="bg-orange-50 rounded p-1.5 space-y-1">
-                    <div className="text-orange-700 font-medium">Intent Verification</div>
+                  <div className="bg-warning/10 rounded p-1.5 space-y-1">
+                    <div className="text-warning font-medium">Intent Verification</div>
                     <div className="flex gap-2 flex-wrap">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.param_scope === 'ok' ? 'bg-green-100 text-green-700'
-                        : entry.verification.param_scope === 'violation' ? 'bg-red-100 text-red-700'
-                        : 'bg-gray-100 text-gray-500'
+                        entry.verification.param_scope === 'ok' ? 'bg-success/15 text-success'
+                        : entry.verification.param_scope === 'violation' ? 'bg-danger/15 text-danger'
+                        : 'bg-surface-2 text-text-tertiary'
                       }`}>params: {entry.verification.param_scope}</span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                        entry.verification.reason_coherence === 'ok' ? 'bg-green-100 text-green-700'
-                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-red-100 text-red-700'
-                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-yellow-100 text-yellow-700'
-                        : 'bg-gray-100 text-gray-500'
+                        entry.verification.reason_coherence === 'ok' ? 'bg-success/15 text-success'
+                        : entry.verification.reason_coherence === 'incoherent' ? 'bg-danger/15 text-danger'
+                        : entry.verification.reason_coherence === 'insufficient' ? 'bg-warning/15 text-warning'
+                        : 'bg-surface-2 text-text-tertiary'
                       }`}>reason: {entry.verification.reason_coherence}</span>
                       {entry.verification.cached && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-600">cached</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-brand/10 text-brand">cached</span>
                       )}
                     </div>
-                    <div className="text-gray-600 text-[11px]">{entry.verification.explanation}</div>
-                    <div className="text-gray-400 text-[10px]">{entry.verification.model} · {entry.verification.latency_ms}ms</div>
+                    <div className="text-text-secondary text-[11px]">{entry.verification.explanation}</div>
+                    <div className="text-text-tertiary text-[10px]">{entry.verification.model} · {entry.verification.latency_ms}ms</div>
                   </div>
                 )}
               </div>
@@ -415,16 +415,16 @@ export default function Tasks() {
     <div className="p-8 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
+          <h1 className="text-2xl font-bold text-text-primary">Tasks</h1>
           {actionableCount > 0 && (
-            <span className="bg-orange-500 text-white text-xs font-bold rounded-full px-2.5 py-0.5">
+            <span className="bg-warning text-surface-0 text-xs font-bold rounded px-2.5 py-0.5 font-mono">
               {actionableCount} awaiting action
             </span>
           )}
         </div>
         <button
           onClick={() => refetch()}
-          className="text-sm text-blue-600 hover:underline"
+          className="text-sm text-brand hover:underline"
         >
           Refresh
         </button>
@@ -432,9 +432,9 @@ export default function Tasks() {
 
       {/* Deep link result banner */}
       {deepLinkResult && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-3 flex items-center justify-between">
-          <span className="text-blue-800 text-sm">{deepLinkResult}</span>
-          <button onClick={() => setDeepLinkResult(null)} className="text-blue-500 text-xs hover:underline">Dismiss</button>
+        <div className="rounded-md border border-brand/30 bg-brand/10 px-5 py-3 flex items-center justify-between">
+          <span className="text-brand text-sm">{deepLinkResult}</span>
+          <button onClick={() => setDeepLinkResult(null)} className="text-brand text-xs hover:underline">Dismiss</button>
         </div>
       )}
 
@@ -443,7 +443,7 @@ export default function Tasks() {
         <select
           value={filter}
           onChange={e => setFilter(e.target.value)}
-          className="text-sm rounded border border-gray-300 px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          className="text-sm rounded border border-border-default bg-surface-0 text-text-primary px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
         >
           {STATUS_FILTER_OPTIONS.map(o => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -451,13 +451,13 @@ export default function Tasks() {
         </select>
       </div>
 
-      {isLoading && <div className="text-sm text-gray-400">Loading...</div>}
+      {isLoading && <div className="text-sm text-text-tertiary">Loading...</div>}
 
       {!isLoading && sorted.length === 0 && (
-        <div className="text-sm text-gray-400 py-8 text-center">
+        <div className="text-sm text-text-tertiary py-8 text-center">
           {filter
             ? 'No tasks match this filter.'
-            : <>When your agent requests permission to run a task, it'll appear here for your approval.{(agentsData ?? []).length === 0 && (<>{' '}<Link to="/dashboard/agents" className="text-blue-600 hover:underline">Create an agent</Link> to get started.</>)}</>
+            : <>When your agent requests permission to run a task, it'll appear here for your approval.{(agentsData ?? []).length === 0 && (<>{' '}<Link to="/dashboard/agents" className="text-brand hover:underline">Create an agent</Link> to get started.</>)}</>
           }
         </div>
       )}

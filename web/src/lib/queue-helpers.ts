@@ -3,13 +3,13 @@
 import { serviceName, actionName } from './services'
 
 export const STATUS_STYLES: Record<string, string> = {
-  pending_approval: 'bg-orange-100 text-orange-800',
-  pending_scope_expansion: 'bg-orange-100 text-orange-800',
-  active: 'bg-green-100 text-green-800',
-  completed: 'bg-gray-100 text-gray-600',
-  expired: 'bg-gray-100 text-gray-500',
-  denied: 'bg-red-100 text-red-700',
-  revoked: 'bg-gray-100 text-gray-500',
+  pending_approval: 'bg-warning/15 text-warning',
+  pending_scope_expansion: 'bg-warning/15 text-warning',
+  active: 'bg-success/15 text-success',
+  completed: 'bg-surface-2 text-text-tertiary',
+  expired: 'bg-surface-2 text-text-tertiary',
+  denied: 'bg-danger/15 text-danger',
+  revoked: 'bg-surface-2 text-text-tertiary',
 }
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -23,13 +23,13 @@ export const STATUS_LABELS: Record<string, string> = {
 }
 
 export const OUTCOME_STYLE: Record<string, string> = {
-  executed: 'bg-green-100 text-green-800',
-  blocked: 'bg-red-100 text-red-800',
-  restricted: 'bg-orange-100 text-orange-800',
-  pending: 'bg-yellow-100 text-yellow-800',
-  denied: 'bg-gray-100 text-gray-600',
-  error: 'bg-red-100 text-red-700',
-  timeout: 'bg-gray-100 text-gray-500',
+  executed: 'bg-success/15 text-success',
+  blocked: 'bg-danger/15 text-danger',
+  restricted: 'bg-warning/15 text-warning',
+  pending: 'bg-warning/15 text-warning',
+  denied: 'bg-surface-2 text-text-tertiary',
+  error: 'bg-danger/15 text-danger',
+  timeout: 'bg-surface-2 text-text-tertiary',
 }
 
 export function summarizeActions(actions: { service: string; action: string; auto_execute: boolean }[]): string {

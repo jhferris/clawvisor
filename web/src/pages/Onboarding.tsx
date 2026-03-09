@@ -34,7 +34,7 @@ function Stepper({
         return (
           <div key={label} className="flex items-center">
             {i > 0 && (
-              <div className={`w-12 h-px mx-1 ${isDone || isActive ? 'bg-blue-400' : 'bg-gray-300'}`} />
+              <div className={`w-12 h-px mx-1 ${isDone || isActive ? 'bg-brand' : 'bg-border-default'}`} />
             )}
             <button
               type="button"
@@ -44,10 +44,10 @@ function Stepper({
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
                   isDone
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-brand text-surface-0'
                     : isActive
-                      ? 'bg-blue-600 text-white ring-4 ring-blue-100'
-                      : 'bg-gray-200 text-gray-500'
+                      ? 'bg-brand text-surface-0 ring-2 ring-brand/20'
+                      : 'bg-surface-2 text-text-tertiary'
                 }`}
               >
                 {isDone ? (
@@ -58,7 +58,7 @@ function Stepper({
                   stepNum
                 )}
               </div>
-              <span className={`text-xs font-medium whitespace-nowrap ${isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+              <span className={`text-xs font-medium whitespace-nowrap ${isActive ? 'text-text-primary' : 'text-text-tertiary'}`}>
                 {label}
               </span>
             </button>
@@ -186,16 +186,16 @@ function OnboardingServices({
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">How Clawvisor works</h2>
+          <h2 className="text-lg font-semibold text-text-primary">How Clawvisor works</h2>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <button onClick={onSkip} className="text-sm text-gray-400 hover:text-gray-600">
+          <button onClick={onSkip} className="text-sm text-text-tertiary hover:text-text-primary">
             Skip
           </button>
           {hasActivated && (
             <button
               onClick={onComplete}
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              className="px-5 py-2 text-sm font-medium rounded bg-brand text-surface-0 hover:bg-brand-strong"
             >
               Continue
             </button>
@@ -203,7 +203,7 @@ function OnboardingServices({
         </div>
       </div>
 
-      <div className="text-sm text-gray-600 space-y-2">
+      <div className="text-sm text-text-secondary space-y-2">
         <p>
           Clawvisor sits between your AI agent and sensitive APIs like Gmail, Slack, and GitHub.
           Your agent never holds credentials directly — instead, every request flows through Clawvisor,
@@ -212,24 +212,24 @@ function OnboardingServices({
         <p>To get started, connect at least one service below.</p>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {serviceTypes.map(st => {
           const desc = serviceDescription(st.baseId)
           const isActivated = st.activatedCount > 0
           return (
-            <div key={st.baseId} className="border rounded-lg p-4 space-y-2 bg-white">
+            <div key={st.baseId} className="border border-border-default rounded-md p-4 space-y-2 bg-surface-1">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-gray-900 text-sm">{serviceName(st.baseId)}</h3>
-                  {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <h3 className="font-semibold text-text-primary text-sm">{serviceName(st.baseId)}</h3>
+                  {desc && <p className="text-xs text-text-tertiary mt-0.5">{desc}</p>}
+                  <p className="text-xs text-text-tertiary mt-0.5">
                     {st.oauth ? 'OAuth' : 'API key'}
                   </p>
                 </div>
                 {isActivated && (
-                  <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                  <span className="text-xs font-medium text-success bg-success/10 px-2 py-0.5 rounded">
                     Connected
                   </span>
                 )}
@@ -238,7 +238,7 @@ function OnboardingServices({
               {/* Alias input */}
               {aliasInputFor === st.baseId && (
                 <div className="space-y-1.5">
-                  <p className="text-xs text-gray-500">Label this connection (leave blank for default):</p>
+                  <p className="text-xs text-text-tertiary">Label this connection (leave blank for default):</p>
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -246,18 +246,18 @@ function OnboardingServices({
                       onChange={e => setAliasValue(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && confirmAlias(st)}
                       placeholder="e.g. personal, work"
-                      className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="flex-1 text-xs px-2 py-1.5 border border-border-default bg-surface-0 text-text-primary rounded focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
                       autoFocus
                     />
                     <button
                       onClick={() => confirmAlias(st)}
-                      className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                      className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong"
                     >
                       Continue
                     </button>
                     <button
                       onClick={() => setAliasInputFor(null)}
-                      className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-primary hover:bg-surface-2"
                     >
                       Cancel
                     </button>
@@ -274,19 +274,19 @@ function OnboardingServices({
                     onChange={e => setKeyValue(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
                     placeholder="Paste your token…"
-                    className="flex-1 text-xs px-2 py-1.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="flex-1 text-xs px-2 py-1.5 border border-border-default bg-surface-0 text-text-primary rounded focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
                     autoFocus
                   />
                   <button
                     onClick={handleSaveKey}
                     disabled={saving || !keyValue.trim()}
-                    className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                    className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>
                   <button
                     onClick={() => { setKeyInputFor(null); setKeyValue('') }}
-                    className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    className="text-xs px-3 py-1.5 rounded border border-border-strong text-text-primary hover:bg-surface-2"
                   >
                     Cancel
                   </button>
@@ -297,7 +297,7 @@ function OnboardingServices({
               {aliasInputFor !== st.baseId && keyInputFor !== st.baseId && !isActivated && (
                 <button
                   onClick={() => showAliasPrompt(st)}
-                  className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                  className="text-xs px-3 py-1.5 rounded bg-brand text-surface-0 hover:bg-brand-strong"
                 >
                   Activate
                 </button>
@@ -341,50 +341,50 @@ function OnboardingAgent({ onComplete, onSkip }: { onComplete: () => void; onSki
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Create an agent</h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <h2 className="text-lg font-semibold text-text-primary">Create an agent</h2>
+          <p className="text-sm text-text-tertiary mt-1">
             Agents use tokens to make requests through Clawvisor. You'll need at least one.
           </p>
         </div>
-        <button onClick={onSkip} className="text-sm text-gray-400 hover:text-gray-600 shrink-0">
+        <button onClick={onSkip} className="text-sm text-text-tertiary hover:text-text-primary shrink-0">
           Skip
         </button>
       </div>
 
-      {formError && <p className="text-sm text-red-500">{formError}</p>}
+      {formError && <p className="text-sm text-danger">{formError}</p>}
 
       {!newToken ? (
-        <div className="bg-white border rounded-lg p-5 space-y-4">
+        <div className="bg-surface-1 border border-border-default rounded-md p-5 space-y-4">
           <div className="flex gap-3">
             <input
               value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && name.trim() && createMut.mutate()}
               placeholder="Agent name (e.g. claude, my-bot)"
-              className="flex-1 text-sm rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="flex-1 text-sm rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
               autoFocus
             />
             <button
               onClick={() => createMut.mutate()}
               disabled={createMut.isPending || !name.trim()}
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              className="px-5 py-2 text-sm font-medium rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
             >
               {createMut.isPending ? 'Creating…' : 'Create'}
             </button>
           </div>
         </div>
       ) : (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-5 space-y-3">
-          <p className="text-sm font-medium text-green-800">
+        <div className="bg-success/10 border border-success/30 rounded-md p-5 space-y-3">
+          <p className="text-sm font-medium text-success">
             Agent created! Copy your token now — it won't be shown again.
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 bg-white border border-green-200 rounded px-3 py-2 text-xs font-mono text-gray-800 break-all">
+            <code className="flex-1 bg-surface-1 border border-success/30 rounded px-3 py-2 text-xs font-mono text-text-primary break-all">
               {newToken}
             </code>
             <button
               onClick={handleCopy}
-              className="text-xs px-3 py-1.5 rounded border border-green-300 text-green-700 hover:bg-green-100 min-w-[60px]"
+              className="text-xs px-3 py-1.5 rounded border border-success/30 text-success hover:bg-success/10 min-w-[60px]"
             >
               {copied ? 'Copied!' : 'Copy'}
             </button>
@@ -392,7 +392,7 @@ function OnboardingAgent({ onComplete, onSkip }: { onComplete: () => void; onSki
           <div className="flex justify-end pt-1">
             <button
               onClick={onComplete}
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              className="px-5 py-2 text-sm font-medium rounded bg-brand text-surface-0 hover:bg-brand-strong"
             >
               Continue
             </button>
@@ -484,22 +484,22 @@ function OnboardingTelegram({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900">Set up Telegram notifications</h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <h2 className="text-lg font-semibold text-text-primary">Set up Telegram notifications</h2>
+        <p className="text-sm text-text-tertiary mt-1">
           Get notified about approval requests and agent activity via Telegram.
         </p>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       {pairingSuccess ? (
         /* ── Success ────────────────────────────────────────────── */
-        <div className="bg-green-50 border border-green-200 rounded-lg p-5 space-y-3">
-          <p className="text-sm font-medium text-green-800">Telegram paired successfully!</p>
+        <div className="bg-success/10 border border-success/30 rounded-md p-5 space-y-3">
+          <p className="text-sm font-medium text-success">Telegram paired successfully!</p>
           <div className="flex justify-end">
             <button
               onClick={onComplete}
-              className="px-5 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              className="px-5 py-2 text-sm font-medium rounded bg-brand text-surface-0 hover:bg-brand-strong"
             >
               Finish
             </button>
@@ -508,29 +508,29 @@ function OnboardingTelegram({
       ) : !pairingId ? (
         /* ── Enter bot token ───────────────────────────────────── */
         <div className="space-y-3">
-          <div className="bg-gray-50 border rounded-lg p-4 text-sm text-gray-700 space-y-2">
-            <p className="font-medium text-gray-800">Setup steps:</p>
-            <ol className="list-decimal list-inside space-y-1.5 text-gray-600">
-              <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">@BotFather</a></li>
-              <li>Send <code className="bg-gray-200 px-1 rounded text-xs">/newbot</code> and follow the prompts</li>
+          <div className="bg-surface-2 border border-border-default rounded-md p-4 text-sm text-text-secondary space-y-2">
+            <p className="font-medium text-text-primary">Setup steps:</p>
+            <ol className="list-decimal list-inside space-y-1.5 text-text-secondary">
+              <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-brand hover:underline">@BotFather</a></li>
+              <li>Send <code className="bg-surface-2 px-1 rounded text-xs">/newbot</code> and follow the prompts</li>
               <li>Copy the <strong>bot token</strong> BotFather gives you</li>
             </ol>
           </div>
-          <div className="bg-white border rounded-lg p-5 space-y-3">
+          <div className="bg-surface-1 border border-border-default rounded-md p-5 space-y-3">
             <div>
-              <label className="text-xs font-medium text-gray-600">Bot Token</label>
+              <label className="text-xs font-medium text-text-tertiary">Bot Token</label>
               <input
                 type="password"
                 value={botToken}
                 onChange={e => { setBotToken(e.target.value); setError(null) }}
                 placeholder="1234567890:ABCDEF..."
-                className="mt-1 block w-full text-sm rounded border border-gray-300 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="mt-1 block w-full text-sm rounded border border-border-default bg-surface-0 text-text-primary px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
               />
             </div>
             <button
               onClick={() => startMut.mutate()}
               disabled={startMut.isPending || !botToken}
-              className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-1.5 text-sm rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
             >
               {startMut.isPending ? 'Validating...' : 'Start Pairing'}
             </button>
@@ -538,34 +538,34 @@ function OnboardingTelegram({
         </div>
       ) : pairingStatus === 'polling' ? (
         /* ── Waiting for /start ────────────────────────────────── */
-        <div className="bg-white border rounded-lg p-5 space-y-3">
-          <p className="text-sm text-gray-700">
+        <div className="bg-surface-1 border border-border-default rounded-md p-5 space-y-3">
+          <p className="text-sm text-text-secondary">
             Open{' '}
             <a
               href={`https://t.me/${botUsername}`}
               target="_blank"
               rel="noreferrer"
-              className="text-blue-600 hover:underline font-medium"
+              className="text-brand hover:underline font-medium"
             >
               @{botUsername}
             </a>{' '}
-            in Telegram and send <code className="bg-gray-200 px-1 rounded text-xs">/start</code>
+            in Telegram and send <code className="bg-surface-2 px-1 rounded text-xs">/start</code>
           </p>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <svg className="animate-spin h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+          <div className="flex items-center gap-2 text-sm text-text-tertiary">
+            <svg className="animate-spin h-4 w-4 text-brand" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             Waiting for your message...
           </div>
-          <button onClick={resetPairing} className="text-sm text-gray-500 hover:text-gray-700">
+          <button onClick={resetPairing} className="text-sm text-text-tertiary hover:text-text-primary">
             Cancel
           </button>
         </div>
       ) : pairingStatus === 'ready' ? (
         /* ── Enter pairing code ────────────────────────────────── */
-        <div className="bg-white border rounded-lg p-5 space-y-3">
-          <p className="text-sm text-gray-700">
+        <div className="bg-surface-1 border border-border-default rounded-md p-5 space-y-3">
+          <p className="text-sm text-text-secondary">
             Enter the pairing code from your Telegram chat:
           </p>
           <input
@@ -573,28 +573,28 @@ function OnboardingTelegram({
             onChange={e => { setCode(e.target.value.toUpperCase()); setError(null) }}
             placeholder="ABCD1234"
             maxLength={8}
-            className="block w-48 text-sm rounded border border-gray-300 px-3 py-1.5 font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-blue-400"
+            className="block w-48 text-sm rounded border border-border-default bg-surface-0 text-text-primary px-3 py-1.5 font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
           />
           <div className="flex items-center gap-2">
             <button
               onClick={() => confirmMut.mutate()}
               disabled={confirmMut.isPending || code.length !== 8}
-              className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-1.5 text-sm rounded bg-brand text-surface-0 hover:bg-brand-strong disabled:opacity-50"
             >
               {confirmMut.isPending ? 'Confirming...' : 'Confirm'}
             </button>
-            <button onClick={resetPairing} className="text-sm text-gray-500 hover:text-gray-700">
+            <button onClick={resetPairing} className="text-sm text-text-tertiary hover:text-text-primary">
               Cancel
             </button>
           </div>
         </div>
       ) : pairingStatus === 'expired' ? (
         /* ── Expired ───────────────────────────────────────────── */
-        <div className="bg-white border rounded-lg p-5 space-y-3">
-          <p className="text-sm text-red-600">Pairing session expired. Please try again.</p>
+        <div className="bg-surface-1 border border-border-default rounded-md p-5 space-y-3">
+          <p className="text-sm text-danger">Pairing session expired. Please try again.</p>
           <button
             onClick={resetPairing}
-            className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            className="px-4 py-1.5 text-sm rounded bg-brand text-surface-0 hover:bg-brand-strong"
           >
             Start Over
           </button>
@@ -602,7 +602,7 @@ function OnboardingTelegram({
       ) : null}
 
       <div className="pt-2">
-        <button onClick={onSkip} className="text-sm text-gray-400 hover:text-gray-600">
+        <button onClick={onSkip} className="text-sm text-text-tertiary hover:text-text-primary">
           Skip — set this up later in Settings
         </button>
       </div>
@@ -664,16 +664,16 @@ export default function Onboarding({
   }
 
   return (
-    <section className="border rounded-lg bg-white p-6 space-y-6">
+    <section className="border border-border-default rounded-md bg-surface-1 p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Get started</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Three quick steps to start using Clawvisor.</p>
+          <h2 className="text-lg font-semibold text-text-primary">Get started</h2>
+          <p className="text-sm text-text-tertiary mt-0.5">Three quick steps to start using Clawvisor.</p>
         </div>
         <button
           onClick={onDismiss}
-          className="text-gray-400 hover:text-gray-600 text-sm"
+          className="text-text-tertiary hover:text-text-primary text-sm"
         >
           Dismiss
         </button>

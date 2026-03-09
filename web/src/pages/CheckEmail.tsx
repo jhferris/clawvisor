@@ -28,40 +28,40 @@ export default function CheckEmail() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow text-center">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-6 p-8 bg-surface-1 border border-border-default rounded-md text-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Check your email</h1>
-          <p className="mt-3 text-gray-600">
+          <h1 className="text-3xl font-bold text-text-primary">Check your email</h1>
+          <p className="mt-3 text-text-secondary">
             We sent a verification link to{' '}
             {email ? <span className="font-medium">{email}</span> : 'your email'}.
           </p>
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-text-tertiary">
             Click the link in the email to continue setting up your account.
             The link is valid for 24 hours.
           </p>
         </div>
 
         {error && (
-          <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+          <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
         )}
 
         {resent ? (
-          <p className="text-sm text-green-600">Verification email resent.</p>
+          <p className="text-sm text-success">Verification email resent.</p>
         ) : (
           email && (
             <button
               onClick={handleResend}
               disabled={resending}
-              className="text-sm text-blue-600 hover:underline disabled:opacity-50"
+              className="text-sm text-brand hover:underline disabled:opacity-50"
             >
               {resending ? 'Resending...' : "Didn't get the email? Resend"}
             </button>
           )
         )}
 
-        <p className="text-sm text-gray-500">
-          <Link to="/register" className="text-blue-600 hover:underline">
+        <p className="text-sm text-text-tertiary">
+          <Link to="/register" className="text-brand hover:underline">
             Back to registration
           </Link>
         </p>

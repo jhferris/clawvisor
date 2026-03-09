@@ -45,20 +45,20 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-8 p-8 bg-surface-1 border border-border-default rounded-md">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Clawvisor</h1>
-          <h2 className="mt-2 text-lg text-gray-600">Create your account</h2>
+          <h1 className="text-3xl font-bold text-text-primary">Clawvisor</h1>
+          <h2 className="mt-2 text-lg text-text-secondary">Create your account</h2>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           {error && (
-            <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+            <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
           )}
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="email" className="block text-sm font-medium text-text-secondary">
               Email
             </label>
             <input
@@ -67,13 +67,13 @@ export default function Register() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
             />
           </div>
 
           {!isPasskeyMode && (
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-text-secondary">
                 Password
               </label>
               <input
@@ -83,24 +83,24 @@ export default function Register() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="mt-1 block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand"
               />
-              <p className="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
+              <p className="mt-1 text-xs text-text-tertiary">Minimum 8 characters</p>
             </div>
           )}
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="w-full py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
           >
             {isSubmitting ? 'Creating account...' : 'Create account'}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-600">
+        <p className="text-center text-sm text-text-secondary">
           Already have an account?{' '}
-          <Link to="/login" className="text-blue-600 hover:underline">
+          <Link to="/login" className="text-brand hover:underline">
             Sign in
           </Link>
         </p>

@@ -30,13 +30,13 @@ export default function TOTPVerify() {
 
   if (!pendingToken) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full p-8 bg-white rounded-lg shadow text-center">
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Session expired</h2>
-          <p className="text-sm text-gray-600 mb-4">Please sign in again.</p>
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="max-w-md w-full p-8 bg-surface-1 border border-border-default rounded-md text-center">
+          <h2 className="text-lg font-semibold text-text-primary mb-2">Session expired</h2>
+          <p className="text-sm text-text-secondary mb-4">Please sign in again.</p>
           <button
             onClick={() => navigate('/login')}
-            className="py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700"
+            className="py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong"
           >
             Go to login
           </button>
@@ -46,19 +46,19 @@ export default function TOTPVerify() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-6 p-8 bg-white rounded-lg shadow">
+    <div className="min-h-screen flex items-center justify-center bg-surface-0">
+      <div className="max-w-md w-full space-y-6 p-8 bg-surface-1 border border-border-default rounded-md">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Clawvisor</h1>
-          <h2 className="mt-2 text-lg text-gray-600">Two-factor authentication</h2>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-3xl font-bold text-text-primary">Clawvisor</h1>
+          <h2 className="mt-2 text-lg text-text-secondary">Two-factor authentication</h2>
+          <p className="mt-1 text-sm text-text-tertiary">
             Enter the 6-digit code from your authenticator app.
           </p>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           {error && (
-            <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+            <div className="p-3 bg-danger/10 text-danger rounded text-sm">{error}</div>
           )}
 
           <div>
@@ -71,7 +71,7 @@ export default function TOTPVerify() {
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
               placeholder="000000"
-              className="block w-full rounded border border-gray-300 px-3 py-3 text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="block w-full rounded border border-border-default bg-surface-0 text-text-primary px-3 py-3 text-center text-2xl tracking-widest focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand placeholder:text-text-tertiary"
               autoFocus
               autoComplete="one-time-code"
             />
@@ -80,7 +80,7 @@ export default function TOTPVerify() {
           <button
             type="submit"
             disabled={isSubmitting || code.length !== 6}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="w-full py-2 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50"
           >
             {isSubmitting ? 'Verifying...' : 'Verify'}
           </button>
@@ -88,7 +88,7 @@ export default function TOTPVerify() {
 
         <button
           onClick={() => navigate('/login')}
-          className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+          className="w-full py-2 text-sm text-text-tertiary hover:text-text-primary"
         >
           Back to login
         </button>
