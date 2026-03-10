@@ -126,7 +126,7 @@ export default function SetupAuth() {
                 className="w-full py-3 px-4 bg-brand text-surface-0 rounded font-medium hover:bg-brand-strong disabled:opacity-50 text-left"
               >
                 <div className="font-medium">Set up passkey</div>
-                <div className="text-sm text-brand-strong mt-0.5">Recommended &mdash; use Face ID, Touch ID, or your security key</div>
+                <div className="text-sm text-surface-0/70 mt-0.5">Recommended &mdash; use Face ID, Touch ID, or your security key</div>
               </button>
             )}
             <button

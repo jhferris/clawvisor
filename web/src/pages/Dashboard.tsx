@@ -2,6 +2,7 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../hooks/useAuth'
 import { useEventStream } from '../hooks/useEventStream'
+import { useTheme } from '../hooks/useTheme'
 import { api } from '../api/client'
 import Services from './Services'
 import Restrictions from './Restrictions'
@@ -23,6 +24,7 @@ const navItems = [
 
 export default function Dashboard() {
   const { user, logout } = useAuth()
+  const { resolvedTheme, setTheme } = useTheme()
 
   // SSE event stream for instant dashboard updates
   useEventStream()
@@ -74,12 +76,25 @@ export default function Dashboard() {
         </ul>
         <div className="px-4 py-3 border-t border-border-default text-sm space-y-1">
           <div className="truncate text-text-secondary">{user?.email}</div>
-          <button
-            onClick={logout}
-            className="text-text-tertiary hover:text-text-primary transition-colors"
-          >
-            Sign out
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={logout}
+              className="text-text-tertiary hover:text-text-primary transition-colors"
+            >
+              Sign out
+            </button>
+            <button
+              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+              className="ml-auto text-text-tertiary hover:text-text-primary transition-colors p-1 rounded hover:bg-surface-2"
+              title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {resolvedTheme === 'dark' ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+              )}
+            </button>
+          </div>
         </div>
       </nav>
 

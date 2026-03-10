@@ -3,11 +3,101 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    color-scheme: dark;
-    background-color: #0a0c10;
-    color: #f0f1f3;
+  :root {
+    color-scheme: light;
+
+    /* Surfaces */
+    --color-surface-0: 255 255 255;
+    --color-surface-1: 249 250 251;
+    --color-surface-2: 243 244 246;
+    --color-surface-3: 229 231 235;
+
+    /* Text */
+    --color-text-primary: 17 24 39;
+    --color-text-secondary: 75 85 99;
+    --color-text-tertiary: 156 163 175;
+
+    /* Brand */
+    --color-brand: 99 102 241;
+    --color-brand-strong: 79 70 229;
+
+    /* Semantic */
+    --color-success: 22 163 74;
+    --color-warning: 180 83 9;
+    --color-danger: 220 38 38;
+
+    /* Borders */
+    --color-border-default: 229 231 235;
+    --color-border-strong: 209 213 219;
+
+    /* Pre-composed (no channel splitting needed) */
+    --color-brand-muted: rgba(99, 102, 241, 0.12);
+    --color-border-subtle: rgba(209, 213, 219, 0.5);
+
+    /* Chart tokens */
+    --color-tooltip-bg: #ffffff;
+    --color-tooltip-border: #e5e7eb;
+    --color-tooltip-text: #111827;
+    --color-axis-tick: #6b7280;
+
+    /* Tint tokens for inline styles */
+    --color-success-tint: rgba(22, 163, 74, 0.04);
+    --color-danger-tint: rgba(220, 38, 38, 0.04);
+    --color-warning-tint: rgba(180, 83, 9, 0.04);
+    --color-warning-border-light: rgba(180, 83, 9, 0.3);
+    --color-warning-border-subtle: rgba(180, 83, 9, 0.15);
   }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Surfaces */
+    --color-surface-0: 10 12 16;
+    --color-surface-1: 15 17 23;
+    --color-surface-2: 22 25 35;
+    --color-surface-3: 30 33 48;
+
+    /* Text */
+    --color-text-primary: 240 241 243;
+    --color-text-secondary: 156 163 175;
+    --color-text-tertiary: 107 114 128;
+
+    /* Brand */
+    --color-brand: 129 140 248;
+    --color-brand-strong: 165 180 252;
+
+    /* Semantic */
+    --color-success: 34 197 94;
+    --color-warning: 245 158 11;
+    --color-danger: 239 68 68;
+
+    /* Borders */
+    --color-border-default: 31 41 55;
+    --color-border-strong: 55 65 81;
+
+    /* Pre-composed */
+    --color-brand-muted: rgba(129, 140, 248, 0.15);
+    --color-border-subtle: rgba(31, 41, 55, 0.5);
+
+    /* Chart tokens */
+    --color-tooltip-bg: #161923;
+    --color-tooltip-border: #1f2937;
+    --color-tooltip-text: #f0f1f3;
+    --color-axis-tick: #6b7280;
+
+    /* Tint tokens */
+    --color-success-tint: rgba(34, 197, 94, 0.04);
+    --color-danger-tint: rgba(239, 68, 68, 0.04);
+    --color-warning-tint: rgba(245, 158, 11, 0.04);
+    --color-warning-border-light: rgba(245, 158, 11, 0.3);
+    --color-warning-border-subtle: rgba(245, 158, 11, 0.15);
+  }
+
+  html {
+    background-color: rgb(var(--color-surface-0));
+    color: rgb(var(--color-text-primary));
+  }
+
   body {
     @apply bg-surface-0 text-text-primary antialiased;
   }

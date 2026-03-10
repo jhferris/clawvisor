@@ -156,8 +156,8 @@ export default function TaskCard({
 
           {task.pending_action && (
             <div className="px-4 pb-3">
-              <div className="bg-surface-0 border rounded overflow-hidden" style={{ borderColor: 'rgba(245, 158, 11, 0.3)' }}>
-                <div className="px-3 py-1.5 border-b flex items-center gap-1.5" style={{ background: 'rgba(245, 158, 11, 0.04)', borderColor: 'rgba(245, 158, 11, 0.15)' }}>
+              <div className="bg-surface-0 border rounded overflow-hidden" style={{ borderColor: 'var(--color-warning-border-light)' }}>
+                <div className="px-3 py-1.5 border-b flex items-center gap-1.5" style={{ background: 'var(--color-warning-tint)', borderColor: 'var(--color-warning-border-subtle)' }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-warning" />
                   <span className="text-[10px] font-medium text-warning uppercase tracking-wider">New scope requested</span>
                 </div>
@@ -291,7 +291,7 @@ function ScopeGroupTables({ autoActions, manualActions }: {
     <>
       {autoActions.length > 0 && (
         <div className="bg-surface-0 border border-border-subtle rounded overflow-hidden">
-          <div className="px-3 py-1.5 border-b border-border-subtle flex items-center gap-1.5" style={{ background: 'rgba(34, 197, 94, 0.04)' }}>
+          <div className="px-3 py-1.5 border-b border-border-subtle flex items-center gap-1.5" style={{ background: 'var(--color-success-tint)' }}>
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
             <span className="text-[10px] font-medium text-success uppercase tracking-wider">Auto-execute</span>
           </div>
@@ -308,8 +308,8 @@ function ScopeGroupTables({ autoActions, manualActions }: {
         </div>
       )}
       {manualActions.length > 0 && (
-        <div className="bg-surface-0 border rounded overflow-hidden mt-2" style={{ borderColor: 'rgba(245, 158, 11, 0.3)' }}>
-          <div className="px-3 py-1.5 border-b flex items-center gap-1.5" style={{ background: 'rgba(245, 158, 11, 0.04)', borderColor: 'rgba(245, 158, 11, 0.15)' }}>
+        <div className="bg-surface-0 border rounded overflow-hidden mt-2" style={{ borderColor: 'var(--color-warning-border-light)' }}>
+          <div className="px-3 py-1.5 border-b flex items-center gap-1.5" style={{ background: 'var(--color-warning-tint)', borderColor: 'var(--color-warning-border-subtle)' }}>
             <span className="w-1.5 h-1.5 rounded-full bg-warning" />
             <span className="text-[10px] font-medium text-warning uppercase tracking-wider">Requires approval</span>
           </div>
@@ -380,8 +380,8 @@ function ActivityRow({ entry }: { entry: AuditEntry }) {
   const hasProblem = entry.outcome === 'blocked' || entry.outcome === 'restricted' ||
     (entry.verification && (entry.verification.param_scope !== 'ok' || entry.verification.reason_coherence !== 'ok'))
   const rowBg = entry.outcome === 'blocked' || entry.outcome === 'restricted'
-    ? 'rgba(239, 68, 68, 0.04)'
-    : hasProblem ? 'rgba(245, 158, 11, 0.04)' : undefined
+    ? 'var(--color-danger-tint)'
+    : hasProblem ? 'var(--color-warning-tint)' : undefined
 
   return (
     <div style={rowBg ? { background: rowBg } : undefined}>

@@ -208,12 +208,6 @@ export default function Overview() {
 
 // ── Activity chart ───────────────────────────────────────────────────────────
 
-const OUTCOME_COLORS: Record<string, string> = {
-  executed: '#22c55e',
-  blocked: '#ef4444',
-  pending: '#f97316',
-}
-
 interface ChartRow {
   time: string
   executed: number
@@ -221,7 +215,29 @@ interface ChartRow {
   pending: number
 }
 
+function useChartColors() {
+  const style = getComputedStyle(document.documentElement)
+  return useMemo(() => {
+    const r = (name: string) => {
+      const channels = style.getPropertyValue(name).trim()
+      return `rgb(${channels.replace(/ /g, ', ')})`
+    }
+    return {
+      executed: r('--color-success'),
+      blocked: r('--color-danger'),
+      pending: r('--color-warning'),
+      axisTick: style.getPropertyValue('--color-axis-tick').trim(),
+      tooltipBg: style.getPropertyValue('--color-tooltip-bg').trim(),
+      tooltipBorder: style.getPropertyValue('--color-tooltip-border').trim(),
+      tooltipText: style.getPropertyValue('--color-tooltip-text').trim(),
+    }
+    // Re-compute when dark class changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [document.documentElement.classList.contains('dark')])
+}
+
 function ActivityChart({ data }: { data: ActivityBucket[] }) {
+  const colors = useChartColors()
   const rows = useMemo(() => {
     // Build lookup from bucket timestamp → aggregated counts
     const counts = new Map<number, ChartRow>()
@@ -254,14 +270,14 @@ function ActivityChart({ data }: { data: ActivityBucket[] }) {
     <div className="bg-surface-1 border border-border-default rounded-md p-4">
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={rows}>
-          <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#6b7280' }} interval="preserveStartEnd" />
-          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6b7280' }} width={30} />
+          <XAxis dataKey="time" tick={{ fontSize: 11, fill: colors.axisTick }} interval="preserveStartEnd" />
+          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: colors.axisTick }} width={30} />
           <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 6, border: '1px solid #1f2937', backgroundColor: '#161923', color: '#f0f1f3' }}
+            contentStyle={{ fontSize: 12, borderRadius: 6, border: `1px solid ${colors.tooltipBorder}`, backgroundColor: colors.tooltipBg, color: colors.tooltipText }}
           />
-          <Bar dataKey="executed" stackId="1" stroke={OUTCOME_COLORS.executed} fill={OUTCOME_COLORS.executed} fillOpacity={0.85} name="Executed" />
-          <Bar dataKey="blocked" stackId="1" stroke={OUTCOME_COLORS.blocked} fill={OUTCOME_COLORS.blocked} fillOpacity={0.85} name="Blocked" />
-          <Bar dataKey="pending" stackId="1" stroke={OUTCOME_COLORS.pending} fill={OUTCOME_COLORS.pending} fillOpacity={0.85} name="Pending" />
+          <Bar dataKey="executed" stackId="1" stroke={colors.executed} fill={colors.executed} fillOpacity={0.85} name="Executed" />
+          <Bar dataKey="blocked" stackId="1" stroke={colors.blocked} fill={colors.blocked} fillOpacity={0.85} name="Blocked" />
+          <Bar dataKey="pending" stackId="1" stroke={colors.pending} fill={colors.pending} fillOpacity={0.85} name="Pending" />
         </BarChart>
       </ResponsiveContainer>
     </div>
