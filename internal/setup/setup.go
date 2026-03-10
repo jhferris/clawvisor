@@ -67,6 +67,13 @@ func Run() error {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
+	// Generate vault key file for local backend (no-op if it already exists).
+	if cfg.vault == "local" {
+		if err := ensureVaultKey("./vault.key"); err != nil {
+			return fmt.Errorf("generating vault key: %w", err)
+		}
+	}
+
 	// Write TUI config so `clawvisor tui` knows the server URL.
 	if err := writeTUIConfig(cfg); err != nil {
 		// Non-fatal — just warn.
@@ -561,6 +568,18 @@ func writeTUIConfig(cfg *config) error {
 	return tuiCfg.Save(cfgPath)
 }
 
+// ensureVaultKey generates a vault key file if it doesn't already exist.
+func ensureVaultKey(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil // already exists
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("generating key: %w", err)
+	}
+	return os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(key)), 0600)
+}
+
 func printNextSteps(cfg *config) {
 	fmt.Println()
 	fmt.Println(green.Padding(0, 2).Render("config.yaml written"))
@@ -585,9 +604,10 @@ func printNextSteps(cfg *config) {
   2. Set environment variables:
      export DATABASE_URL="<your postgres url>"
      export JWT_SECRET="<your jwt secret>"
+     export VAULT_KEY="$(openssl rand -base64 32)"
 
   3. Run the server:
-     ./bin/clawvisor
+     ./bin/clawvisor server
 
   4. For Cloud Run deployment:
      make deploy`)
