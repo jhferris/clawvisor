@@ -257,6 +257,12 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				expectedUse = match.MatchedAction.ExpectedUse
 				expansionRationale = match.MatchedAction.ExpansionRationale
 			}
+			var serviceHints string
+			if ada, ok := h.adapterReg.Get(serviceType); ok {
+				if hinter, ok := ada.(adapters.VerificationHinter); ok {
+					serviceHints = hinter.VerificationHints()
+				}
+			}
 			verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
 				TaskPurpose:        task.Purpose,
 				ExpectedUse:        expectedUse,
@@ -266,6 +272,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				Params:             req.Params,
 				Reason:             req.Reason,
 				TaskID:             req.TaskID,
+				ServiceHints:       serviceHints,
 			})
 			if verdict != nil && !verdict.Allow {
 				dur := int(time.Since(start).Milliseconds())

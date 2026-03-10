@@ -29,6 +29,16 @@ type ContactsChecker interface {
 	IsInContacts(ctx context.Context, cred []byte, email string) (bool, error)
 }
 
+// VerificationHinter is an optional interface adapters can implement to provide
+// service-specific guidance to the LLM intent verifier. The hints are included
+// in the verification prompt only when that adapter is being verified.
+type VerificationHinter interface {
+	// VerificationHints returns natural-language guidance for the intent verifier
+	// about how to interpret this service's parameters (e.g. "thread_ts is
+	// within channel scope, not a scope escalation").
+	VerificationHints() string
+}
+
 // Adapter is the interface every service adapter implements.
 type Adapter interface {
 	// ServiceID returns the adapter's canonical service identifier (e.g. "google.gmail").

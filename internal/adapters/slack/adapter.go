@@ -40,6 +40,9 @@ func (a *SlackAdapter) SupportedActions() []string {
 
 func (a *SlackAdapter) OAuthConfig() *oauth2.Config                          { return nil }
 func (a *SlackAdapter) RequiredScopes() []string                             { return nil }
+func (a *SlackAdapter) VerificationHints() string {
+	return "Thread-level parameters (e.g. thread_ts) are within the scope of the channel they belong to. Accessing thread replies is not a scope escalation beyond channel-level access — threads are part of a channel conversation."
+}
 func (a *SlackAdapter) CredentialFromToken(_ *oauth2.Token) ([]byte, error)  {
 	return nil, fmt.Errorf("slack: OAuth token exchange not supported — use API key activation")
 }
@@ -230,6 +233,8 @@ func (a *SlackAdapter) listMessages(ctx context.Context, client *http.Client, pa
 		return nil, fmt.Errorf("slack list_messages: channel is required")
 	}
 
+	threadTS, _ := params["thread_ts"].(string)
+
 	q := url.Values{}
 	q.Set("channel", channel)
 	limit := 50
@@ -244,6 +249,13 @@ func (a *SlackAdapter) listMessages(ctx context.Context, client *http.Client, pa
 		q.Set("latest", latest)
 	}
 
+	// Use conversations.replies for thread replies, conversations.history for top-level.
+	endpoint := "conversations.history"
+	if threadTS != "" {
+		endpoint = "conversations.replies"
+		q.Set("ts", threadTS)
+	}
+
 	var resp struct {
 		OK       bool   `json:"ok"`
 		Error    string `json:"error,omitempty"`
@@ -254,7 +266,7 @@ func (a *SlackAdapter) listMessages(ctx context.Context, client *http.Client, pa
 			TS   string `json:"ts"`
 		} `json:"messages"`
 	}
-	if err := slackGET(ctx, client, "conversations.history", q, &resp); err != nil {
+	if err := slackGET(ctx, client, endpoint, q, &resp); err != nil {
 		return nil, fmt.Errorf("slack list_messages: %w", err)
 	}
 	if !resp.OK {
@@ -274,8 +286,13 @@ func (a *SlackAdapter) listMessages(ctx context.Context, client *http.Client, pa
 			TS:   m.TS,
 		})
 	}
+
+	summary := format.Summary("%d message(s) in %s", len(items), channel)
+	if threadTS != "" {
+		summary = format.Summary("%d reply/replies in thread %s", len(items), threadTS)
+	}
 	return &adapters.Result{
-		Summary: format.Summary("%d message(s) in %s", len(items), channel),
+		Summary: summary,
 		Data:    items,
 	}, nil
 }

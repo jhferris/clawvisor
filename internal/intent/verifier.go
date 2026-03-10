@@ -33,6 +33,7 @@ type VerifyRequest struct {
 	Params             map[string]any
 	Reason             string
 	TaskID             string // cache key component
+	ServiceHints       string // adapter-provided verification guidance; empty for most adapters
 }
 
 // Verifier checks whether a gateway request is consistent with the approved task.

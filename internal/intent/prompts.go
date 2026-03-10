@@ -53,14 +53,19 @@ func buildVerificationUserMessage(req VerifyRequest) string {
 		expansionLine = fmt.Sprintf("\nApproved scope expansion rationale: %s", req.ExpansionRationale)
 	}
 
+	var hintsLine string
+	if req.ServiceHints != "" {
+		hintsLine = fmt.Sprintf("\nService-specific verification guidance: %s", req.ServiceHints)
+	}
+
 	return fmt.Sprintf(`Current date: %s
 Task purpose: %s
-%s%s
+%s%s%s
 Service: %s
 Action: %s
 Request params:
 %s
-Agent reason for this request: %s`, time.Now().UTC().Format("2006-01-02"), req.TaskPurpose, expectedUseLine, expansionLine, req.Service, req.Action, params, req.Reason)
+Agent reason for this request: %s`, time.Now().UTC().Format("2006-01-02"), req.TaskPurpose, expectedUseLine, expansionLine, hintsLine, req.Service, req.Action, params, req.Reason)
 }
 
 // parseVerificationResponse parses the LLM response into a VerificationVerdict.

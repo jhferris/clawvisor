@@ -311,7 +311,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /api/notifications/telegram/pair/{pairing_id}/confirm", user(notificationsHandler.ConfirmPairing))
 
 	// Guard (agent token — Claude Code permission check)
-	guardHandler := handlers.NewGuardHandler(s.store, verifier, s.logger)
+	guardHandler := handlers.NewGuardHandler(s.store, verifier, s.adapterReg, s.logger)
 	mux.Handle("POST /api/guard/check", agent(guardHandler.Check))
 
 	// Gateway (agent token, rate-limited)

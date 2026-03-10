@@ -13,19 +13,21 @@ import (
 
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/intent"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // GuardHandler handles POST /api/guard/check for Claude Code permission hooks.
 type GuardHandler struct {
-	store    store.Store
-	verifier intent.Verifier
-	logger   *slog.Logger
+	store      store.Store
+	verifier   intent.Verifier
+	adapterReg *adapters.Registry
+	logger     *slog.Logger
 }
 
 // NewGuardHandler creates a GuardHandler.
-func NewGuardHandler(st store.Store, verifier intent.Verifier, logger *slog.Logger) *GuardHandler {
-	return &GuardHandler{store: st, verifier: verifier, logger: logger}
+func NewGuardHandler(st store.Store, verifier intent.Verifier, adapterReg *adapters.Registry, logger *slog.Logger) *GuardHandler {
+	return &GuardHandler{store: st, verifier: verifier, adapterReg: adapterReg, logger: logger}
 }
 
 type guardCheckRequest struct {
@@ -110,15 +112,22 @@ func (h *GuardHandler) Check(w http.ResponseWriter, r *http.Request) {
 		if match.MatchedAction != nil {
 			expectedUse = match.MatchedAction.ExpectedUse
 		}
+		var serviceHints string
+		if ada, ok := h.adapterReg.Get(service); ok {
+			if hinter, ok := ada.(adapters.VerificationHinter); ok {
+				serviceHints = hinter.VerificationHints()
+			}
+		}
 
 		verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
-			TaskPurpose: task.Purpose,
-			ExpectedUse: expectedUse,
-			Service:     service,
-			Action:      action,
-			Params:      req.ToolInput,
-			Reason:      reason,
-			TaskID:      req.TaskID,
+			TaskPurpose:  task.Purpose,
+			ExpectedUse:  expectedUse,
+			Service:      service,
+			Action:       action,
+			Params:       req.ToolInput,
+			Reason:       reason,
+			TaskID:       req.TaskID,
+			ServiceHints: serviceHints,
 		})
 
 		if verdict != nil && !verdict.Allow {
