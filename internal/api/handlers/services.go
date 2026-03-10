@@ -17,11 +17,11 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
-	"github.com/clawvisor/clawvisor/pkg/adapters"
-	"github.com/clawvisor/clawvisor/internal/display"
 	"github.com/clawvisor/clawvisor/internal/adapters/google/credential"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
+	"github.com/clawvisor/clawvisor/internal/display"
+	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/pkg/store"
 	"github.com/clawvisor/clawvisor/pkg/vault"
 )
@@ -41,10 +41,10 @@ type ServicesHandler struct {
 type oauthStateEntry struct {
 	UserID       string
 	ServiceID    string
-	Alias        string // "default" when not specified
-	PendingReqID string // pending_request_id query param (may be empty)
-	CLICallback  string // TUI local server callback URL (may be empty)
-	Scopes       []string  // merged scopes for this OAuth flow
+	Alias        string   // "default" when not specified
+	PendingReqID string   // pending_request_id query param (may be empty)
+	CLICallback  string   // TUI local server callback URL (may be empty)
+	Scopes       []string // merged scopes for this OAuth flow
 	ExpiresAt    time.Time
 }
 
@@ -806,10 +806,12 @@ func (h *ServicesHandler) sweepExpiredOAuthStates() {
 // different Google account.
 func oauthAuthURL(cfg *oauth2.Config, stateToken, alias string) string {
 	opts := []oauth2.AuthCodeOption{
+		oauth2.AccessTypeOffline,
 		oauth2.SetAuthURLParam("include_granted_scopes", "true"),
+		oauth2.SetAuthURLParam("prompt", "consent"),
 	}
 	if alias != "" && alias != "default" {
-		opts = append(opts, oauth2.SetAuthURLParam("prompt", "select_account"))
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "consent select_account"))
 	}
 	return cfg.AuthCodeURL(stateToken, opts...)
 }
@@ -865,4 +867,3 @@ func (h *ServicesHandler) removeAdapterScopes(ctx context.Context, userID, vKey 
 	}
 	_ = h.vault.Set(ctx, userID, vKey, updated)
 }
-
