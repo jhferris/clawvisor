@@ -35,13 +35,15 @@ func (h *Hub) Subscribe(userID string) (<-chan Event, func()) {
 
 	unsub := func() {
 		h.mu.Lock()
-		delete(h.clients[userID], ch)
-		if len(h.clients[userID]) == 0 {
-			delete(h.clients, userID)
+		// Guard against double-close: if Close() already removed and
+		// closed this channel, it won't be in the map.
+		if _, exists := h.clients[userID][ch]; exists {
+			delete(h.clients[userID], ch)
+			if len(h.clients[userID]) == 0 {
+				delete(h.clients, userID)
+			}
+			close(ch)
 		}
-		// Close under the lock so Publish (which holds RLock for its
-		// entire iteration) can never send on a closed channel.
-		close(ch)
 		h.mu.Unlock()
 		// Drain any buffered events.
 		for range ch {
