@@ -1,4 +1,4 @@
-.PHONY: build test run run-sqlite migrate lint clean setup tui
+.PHONY: build test run run-sqlite migrate lint clean setup tui eval-intent
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
@@ -19,6 +19,9 @@ test:
 
 test-verbose:
 	go test -v ./...
+
+eval-intent:
+	go test -v -run TestEvalIntentVerification -count=1 -timeout=300s ./internal/intent/
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 
