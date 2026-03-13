@@ -62,6 +62,7 @@ export default function TaskCard({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['tasks'] })
     qc.invalidateQueries({ queryKey: ['overview'] })
+    qc.invalidateQueries({ queryKey: ['queue'] })
   }
 
   const approveMut = useMutation({
@@ -111,7 +112,7 @@ export default function TaskCard({
   const riskDetails = task.risk_details
   const hasRisk = riskLevel !== '' && riskLevel !== 'unknown'
   const isHighRisk = riskLevel === 'high' || riskLevel === 'critical'
-  const riskPanelExpanded = isActionable && isHighRisk
+  const riskPanelExpanded = riskLevel !== 'low' && riskLevel !== ''
   // Critical pending tasks shift the left border to danger red.
   const leftBorder = (isActionable && riskLevel === 'critical')
     ? 'border-l-danger'
@@ -151,7 +152,7 @@ export default function TaskCard({
           <RiskPanel risk={riskDetails} level={riskLevel} />
         ) : (
           <>
-            <div className="px-5 pb-3 flex items-center justify-between">
+            <div className="px-5 pb-3">
               <button
                 onClick={() => setRiskOpen(o => !o)}
                 className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary"
@@ -159,7 +160,6 @@ export default function TaskCard({
                 <svg className={`w-3 h-3 transition-transform ${riskOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
                 <span className="font-medium">Risk assessment</span>
               </button>
-              <span className="text-xs text-text-secondary truncate ml-3" style={{ maxWidth: 360 }}>{riskDetails.explanation}</span>
             </div>
             {riskOpen && <RiskPanel risk={riskDetails} level={riskLevel} />}
           </>

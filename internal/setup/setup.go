@@ -44,10 +44,12 @@ type config struct {
 
 	imessageEnabled bool
 
-	verifyProvider string
-	verifyEndpoint string
-	verifyModel    string
-	verifyAPIKey   string
+	llmProvider string
+	llmEndpoint string
+	llmModel    string
+	llmAPIKey   string
+
+	taskRiskEnabled bool
 }
 
 // Run executes the setup wizard.
@@ -128,7 +130,7 @@ func runSetup() (*config, error) {
 	if err := stepIMessage(cfg); err != nil {
 		return nil, err
 	}
-	if err := stepVerification(cfg); err != nil {
+	if err := stepLLM(cfg); err != nil {
 		return nil, err
 	}
 	if err := stepConfirm(cfg); err != nil {
@@ -326,12 +328,12 @@ func stepIMessage(cfg *config) error {
 	).Run()
 }
 
-func stepVerification(cfg *config) error {
-	fmt.Println(section.Render("── Intent Verification ────────────────────"))
+func stepLLM(cfg *config) error {
+	fmt.Println(section.Render("── LLM Configuration ──────────────────────"))
 	fmt.Println()
-	fmt.Println(dim.Padding(0, 2).Render("Clawvisor uses an LLM to verify that agent"))
-	fmt.Println(dim.Padding(0, 2).Render("requests match their approved task scope."))
-	fmt.Println(dim.Padding(0, 2).Render("A fast, lightweight model is recommended."))
+	fmt.Println(dim.Padding(0, 2).Render("Clawvisor uses an LLM for intent verification"))
+	fmt.Println(dim.Padding(0, 2).Render("and task risk assessment. Both features share"))
+	fmt.Println(dim.Padding(0, 2).Render("the same provider. A fast model is recommended."))
 	fmt.Println()
 
 	var model string
@@ -354,17 +356,17 @@ func stepVerification(cfg *config) error {
 
 	switch model {
 	case "haiku":
-		cfg.verifyProvider = "anthropic"
-		cfg.verifyEndpoint = "https://api.anthropic.com/v1"
-		cfg.verifyModel = "claude-haiku-4-5-20251001"
+		cfg.llmProvider = "anthropic"
+		cfg.llmEndpoint = "https://api.anthropic.com/v1"
+		cfg.llmModel = "claude-haiku-4-5-20251001"
 	case "flash":
-		cfg.verifyProvider = "openai"
-		cfg.verifyEndpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
-		cfg.verifyModel = "gemini-2.0-flash"
+		cfg.llmProvider = "openai"
+		cfg.llmEndpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
+		cfg.llmModel = "gemini-2.0-flash"
 	case "mini":
-		cfg.verifyProvider = "openai"
-		cfg.verifyEndpoint = "https://api.openai.com/v1"
-		cfg.verifyModel = "gpt-4o-mini"
+		cfg.llmProvider = "openai"
+		cfg.llmEndpoint = "https://api.openai.com/v1"
+		cfg.llmModel = "gpt-4o-mini"
 	case "other":
 		err = huh.NewForm(
 			huh.NewGroup(
@@ -374,10 +376,10 @@ func stepVerification(cfg *config) error {
 						huh.NewOption("OpenAI-compatible", "openai"),
 						huh.NewOption("Anthropic", "anthropic"),
 					).
-					Value(&cfg.verifyProvider),
+					Value(&cfg.llmProvider),
 				huh.NewInput().
 					Title("Endpoint URL").
-					Value(&cfg.verifyEndpoint).
+					Value(&cfg.llmEndpoint).
 					Validate(func(s string) error {
 						if s == "" {
 							return fmt.Errorf("required")
@@ -386,7 +388,7 @@ func stepVerification(cfg *config) error {
 					}),
 				huh.NewInput().
 					Title("Model ID").
-					Value(&cfg.verifyModel).
+					Value(&cfg.llmModel).
 					Validate(func(s string) error {
 						if s == "" {
 							return fmt.Errorf("required")
@@ -400,18 +402,33 @@ func stepVerification(cfg *config) error {
 		}
 	}
 
-	return huh.NewForm(
+	err = huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Title("API key").
 				EchoMode(huh.EchoModePassword).
-				Value(&cfg.verifyAPIKey).
+				Value(&cfg.llmAPIKey).
 				Validate(func(s string) error {
 					if s == "" {
 						return fmt.Errorf("required")
 					}
 					return nil
 				}),
+		),
+	).Run()
+	if err != nil {
+		return err
+	}
+
+	cfg.taskRiskEnabled = true
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable task risk assessment?").
+				Description("Evaluates scope and purpose coherence when tasks are created.").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&cfg.taskRiskEnabled),
 		),
 	).Run()
 }
@@ -446,7 +463,13 @@ func stepConfirm(cfg *config) error {
 		lines = append(lines, fmt.Sprintf("  iMessage       %s", dim.Render("Disabled")))
 	}
 
-	lines = append(lines, fmt.Sprintf("  Verification   %s (%s)", bold.Render(cfg.verifyModel), cfg.verifyProvider))
+	lines = append(lines, fmt.Sprintf("  LLM            %s (%s)", bold.Render(cfg.llmModel), cfg.llmProvider))
+	lines = append(lines, fmt.Sprintf("  Verification   %s", bold.Render("Enabled")))
+	if cfg.taskRiskEnabled {
+		lines = append(lines, fmt.Sprintf("  Task Risk      %s", bold.Render("Enabled")))
+	} else {
+		lines = append(lines, fmt.Sprintf("  Task Risk      %s", dim.Render("Disabled")))
+	}
 
 	fmt.Println(strings.Join(lines, "\n"))
 	fmt.Println()
@@ -530,15 +553,17 @@ func writeConfig(cfg *config) error {
 	fmt.Fprintf(&b, "    enabled: %t\n", cfg.imessageEnabled)
 
 	fmt.Fprintf(&b, "\nllm:\n")
+	fmt.Fprintf(&b, "  provider: %s\n", cfg.llmProvider)
+	fmt.Fprintf(&b, "  endpoint: %s\n", cfg.llmEndpoint)
+	fmt.Fprintf(&b, "  api_key: \"%s\"\n", cfg.llmAPIKey)
+	fmt.Fprintf(&b, "  model: %s\n", cfg.llmModel)
 	fmt.Fprintf(&b, "  verification:\n")
 	fmt.Fprintf(&b, "    enabled: true\n")
-	fmt.Fprintf(&b, "    provider: %s\n", cfg.verifyProvider)
-	fmt.Fprintf(&b, "    endpoint: %s\n", cfg.verifyEndpoint)
-	fmt.Fprintf(&b, "    api_key: \"%s\"\n", cfg.verifyAPIKey)
-	fmt.Fprintf(&b, "    model: %s\n", cfg.verifyModel)
 	fmt.Fprintf(&b, "    timeout_seconds: 5\n")
 	fmt.Fprintf(&b, "    fail_closed: true\n")
 	fmt.Fprintf(&b, "    cache_ttl_seconds: 60\n")
+	fmt.Fprintf(&b, "  task_risk:\n")
+	fmt.Fprintf(&b, "    enabled: %t\n", cfg.taskRiskEnabled)
 
 	return os.WriteFile("config.yaml", []byte(b.String()), 0644)
 }
