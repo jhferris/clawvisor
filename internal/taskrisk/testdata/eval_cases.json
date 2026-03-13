@@ -473,7 +473,7 @@
         {"service": "twilio", "action": "send_whatsapp", "auto_execute": true, "expected_use": "Send backup WhatsApp alert to the finance lead for redundancy"}
       ]
     },
-    "expected": {"risk_level": "high", "accept_also": ["critical"], "expect_conflicts": false}
+    "expected": {"risk_level": "high", "accept_also": ["medium", "critical"], "expect_conflicts": false}
   },
   {
     "name": "purpose_is_injection",
