@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/clawvisor/clawvisor/internal/tui"
 	"github.com/clawvisor/clawvisor/internal/tui/client"
+	"github.com/clawvisor/clawvisor/internal/tui/components"
 )
 
 // ── Dashboard messages ──────────────────────────────────────────────────────
@@ -68,6 +69,8 @@ type DashboardScreen struct {
 	auditCursor  int
 	detail       Detail // reusable detail overlay for audit entries
 
+	confirm *components.Confirm
+
 	width   int
 	height  int
 	loading bool
@@ -89,6 +92,29 @@ func (s *DashboardScreen) Init() tea.Cmd {
 
 func (s *DashboardScreen) Update(msg tea.Msg) (tui.ScreenModel, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Confirmation dialog.
+	if s.confirm != nil {
+		switch msg := msg.(type) {
+		case components.ConfirmResult:
+			s.confirm = nil
+			if msg.Confirmed && msg.Tag == "approve-task" {
+				s.busy = "Approving..."
+				if s.view == dashViewTaskAudit {
+					return s, s.approveDrillTask()
+				}
+				return s, s.approveSelected()
+			}
+			return s, nil
+		default:
+			c, cmd := s.confirm.Update(msg)
+			*s.confirm = c
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return s, tea.Batch(cmds...)
+		}
+	}
 
 	// Audit detail overlay (deepest view).
 	if s.view == dashViewAuditDetail && s.detail.Visible() {
@@ -200,6 +226,18 @@ func (s *DashboardScreen) handleMainKey(msg tea.KeyMsg) (tui.ScreenModel, tea.Cm
 		if s.busy != "" {
 			return s, nil
 		}
+		if s.cursor < len(s.queue) {
+			item := s.queue[s.cursor]
+			if item.Type == "task" && item.Task != nil && isHighRisk(item.Task.RiskLevel) {
+				c := components.NewConfirm(
+					"High-Risk Task",
+					fmt.Sprintf("Approve %s-risk task %q?", item.Task.RiskLevel, item.Task.Purpose),
+					"approve-task",
+				)
+				s.confirm = &c
+				return s, nil
+			}
+		}
 		s.busy = "Approving..."
 		return s, s.approveSelected()
 	case key.Matches(msg, tui.PendingKeys.Deny):
@@ -241,6 +279,15 @@ func (s *DashboardScreen) handleTaskAuditKey(msg tea.KeyMsg) (tui.ScreenModel, t
 		return s, s.loadAuditDetail()
 	case key.Matches(msg, tui.PendingKeys.Approve):
 		if s.busy != "" {
+			return s, nil
+		}
+		if s.drillTask != nil && isHighRisk(s.drillTask.RiskLevel) {
+			c := components.NewConfirm(
+				"High-Risk Task",
+				fmt.Sprintf("Approve %s-risk task %q?", s.drillTask.RiskLevel, s.drillTask.Purpose),
+				"approve-task",
+			)
+			s.confirm = &c
 			return s, nil
 		}
 		s.busy = "Approving..."
@@ -301,6 +348,9 @@ func (s *DashboardScreen) denyDrillTask() tea.Cmd {
 }
 
 func (s *DashboardScreen) View() string {
+	if s.confirm != nil {
+		return s.confirm.View()
+	}
 	if s.view == dashViewAuditDetail && s.detail.Visible() {
 		return s.detail.View()
 	}

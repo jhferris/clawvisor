@@ -116,6 +116,10 @@ func formatApprovalDetail(a *client.QueueApproval, created time.Time) string {
 	return b.String()
 }
 
+func isHighRisk(level string) bool {
+	return level == "high" || level == "critical"
+}
+
 func timeAgo(t time.Time) string {
 	d := time.Since(t)
 	switch {
