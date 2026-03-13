@@ -146,7 +146,7 @@ export default function TaskCard({
       )}
 
       {/* Risk assessment panel (auto-expanded for high/critical pending, collapsible otherwise) */}
-      {riskDetails && hasRisk && riskLevel !== 'low' && (
+      {riskDetails && hasRisk && (
         riskPanelExpanded ? (
           <RiskPanel risk={riskDetails} level={riskLevel} />
         ) : !isActionable ? (
@@ -366,6 +366,7 @@ function ScopeGroupTables({ autoActions, manualActions }: {
 const RISK_PANEL_COLORS: Record<string, {
   bg: string; border: string; headerBorder: string; color: string; conflictBorder: string
 }> = {
+  low:      { bg: 'rgba(34, 197, 94, 0.04)', border: 'rgba(34, 197, 94, 0.15)', headerBorder: 'rgba(34, 197, 94, 0.10)', color: 'rgb(var(--color-success))', conflictBorder: 'rgba(34, 197, 94, 0.1)' },
   medium:   { bg: 'rgba(245, 158, 11, 0.05)', border: 'rgba(245, 158, 11, 0.2)', headerBorder: 'rgba(245, 158, 11, 0.12)', color: 'rgb(var(--color-warning))', conflictBorder: 'rgba(245, 158, 11, 0.1)' },
   high:     { bg: 'rgba(249, 115, 22, 0.05)', border: 'rgba(249, 115, 22, 0.2)', headerBorder: 'rgba(249, 115, 22, 0.12)', color: 'rgb(var(--color-risk-orange))', conflictBorder: 'rgba(249, 115, 22, 0.1)' },
   critical: { bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.25)', headerBorder: 'rgba(239, 68, 68, 0.15)', color: 'rgb(var(--color-danger))', conflictBorder: 'rgba(239, 68, 68, 0.1)' },
@@ -381,7 +382,10 @@ function RiskPanel({ risk, level }: { risk: RiskAssessment; level: string }) {
     <div className="px-4 pb-3">
       <div className="rounded overflow-hidden" style={{ background: colors.bg, border: `1px solid ${colors.border}` }}>
         <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ borderBottom: `1px solid ${colors.headerBorder}` }}>
-          <svg className="w-3 h-3" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          {level === 'low'
+            ? <svg className="w-3 h-3" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+            : <svg className="w-3 h-3" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          }
           <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: colors.color }}>{headerLabel}</span>
         </div>
         <div className="px-3 py-2.5 space-y-2">
