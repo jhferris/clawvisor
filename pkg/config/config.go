@@ -103,7 +103,15 @@ type TaskRiskConfig struct {
 }
 
 // LLMConfig groups all LLM provider configurations.
+// Shared fields (provider, endpoint, api_key, model, timeout_seconds) are inherited
+// by subsections unless explicitly overridden at the subsection level.
 type LLMConfig struct {
+	Provider       string `yaml:"provider"`        // Shared default: "anthropic"
+	Endpoint       string `yaml:"endpoint"`        // Shared default: "https://api.anthropic.com/v1"
+	APIKey         string `yaml:"api_key"`          // Shared default; overridable via CLAWVISOR_LLM_API_KEY
+	Model          string `yaml:"model"`            // Shared default: "claude-haiku-4-5-20251001"
+	TimeoutSeconds int    `yaml:"timeout_seconds"`  // Shared default: 10
+
 	Verification VerificationConfig `yaml:"verification"` // Intent verification (runtime)
 	TaskRisk     TaskRiskConfig     `yaml:"task_risk"`     // Task risk assessment (creation time)
 }
@@ -211,24 +219,16 @@ func Default() *Config {
 			DefaultExpirySeconds: 1800,
 		},
 		LLM: LLMConfig{
+			Provider:       "anthropic",
+			Endpoint:       "https://api.anthropic.com/v1",
+			Model:          "claude-haiku-4-5-20251001",
+			TimeoutSeconds: 10,
 			Verification: VerificationConfig{
 				LLMProviderConfig: LLMProviderConfig{
-					Enabled:        false,
-					Provider:       "anthropic",
-					Endpoint:       "https://api.anthropic.com/v1",
-					Model:          "claude-haiku-4-5-20251001",
 					TimeoutSeconds: 5,
 				},
 				FailClosed:      true,
 				CacheTTLSeconds: 60,
-			},
-			TaskRisk: TaskRiskConfig{
-				LLMProviderConfig: LLMProviderConfig{
-					Enabled:        false,
-					Provider:       "anthropic",
-					Model:          "claude-haiku-4-5-20251001",
-					TimeoutSeconds: 10,
-				},
 			},
 		},
 		MCP: MCPConfig{
@@ -349,7 +349,6 @@ func Load(path string) (*Config, error) {
 		cfg.Callback.RequireHTTPS = v == "true" || v == "1"
 	}
 
-	// LLM Verification overrides
 	if v := os.Getenv("LOG_FORMAT"); v != "" {
 		cfg.Server.LogFormat = v
 	}
@@ -357,6 +356,26 @@ func Load(path string) (*Config, error) {
 		cfg.Server.LogLevel = v
 	}
 
+	// Shared LLM overrides (inherited by all subsections)
+	if v := os.Getenv("CLAWVISOR_LLM_PROVIDER"); v != "" {
+		cfg.LLM.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_ENDPOINT"); v != "" {
+		cfg.LLM.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_API_KEY"); v != "" {
+		cfg.LLM.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_MODEL"); v != "" {
+		cfg.LLM.Model = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_TIMEOUT_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.LLM.TimeoutSeconds = n
+		}
+	}
+
+	// Per-subsection overrides (take precedence over shared)
 	if v := os.Getenv("CLAWVISOR_LLM_VERIFICATION_ENABLED"); v != "" {
 		cfg.LLM.Verification.Enabled = v == "true" || v == "1"
 	}
@@ -376,7 +395,6 @@ func Load(path string) (*Config, error) {
 		cfg.LLM.Verification.FailClosed = v == "true" || v == "1"
 	}
 
-	// LLM Task Risk overrides
 	if v := os.Getenv("CLAWVISOR_LLM_TASK_RISK_ENABLED"); v != "" {
 		cfg.LLM.TaskRisk.Enabled = v == "true" || v == "1"
 	}
@@ -393,24 +411,9 @@ func Load(path string) (*Config, error) {
 		cfg.LLM.TaskRisk.Model = v
 	}
 
-	// Fallback: inherit empty task_risk fields from verification config.
-	tr := &cfg.LLM.TaskRisk
-	vr := &cfg.LLM.Verification
-	if tr.Provider == "" {
-		tr.Provider = vr.Provider
-	}
-	if tr.Endpoint == "" {
-		tr.Endpoint = vr.Endpoint
-	}
-	if tr.APIKey == "" {
-		tr.APIKey = vr.APIKey
-	}
-	if tr.Model == "" {
-		tr.Model = vr.Model
-	}
-	if tr.TimeoutSeconds == 0 {
-		tr.TimeoutSeconds = vr.TimeoutSeconds
-	}
+	// Inherit: fill empty subsection fields from shared LLM config.
+	inheritLLMDefaults(&cfg.LLM.Verification.LLMProviderConfig, &cfg.LLM)
+	inheritLLMDefaults(&cfg.LLM.TaskRisk.LLMProviderConfig, &cfg.LLM)
 
 	// Resolve empty database driver: explicit env/config wins; otherwise auto-detect.
 	if cfg.Database.Driver == "" {
@@ -425,6 +428,25 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// inheritLLMDefaults fills empty fields in sub with the shared LLM-level defaults.
+func inheritLLMDefaults(sub *LLMProviderConfig, shared *LLMConfig) {
+	if sub.Provider == "" {
+		sub.Provider = shared.Provider
+	}
+	if sub.Endpoint == "" {
+		sub.Endpoint = shared.Endpoint
+	}
+	if sub.APIKey == "" {
+		sub.APIKey = shared.APIKey
+	}
+	if sub.Model == "" {
+		sub.Model = shared.Model
+	}
+	if sub.TimeoutSeconds == 0 {
+		sub.TimeoutSeconds = shared.TimeoutSeconds
+	}
 }
 
 // AccessTokenDuration parses the configured duration.
