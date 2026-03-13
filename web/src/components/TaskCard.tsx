@@ -149,7 +149,7 @@ export default function TaskCard({
       {riskDetails && hasRisk && (
         riskPanelExpanded ? (
           <RiskPanel risk={riskDetails} level={riskLevel} />
-        ) : !isActionable ? (
+        ) : (
           <>
             <div className="px-5 pb-3 flex items-center justify-between">
               <button
@@ -163,7 +163,7 @@ export default function TaskCard({
             </div>
             {riskOpen && <RiskPanel risk={riskDetails} level={riskLevel} />}
           </>
-        ) : null
+        )
       )}
 
       {/* Scope expansion: collapsed approved scopes + new scope */}
