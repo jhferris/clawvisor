@@ -310,6 +310,23 @@ export interface Task {
   request_count: number
   pending_action?: TaskAction
   pending_reason?: string
+  risk_level?: string
+  risk_details?: RiskAssessment
+}
+
+export interface RiskAssessment {
+  risk_level: string
+  explanation: string
+  factors: string[]
+  conflicts: RiskConflict[]
+  model: string
+  latency_ms: number
+}
+
+export interface RiskConflict {
+  field: string
+  description: string
+  severity: string
 }
 
 export interface FeatureSet {

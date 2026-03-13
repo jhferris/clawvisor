@@ -18,6 +18,7 @@ export default {
         success: "rgb(var(--color-success) / <alpha-value>)",
         warning: "rgb(var(--color-warning) / <alpha-value>)",
         danger: "rgb(var(--color-danger) / <alpha-value>)",
+        "risk-orange": "rgb(var(--color-risk-orange) / <alpha-value>)",
         "text-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
         "text-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",
         "text-tertiary": "rgb(var(--color-text-tertiary) / <alpha-value>)",

@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Task, type AuditEntry } from '../api/client'
+import { api, type Task, type AuditEntry, type RiskAssessment } from '../api/client'
 import { format } from 'date-fns'
 import { serviceName, actionName } from '../lib/services'
 import CountdownTimer from './CountdownTimer'
+import RiskBadge from './RiskBadge'
 
 // ── Status helpers ───────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ export default function TaskCard({
   const [result, setResult] = useState<string | null>(null)
   const [scopesOpen, setScopesOpen] = useState(false)
   const [activityOpen, setActivityOpen] = useState(false)
+  const [riskOpen, setRiskOpen] = useState(false)
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['tasks'] })
@@ -105,7 +107,15 @@ export default function TaskCard({
   const auditEntries = auditData?.entries ?? []
   const badge = STATUS_BADGE[task.status] ?? { bg: 'bg-surface-2', text: 'text-text-tertiary', label: task.status }
   const dotColor = STATUS_DOT[task.status] ?? 'bg-text-tertiary'
-  const leftBorder = LEFT_BORDER[task.status] ?? 'border-l-transparent'
+  const riskLevel = task.risk_level ?? ''
+  const riskDetails = task.risk_details
+  const hasRisk = riskLevel !== '' && riskLevel !== 'unknown'
+  const isHighRisk = riskLevel === 'high' || riskLevel === 'critical'
+  const riskPanelExpanded = isActionable && isHighRisk
+  // Critical pending tasks shift the left border to danger red.
+  const leftBorder = (isActionable && riskLevel === 'critical')
+    ? 'border-l-danger'
+    : (LEFT_BORDER[task.status] ?? 'border-l-transparent')
 
   return (
     <div className={`bg-surface-1 border border-border-default rounded-md border-l-[3px] ${leftBorder} overflow-hidden`}>
@@ -117,6 +127,7 @@ export default function TaskCard({
             <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
             {badge.label}
           </span>
+          {riskLevel && <RiskBadge level={riskLevel} />}
           <span className="text-xs font-mono text-text-secondary">{agentName}</span>
           <span className="text-xs text-text-tertiary">&middot;</span>
           <span className="text-xs font-mono text-text-tertiary">
@@ -132,6 +143,27 @@ export default function TaskCard({
         <div className="px-5 pb-3">
           <div className="p-2 bg-surface-2 rounded text-sm text-text-tertiary">{result}</div>
         </div>
+      )}
+
+      {/* Risk assessment panel (auto-expanded for high/critical pending, collapsible otherwise) */}
+      {riskDetails && hasRisk && riskLevel !== 'low' && (
+        riskPanelExpanded ? (
+          <RiskPanel risk={riskDetails} level={riskLevel} />
+        ) : !isActionable ? (
+          <>
+            <div className="px-5 pb-3 flex items-center justify-between">
+              <button
+                onClick={() => setRiskOpen(o => !o)}
+                className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary"
+              >
+                <svg className={`w-3 h-3 transition-transform ${riskOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+                <span className="font-medium">Risk assessment</span>
+              </button>
+              <span className="text-xs text-text-secondary truncate ml-3" style={{ maxWidth: 360 }}>{riskDetails.explanation}</span>
+            </div>
+            {riskOpen && <RiskPanel risk={riskDetails} level={riskLevel} />}
+          </>
+        ) : null
       )}
 
       {/* Scope expansion: collapsed approved scopes + new scope */}
@@ -326,6 +358,76 @@ function ScopeGroupTables({ autoActions, manualActions }: {
         </div>
       )}
     </>
+  )
+}
+
+// ── Risk assessment panel ─────────────────────────────────────────────────────
+
+const RISK_PANEL_COLORS: Record<string, {
+  bg: string; border: string; headerBorder: string; color: string; conflictBorder: string
+}> = {
+  medium:   { bg: 'rgba(245, 158, 11, 0.05)', border: 'rgba(245, 158, 11, 0.2)', headerBorder: 'rgba(245, 158, 11, 0.12)', color: 'rgb(var(--color-warning))', conflictBorder: 'rgba(245, 158, 11, 0.1)' },
+  high:     { bg: 'rgba(249, 115, 22, 0.05)', border: 'rgba(249, 115, 22, 0.2)', headerBorder: 'rgba(249, 115, 22, 0.12)', color: 'rgb(var(--color-risk-orange))', conflictBorder: 'rgba(249, 115, 22, 0.1)' },
+  critical: { bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.25)', headerBorder: 'rgba(239, 68, 68, 0.15)', color: 'rgb(var(--color-danger))', conflictBorder: 'rgba(239, 68, 68, 0.1)' },
+}
+
+function RiskPanel({ risk, level }: { risk: RiskAssessment; level: string }) {
+  const colors = RISK_PANEL_COLORS[level] ?? RISK_PANEL_COLORS.medium
+  const hasConflicts = risk.conflicts && risk.conflicts.length > 0
+  const hasFactors = risk.factors && risk.factors.length > 0
+  const headerLabel = level === 'critical' ? 'Risk Assessment \u2014 Critical' : 'Risk Assessment'
+
+  return (
+    <div className="px-4 pb-3">
+      <div className="rounded overflow-hidden" style={{ background: colors.bg, border: `1px solid ${colors.border}` }}>
+        <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ borderBottom: `1px solid ${colors.headerBorder}` }}>
+          <svg className="w-3 h-3" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: colors.color }}>{headerLabel}</span>
+        </div>
+        <div className="px-3 py-2.5 space-y-2">
+          <p className="text-sm text-text-secondary">{risk.explanation}</p>
+
+          {/* Conflicts (shown before factors for critical, after for others) */}
+          {hasConflicts && level === 'critical' && (
+            <div className="space-y-1.5">
+              {risk.conflicts.map((c, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <svg className="w-3 h-3 shrink-0 mt-0.5" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                  <span className="text-xs text-text-secondary">{c.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Factors */}
+          {hasFactors && (
+            <div className="space-y-1" style={hasConflicts && level === 'critical' ? { borderTop: `1px solid ${colors.conflictBorder}`, paddingTop: '0.25rem' } : undefined}>
+              {risk.factors.map((f, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-text-tertiary mt-0.5 text-xs">&bull;</span>
+                  <span className="text-xs text-text-secondary">{f}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Conflicts (after factors for non-critical) */}
+          {hasConflicts && level !== 'critical' && (
+            <div className="mt-1 pt-2 space-y-1.5" style={{ borderTop: `1px solid ${colors.conflictBorder}` }}>
+              {risk.conflicts.map((c, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <svg className="w-3 h-3 shrink-0 mt-0.5" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                  <span className="text-xs text-text-secondary">{c.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Model & latency metadata */}
+          <div className="text-[10px] font-mono text-text-tertiary pt-1">{risk.model} &middot; {risk.latency_ms}ms</div>
+        </div>
+      </div>
+    </div>
   )
 }
 
