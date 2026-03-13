@@ -158,6 +158,26 @@ The agent calls `POST /api/tasks` with:
 
 Every task starts as `pending_approval`. The human is notified via Telegram with the purpose and action list. The `auto_execute` flag per action controls whether matching requests run immediately or still require per-request approval. In the example above, reading emails is automatic but sending requires a human check each time.
 
+### 3.2.1 Task Risk Assessment
+
+When task risk assessment is enabled, an LLM evaluates the task at creation time and produces a `RiskAssessment`:
+
+- **Risk level**: `low`, `medium`, `high`, or `critical`
+- **Explanation**: A natural-language summary of why this risk level was assigned
+- **Factors**: Specific signals that contributed to the assessment (e.g., "auto-execute on destructive actions", "broad wildcard scope")
+- **Conflicts**: Internal inconsistencies between the stated purpose and the requested scope (e.g., purpose says "read emails" but scope includes calendar deletion)
+
+The assessment is stored on the task record (`risk_level`, `risk_details`) and displayed in the dashboard. The risk panel auto-expands for medium and above; low risk tasks show a collapsible panel. High and critical risk tasks require a two-step confirmation to approve.
+
+The assessor evaluates three dimensions:
+1. **Scope breadth** — How many services, actions, and auto-execute permissions are requested?
+2. **Purpose-scope coherence** — Does the declared purpose justify the requested scope?
+3. **Internal consistency** — Do the `expected_use` descriptions on individual actions align with the stated purpose?
+
+Risk assessment is non-blocking: if the LLM call fails, the task is created without a risk level. The assessment runs asynchronously and does not delay task creation.
+
+Configuration: `llm.task_risk.enabled` (default: false). The assessor inherits shared LLM settings (provider, model, API key) from the `llm` section, with optional per-feature overrides.
+
 ### 3.3 Lifetimes
 
 **Session tasks** expire after a configurable TTL (default 30 minutes). They're meant for a single agent conversation — triage this inbox, plan this week's calendar.
@@ -393,6 +413,7 @@ Migrations are embedded in the binary and run automatically on startup. Each mig
 | 007 | Multi-account alias support on service_meta |
 | 008 | Notification messages table (replaces inline telegram_msg_id) |
 | 009 | Intent verification column on audit_log |
+| 012 | Task risk assessment columns (risk_level, risk_details) on tasks |
 
 ---
 
@@ -453,11 +474,12 @@ Configuration is loaded in three layers, each overriding the previous:
 
 ### 12.2 LLM Configuration
 
-There is one LLM slot for intent verification, configurable with provider and model:
+The `llm` section defines shared provider settings (provider, endpoint, api_key, model, timeout_seconds) inherited by all LLM features. Each subsection can optionally override individual fields.
 
-- **Verification**: Pre-execution intent consistency checking. Recommended: fast/cheap model.
+- **Verification** (`llm.verification`): Pre-execution intent consistency checking. Runs on every gateway request under a task. Settings: `enabled`, `timeout_seconds`, `fail_closed`, `cache_ttl_seconds`.
+- **Task Risk** (`llm.task_risk`): Risk assessment at task creation time. Settings: `enabled`.
 
-Settings: `enabled`, `provider` (anthropic/openai), `endpoint`, `api_key`, `model`, `timeout_seconds`, `fail_closed`, `cache_ttl_seconds`.
+Both features share the same provider and API key by default. Per-feature overrides are supported via `CLAWVISOR_LLM_VERIFICATION_*` and `CLAWVISOR_LLM_TASK_RISK_*` env vars, or by setting fields directly in the subsection YAML.
 
 ---
 
@@ -539,4 +561,4 @@ Human approval decision          Agent's "context.data_origin" (logged, not trus
 
 **Why HMAC-SHA256 for callback signing?** The agent needs to verify that callbacks actually came from Clawvisor. HMAC with a shared secret is simple and doesn't require PKI. The trade-off is that the signing key derivation is currently based on the agent's token hash rather than the raw token, which means the agent can't independently verify signatures without knowing this implementation detail.
 
-**Why a single LLM checkpoint (intent verification)?** Earlier designs included post-execution safety checking and LLM-powered response filtering, but these were removed as dead code — the safety checker always returned "safe" via a noop implementation, and no consumer ever sent response filters. Intent verification is the only LLM checkpoint that provides concrete value: it catches misuse of task-scoped auto-execution by verifying that request parameters match the stated purpose.
+**Why two LLM checkpoints?** Intent verification and task risk assessment serve different purposes at different points in the lifecycle. Task risk assessment runs once at task creation to help the user make an informed approval decision — it evaluates whether the scope is reasonable for the stated purpose. Intent verification runs on every gateway request under an active task to catch runtime misuse — it verifies that specific request parameters match the approved purpose. Risk assessment is advisory (non-blocking); intent verification can block requests.

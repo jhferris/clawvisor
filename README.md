@@ -79,7 +79,9 @@ Clawvisor loads `config.yaml` from the working directory (override with `CONFIG_
 | Allowed emails | `ALLOWED_EMAILS` | Comma-separated emails allowed to register |
 | Google OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Needed for Google services |
 | Public URL | `PUBLIC_URL` | Used in Telegram notification links |
+| LLM config | `CLAWVISOR_LLM_*` | Shared provider, model, API key for all LLM features |
 | Intent verification | `CLAWVISOR_LLM_VERIFICATION_*` | Optional LLM check that request params match task purpose |
+| Task risk assessment | `CLAWVISOR_LLM_TASK_RISK_*` | Optional LLM risk assessment when tasks are created |
 
 See [`config.example.yaml`](config.example.yaml) for the full configuration reference.
 
@@ -111,6 +113,8 @@ Every gateway request passes through three authorization layers, checked in orde
 1. **Restrictions** — hard blocks you configure on specific service/action pairs. If a restriction matches, the request is denied immediately. Use these for actions you never want any agent to take (e.g. "no agent can delete calendar events").
 2. **Task scopes** — the primary mechanism. When an agent needs to do something, it creates a task declaring the purpose and which service/action pairs it needs. You review and approve the scope once. After that, requests under that task execute without further interruption — you approved the purpose, not each individual call. Tasks can be session-scoped (expire after a TTL) or standing (persist until you revoke them).
 3. **Per-request approval** — the fallback. Any request that isn't covered by a task scope goes to the approval queue, and you're notified via the dashboard or Telegram. This is the default for actions the agent didn't declare upfront, or for task actions marked `auto_execute: false` (e.g. sending emails).
+
+When a task is created, Clawvisor can optionally run an **LLM-powered risk assessment** that evaluates the scope breadth, purpose-scope coherence, and internal consistency of the task. The assessment produces a risk level (low, medium, high, critical) shown in the dashboard to help inform your approval decision. High and critical risk tasks require a confirmation step before approval.
 
 ## Supported Services
 
@@ -353,7 +357,8 @@ internal/
   display/                  — human-readable names for services and actions
   events/                   — SSE event hub for real-time dashboard updates
   intent/                   — intent verification
-  llm/                      — LLM HTTP client for intent verification
+  llm/                      — LLM HTTP client for intent verification and task risk
+  taskrisk/                 — LLM-powered task risk assessment
   mcp/                      — MCP (Model Context Protocol) server
   notify/                   — Telegram notifier
   ratelimit/                — rate limiting
