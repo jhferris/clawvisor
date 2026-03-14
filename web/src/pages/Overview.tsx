@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, type QueueItem, type Agent, type NotificationConfig, type ActivityBucket } from '../api/client'
+import { api, type QueueItem, type Agent, type NotificationConfig, type ActivityBucket, type VerificationVerdict } from '../api/client'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { serviceName, actionName } from '../lib/services'
 import CountdownTimer from '../components/CountdownTimer'
 import TaskCard from '../components/TaskCard'
+import VerificationIcon from '../components/VerificationIcon'
 import Onboarding from './Onboarding'
 
 export default function Overview() {
@@ -356,8 +357,19 @@ function ApprovalCard({ item }: { item: QueueItem }) {
         </div>
       )}
 
+      {/* Verification warning */}
+      {a.verification && hasVerificationIssue(a.verification) && (
+        <VerificationWarningPanel verification={a.verification} />
+      )}
+
       {/* Actions */}
       <div className="px-4 py-3 border-t border-border-subtle flex items-center justify-end gap-2">
+        {a.verification && hasVerificationIssue(a.verification) && (
+          <div className="flex items-center gap-1.5 mr-auto">
+            <VerificationIcon result={a.verification.param_scope} type="param" />
+            <VerificationIcon result={a.verification.reason_coherence} type="reason" />
+          </div>
+        )}
         <button
           onClick={() => denyMut.mutate()}
           disabled={isPending}
@@ -372,6 +384,47 @@ function ApprovalCard({ item }: { item: QueueItem }) {
         >
           {approveMut.isPending ? 'Approving...' : 'Approve'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+function hasVerificationIssue(v: VerificationVerdict): boolean {
+  return v.param_scope !== 'ok' || v.reason_coherence !== 'ok'
+}
+
+function VerificationWarningPanel({ verification: v }: { verification: VerificationVerdict }) {
+  const isDanger = v.param_scope === 'violation' || v.reason_coherence === 'incoherent'
+  const colors = isDanger
+    ? { bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.25)', headerBorder: 'rgba(239, 68, 68, 0.15)', color: 'rgb(var(--color-danger))' }
+    : { bg: 'rgba(245, 158, 11, 0.05)', border: 'rgba(245, 158, 11, 0.2)', headerBorder: 'rgba(245, 158, 11, 0.12)', color: 'rgb(var(--color-warning))' }
+
+  return (
+    <div className="px-5 pb-3">
+      <div className="rounded overflow-hidden" style={{ background: colors.bg, border: `1px solid ${colors.border}` }}>
+        <div className="px-3 py-1.5 flex items-center gap-1.5" style={{ borderBottom: `1px solid ${colors.headerBorder}` }}>
+          <svg className="w-3 h-3" style={{ color: colors.color }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: colors.color }}>
+            {isDanger ? 'Verification Warning' : 'Verification Notice'}
+          </span>
+        </div>
+        <div className="px-3 py-2.5 space-y-1.5">
+          <div className="flex items-center gap-3">
+            <span className={`text-[10px] font-mono font-medium ${
+              v.param_scope === 'ok' ? 'text-success' : v.param_scope === 'violation' ? 'text-danger' : 'text-text-tertiary'
+            }`}>params: {v.param_scope}</span>
+            <span className={`text-[10px] font-mono font-medium ${
+              v.reason_coherence === 'ok' ? 'text-success'
+              : v.reason_coherence === 'incoherent' ? 'text-danger'
+              : v.reason_coherence === 'insufficient' ? 'text-warning'
+              : 'text-text-tertiary'
+            }`}>reason: {v.reason_coherence}</span>
+          </div>
+          {v.explanation && <p className="text-xs text-text-secondary">{v.explanation}</p>}
+          <div className="text-[10px] font-mono text-text-tertiary">{v.model} &middot; {v.latency_ms}ms</div>
+        </div>
       </div>
     </div>
   )

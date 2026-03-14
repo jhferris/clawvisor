@@ -82,6 +82,7 @@ Clawvisor loads `config.yaml` from the working directory (override with `CONFIG_
 | LLM config | `CLAWVISOR_LLM_*` | Shared provider, model, API key for all LLM features |
 | Intent verification | `CLAWVISOR_LLM_VERIFICATION_*` | Optional LLM check that request params match task purpose |
 | Task risk assessment | `CLAWVISOR_LLM_TASK_RISK_*` | Optional LLM risk assessment when tasks are created |
+| Chain context | `CLAWVISOR_LLM_CHAIN_CONTEXT_*` | Optional LLM extraction of facts from results for multi-step verification |
 
 See [`config.example.yaml`](config.example.yaml) for the full configuration reference.
 
@@ -115,6 +116,8 @@ Every gateway request passes through three authorization layers, checked in orde
 3. **Per-request approval** — the fallback. Any request that isn't covered by a task scope goes to the approval queue, and you're notified via the dashboard or Telegram. This is the default for actions the agent didn't declare upfront, or for task actions marked `auto_execute: false` (e.g. sending emails).
 
 When a task is created, Clawvisor can optionally run an **LLM-powered risk assessment** that evaluates the scope breadth, purpose-scope coherence, and internal consistency of the task. The assessment produces a risk level (low, medium, high, critical) shown in the dashboard to help inform your approval decision. High and critical risk tasks require a confirmation step before approval.
+
+For multi-step tasks, **chain context verification** tracks structural facts (IDs, email addresses, phone numbers) extracted from adapter results and feeds them into subsequent verification prompts. This prevents a compromised agent from reading an inbox and then targeting an entity not present in the results. Chain context is activated by passing a consistent `session_id` across related gateway requests.
 
 ## Supported Services
 

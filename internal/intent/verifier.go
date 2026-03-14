@@ -8,8 +8,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/clawvisor/clawvisor/pkg/config"
 	"github.com/clawvisor/clawvisor/internal/llm"
+	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // VerificationVerdict is the result of intent verification.
@@ -17,6 +18,7 @@ type VerificationVerdict struct {
 	Allow           bool   `json:"allow"`
 	ParamScope      string `json:"param_scope"`      // "ok" | "violation" | "n/a"
 	ReasonCoherence string `json:"reason_coherence"` // "ok" | "incoherent" | "insufficient"
+	ExtractContext  bool   `json:"extract_context"`
 	Explanation     string `json:"explanation"`
 	Model           string `json:"model"`
 	LatencyMS       int    `json:"latency_ms"`
@@ -34,6 +36,8 @@ type VerifyRequest struct {
 	Reason             string
 	TaskID             string // cache key component
 	ServiceHints       string // adapter-provided verification guidance; empty for most adapters
+	ChainFacts         []store.ChainFact
+	ChainContextOptOut bool // standing task without session_id — agent bypassed chain context
 }
 
 // Verifier checks whether a gateway request is consistent with the approved task.

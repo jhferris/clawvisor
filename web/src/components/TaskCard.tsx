@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { serviceName, actionName } from '../lib/services'
 import CountdownTimer from './CountdownTimer'
 import RiskBadge from './RiskBadge'
+import VerificationIcon from './VerificationIcon'
 
 // ── Status helpers ───────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ export default function TaskCard({
   const riskDetails = task.risk_details
   const hasRisk = riskLevel !== '' && riskLevel !== 'unknown'
   const isHighRisk = riskLevel === 'high' || riskLevel === 'critical'
-  const riskPanelExpanded = riskLevel !== 'low' && riskLevel !== ''
+  const riskPanelExpanded = !isActive && riskLevel !== 'low' && riskLevel !== ''
   // Critical pending tasks shift the left border to danger red.
   const leftBorder = (isActionable && riskLevel === 'critical')
     ? 'border-l-danger'
@@ -448,29 +449,6 @@ function RiskPanel({ risk, level }: { risk: RiskAssessment; level: string }) {
 }
 
 // ── Activity feed row ────────────────────────────────────────────────────────
-
-function VerificationIcon({ result: r, type }: { result: string; type: 'param' | 'reason' }) {
-  const isOk = r === 'ok'
-  const isDanger = type === 'param' ? r === 'violation' : r === 'incoherent'
-  const isWarning = type === 'reason' && r === 'insufficient'
-
-  if (isOk) return (
-    <span className="inline-flex items-center text-[10px] font-mono px-1 py-0.5 rounded bg-success/10 text-success">
-      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
-    </span>
-  )
-  if (isDanger) return (
-    <span className="inline-flex items-center text-[10px] font-mono px-1 py-0.5 rounded bg-danger/12 text-danger">
-      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
-    </span>
-  )
-  if (isWarning) return (
-    <span className="inline-flex items-center text-[10px] font-mono px-1 py-0.5 rounded bg-warning/15 text-warning">
-      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01"/></svg>
-    </span>
-  )
-  return null
-}
 
 function ParamsTable({ params }: { params: Record<string, unknown> }) {
   if (!params || Object.keys(params).length === 0) return null

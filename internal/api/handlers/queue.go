@@ -20,12 +20,13 @@ func NewQueueHandler(st store.Store) *QueueHandler {
 }
 
 type queueApproval struct {
-	RequestID string         `json:"request_id"`
-	AuditID   string         `json:"audit_id"`
-	Service   string         `json:"service"`
-	Action    string         `json:"action"`
-	Params    map[string]any `json:"params"`
-	Reason    string         `json:"reason,omitempty"`
+	RequestID    string         `json:"request_id"`
+	AuditID      string         `json:"audit_id"`
+	Service      string         `json:"service"`
+	Action       string         `json:"action"`
+	Params       map[string]any `json:"params"`
+	Reason       string         `json:"reason,omitempty"`
+	Verification map[string]any `json:"verification,omitempty"`
 }
 
 type queueItem struct {
@@ -67,19 +68,27 @@ func (h *QueueHandler) List(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(pa.RequestBlob, &blob)
 
 		exp := pa.ExpiresAt
+		qa := &queueApproval{
+			RequestID: pa.RequestID,
+			AuditID:   pa.AuditID,
+			Service:   blob.Service,
+			Action:    blob.Action,
+			Params:    blob.Params,
+			Reason:    blob.Reason,
+		}
+		if blob.Verification != nil {
+			b, _ := json.Marshal(blob.Verification)
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				qa.Verification = m
+			}
+		}
 		items = append(items, queueItem{
 			Type:      "approval",
 			ID:        pa.RequestID,
 			CreatedAt: pa.CreatedAt,
 			ExpiresAt: &exp,
-			Approval: &queueApproval{
-				RequestID: pa.RequestID,
-				AuditID:   pa.AuditID,
-				Service:   blob.Service,
-				Action:    blob.Action,
-				Params:    blob.Params,
-				Reason:    blob.Reason,
-			},
+			Approval:  qa,
 		})
 	}
 

@@ -102,6 +102,11 @@ type TaskRiskConfig struct {
 	LLMProviderConfig `yaml:",inline"`
 }
 
+// ChainContextConfig holds settings for chain context extraction.
+type ChainContextConfig struct {
+	LLMProviderConfig `yaml:",inline"`
+}
+
 // LLMConfig groups all LLM provider configurations.
 // Shared fields (provider, endpoint, api_key, model, timeout_seconds) are inherited
 // by subsections unless explicitly overridden at the subsection level.
@@ -112,8 +117,9 @@ type LLMConfig struct {
 	Model          string `yaml:"model"`            // Shared default: "claude-haiku-4-5-20251001"
 	TimeoutSeconds int    `yaml:"timeout_seconds"`  // Shared default: 10
 
-	Verification VerificationConfig `yaml:"verification"` // Intent verification (runtime)
-	TaskRisk     TaskRiskConfig     `yaml:"task_risk"`     // Task risk assessment (creation time)
+	Verification VerificationConfig `yaml:"verification"`  // Intent verification (runtime)
+	TaskRisk     TaskRiskConfig     `yaml:"task_risk"`      // Task risk assessment (creation time)
+	ChainContext ChainContextConfig `yaml:"chain_context"`  // Chain context extraction (multi-step tasks)
 }
 
 // MCPConfig holds settings for the MCP server.
@@ -411,9 +417,26 @@ func Load(path string) (*Config, error) {
 		cfg.LLM.TaskRisk.Model = v
 	}
 
+	if v := os.Getenv("CLAWVISOR_LLM_CHAIN_CONTEXT_ENABLED"); v != "" {
+		cfg.LLM.ChainContext.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_CHAIN_CONTEXT_PROVIDER"); v != "" {
+		cfg.LLM.ChainContext.Provider = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_CHAIN_CONTEXT_ENDPOINT"); v != "" {
+		cfg.LLM.ChainContext.Endpoint = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_CHAIN_CONTEXT_API_KEY"); v != "" {
+		cfg.LLM.ChainContext.APIKey = v
+	}
+	if v := os.Getenv("CLAWVISOR_LLM_CHAIN_CONTEXT_MODEL"); v != "" {
+		cfg.LLM.ChainContext.Model = v
+	}
+
 	// Inherit: fill empty subsection fields from shared LLM config.
 	inheritLLMDefaults(&cfg.LLM.Verification.LLMProviderConfig, &cfg.LLM)
 	inheritLLMDefaults(&cfg.LLM.TaskRisk.LLMProviderConfig, &cfg.LLM)
+	inheritLLMDefaults(&cfg.LLM.ChainContext.LLMProviderConfig, &cfg.LLM)
 
 	// Resolve empty database driver: explicit env/config wins; otherwise auto-detect.
 	if cfg.Database.Driver == "" {

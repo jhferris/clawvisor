@@ -203,9 +203,15 @@ func (s *Server) routes() http.Handler {
 		verifier = intent.NewLLMVerifier(s.llmCfg.Verification)
 	}
 
+	// Construct chain context extractor (noop if disabled).
+	var extractor intent.Extractor = intent.NoopExtractor{}
+	if s.llmCfg.ChainContext.Enabled {
+		extractor = intent.NewLLMExtractor(s.llmCfg.ChainContext, s.logger)
+	}
+
 	gatewayHandler := handlers.NewGatewayHandler(
 		s.store, s.vault, s.adapterReg,
-		s.notifier, verifier, *s.cfg, s.logger, baseURL, s.eventHub,
+		s.notifier, verifier, extractor, *s.cfg, s.logger, baseURL, s.eventHub,
 	)
 	servicesHandler := handlers.NewServicesHandler(s.store, s.vault, s.adapterReg, s.logger, baseURL)
 	skillHandler := handlers.NewSkillHandler(s.store, s.vault, s.adapterReg, s.logger)

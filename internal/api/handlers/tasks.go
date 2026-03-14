@@ -426,6 +426,9 @@ func (h *TasksHandler) Deny(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not deny task")
 		return
 	}
+	if err := h.st.DeleteChainFactsByTask(ctx, taskID); err != nil {
+		h.logger.Warn("chain facts cleanup failed", "err", err, "task_id", taskID)
+	}
 
 	h.publishTasksAndQueue(user.ID)
 
@@ -483,6 +486,9 @@ func (h *TasksHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	if err := h.st.UpdateTaskStatus(ctx, taskID, "completed"); err != nil {
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not complete task")
 		return
+	}
+	if err := h.st.DeleteChainFactsByTask(ctx, taskID); err != nil {
+		h.logger.Warn("chain facts cleanup failed", "err", err, "task_id", taskID)
 	}
 
 	h.publishTasksAndQueue(agent.UserID)
@@ -972,6 +978,9 @@ func (h *TasksHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not revoke task")
 		return
+	}
+	if err := h.st.DeleteChainFactsByTask(ctx, taskID); err != nil {
+		h.logger.Warn("chain facts cleanup failed", "err", err, "task_id", taskID)
 	}
 
 	h.publishTasksAndQueue(user.ID)

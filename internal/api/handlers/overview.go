@@ -51,19 +51,27 @@ func (h *OverviewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(pa.RequestBlob, &blob)
 
 		exp := pa.ExpiresAt
+		qa := &queueApproval{
+			RequestID: pa.RequestID,
+			AuditID:   pa.AuditID,
+			Service:   blob.Service,
+			Action:    blob.Action,
+			Params:    blob.Params,
+			Reason:    blob.Reason,
+		}
+		if blob.Verification != nil {
+			b, _ := json.Marshal(blob.Verification)
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				qa.Verification = m
+			}
+		}
 		queueItems = append(queueItems, queueItem{
 			Type:      "approval",
 			ID:        pa.RequestID,
 			CreatedAt: pa.CreatedAt,
 			ExpiresAt: &exp,
-			Approval: &queueApproval{
-				RequestID: pa.RequestID,
-				AuditID:   pa.AuditID,
-				Service:   blob.Service,
-				Action:    blob.Action,
-				Params:    blob.Params,
-				Reason:    blob.Reason,
-			},
+			Approval:  qa,
 		})
 	}
 

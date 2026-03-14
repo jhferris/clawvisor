@@ -1176,6 +1176,53 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, codeHash string) (
 	return c, nil
 }
 
+// ── Chain Facts ───────────────────────────────────────────────────────────────
+
+func (s *Store) SaveChainFacts(ctx context.Context, facts []*store.ChainFact) error {
+	for _, f := range facts {
+		if f.ID == "" {
+			f.ID = uuid.New().String()
+		}
+		_, err := s.db.ExecContext(ctx, `
+			INSERT INTO chain_facts (id, task_id, session_id, audit_id, service, action, fact_type, fact_value)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, f.ID, f.TaskID, f.SessionID, f.AuditID, f.Service, f.Action, f.FactType, f.FactValue)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListChainFacts(ctx context.Context, taskID, sessionID string, limit int) ([]*store.ChainFact, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, task_id, session_id, audit_id, service, action, fact_type, fact_value, created_at
+		FROM chain_facts WHERE task_id = ? AND session_id = ? ORDER BY created_at ASC LIMIT ?
+	`, taskID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var facts []*store.ChainFact
+	for rows.Next() {
+		f := &store.ChainFact{}
+		var createdAt string
+		if err := rows.Scan(&f.ID, &f.TaskID, &f.SessionID, &f.AuditID,
+			&f.Service, &f.Action, &f.FactType, &f.FactValue, &createdAt); err != nil {
+			return nil, err
+		}
+		f.CreatedAt = parseTime(createdAt)
+		facts = append(facts, f)
+	}
+	return facts, rows.Err()
+}
+
+func (s *Store) DeleteChainFactsByTask(ctx context.Context, taskID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chain_facts WHERE task_id = ?`, taskID)
+	return err
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func isDuplicate(err error) bool {

@@ -37,7 +37,8 @@ type pendingRequestBlob struct {
 	AgentName   string         `json:"agent_name"`
 	RequestID   string         `json:"request_id"`
 	Reason      string         `json:"reason"`
-	CallbackURL string         `json:"callback_url"`
+	CallbackURL  string                    `json:"callback_url"`
+	Verification *intent.VerificationVerdict `json:"verification,omitempty"`
 }
 
 // GatewayHandler handles POST /api/gateway/request.
@@ -47,6 +48,7 @@ type GatewayHandler struct {
 	adapterReg *adapters.Registry
 	notifier   notify.Notifier // may be nil if Telegram not configured
 	verifier   intent.Verifier
+	extractor  intent.Extractor
 	cfg        config.Config
 	logger     *slog.Logger
 	baseURL    string
@@ -59,6 +61,7 @@ func NewGatewayHandler(
 	adapterReg *adapters.Registry,
 	notifier notify.Notifier,
 	verifier intent.Verifier,
+	extractor intent.Extractor,
 	cfg config.Config,
 	logger *slog.Logger,
 	baseURL string,
@@ -66,7 +69,7 @@ func NewGatewayHandler(
 ) *GatewayHandler {
 	return &GatewayHandler{
 		store: st, vault: v, adapterReg: adapterReg,
-		notifier: notifier, verifier: verifier,
+		notifier: notifier, verifier: verifier, extractor: extractor,
 		cfg: cfg, logger: logger, baseURL: baseURL,
 		eventHub: eventHub,
 	}
@@ -193,6 +196,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	hardcoded := RequiresHardcodedApproval(serviceType, req.Action)
 
 	// ── Step 4: Task scope enforcement ───────────────────────────────────────
+	var advisoryVerdict *intent.VerificationVerdict
 	{
 		task, taskErr := h.store.GetTask(ctx, req.TaskID)
 		if taskErr != nil {
@@ -252,28 +256,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			taskIDPtr := &req.TaskID
 
 			// ── Intent verification ──────────────────────────────────────
-			var expectedUse, expansionRationale string
-			if match.MatchedAction != nil {
-				expectedUse = match.MatchedAction.ExpectedUse
-				expansionRationale = match.MatchedAction.ExpansionRationale
-			}
-			var serviceHints string
-			if ada, ok := h.adapterReg.Get(serviceType); ok {
-				if hinter, ok := ada.(adapters.VerificationHinter); ok {
-					serviceHints = hinter.VerificationHints()
-				}
-			}
-			verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
-				TaskPurpose:        task.Purpose,
-				ExpectedUse:        expectedUse,
-				ExpansionRationale: expansionRationale,
-				Service:            req.Service,
-				Action:             req.Action,
-				Params:             req.Params,
-				Reason:             req.Reason,
-				TaskID:             req.TaskID,
-				ServiceHints:       serviceHints,
-			})
+			verdict := h.runVerification(ctx, task, match.MatchedAction, req, serviceType)
 			if verdict != nil && !verdict.Allow {
 				dur := int(time.Since(start).Milliseconds())
 				e := baseEntry("verify", "restricted", taskIDPtr)
@@ -395,6 +378,37 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
 			h.publishAuditAndQueue(agent.UserID, req.TaskID)
+
+			// Chain context extraction (async — after response is written)
+			chainSessionID := req.SessionID
+			if chainSessionID == "" && task.Lifetime != "standing" {
+				chainSessionID = req.TaskID
+			}
+			if chainSessionID != "" && verdict != nil && verdict.ExtractContext {
+				resultJSON, _ := json.Marshal(result)
+				go func() {
+					facts, err := h.extractor.Extract(context.Background(), intent.ExtractRequest{
+						TaskPurpose:       task.Purpose,
+						AuthorizedActions: task.AuthorizedActions,
+						Service:           req.Service,
+						Action:            req.Action,
+						Result:            string(resultJSON),
+						TaskID:            req.TaskID,
+						SessionID:         chainSessionID,
+						AuditID:           auditID,
+					})
+					if err != nil {
+						h.logger.Warn("chain context extraction failed", "err", err, "task_id", req.TaskID)
+						return
+					}
+					if len(facts) > 0 {
+						if err := h.store.SaveChainFacts(context.Background(), facts); err != nil {
+							h.logger.Warn("chain facts save failed", "err", err, "task_id", req.TaskID)
+						}
+					}
+				}()
+			}
+
 			if req.Context.CallbackURL != "" {
 				cbKey, _ := h.store.GetAgentCallbackSecret(ctx, agent.ID)
 				go func() {
@@ -412,7 +426,9 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// In scope + (!auto_execute || hardcoded) → falls through to per-request approval below
+		// In scope + (!auto_execute || hardcoded) → falls through to per-request approval below.
+		// Run advisory verification so the human sees warnings in the approval UI.
+		advisoryVerdict = h.runVerification(ctx, task, match.MatchedAction, req, serviceType)
 	}
 
 	// ── Step 5: Per-request approval ─────────────────────────────────────────
@@ -478,18 +494,20 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	taskIDPtr := &req.TaskID
 	e := baseEntry("approve", "pending", taskIDPtr)
 	e.DurationMS = int(time.Since(start).Milliseconds())
+	e.Verification = intent.MarshalVerdict(advisoryVerdict)
 	if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 		h.logger.Warn("audit log failed", "err", logErr)
 	}
 	h.publishAuditAndQueue(agent.UserID, req.TaskID)
 	expiresAt := time.Now().Add(time.Duration(h.cfg.Approval.Timeout) * time.Second)
 	blob := buildRequestBlob(req, agent)
+	blob.Verification = advisoryVerdict
 	reason := ""
 	if hardcoded {
 		reason = "iMessage send_message always requires human approval"
 	}
 	if routeErr := h.routeToApproval(ctx, agent.UserID, blob, auditID,
-		req.Context.CallbackURL, expiresAt, reason); routeErr != nil {
+		req.Context.CallbackURL, expiresAt, reason, advisoryVerdict); routeErr != nil {
 		h.logger.Warn("route to approval failed", "err", routeErr)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -577,6 +595,56 @@ func (h *GatewayHandler) publishAuditAndQueue(userID, taskID string) {
 	h.eventHub.Publish(userID, events.Event{Type: "queue"})
 }
 
+// runVerification runs intent verification for a request and returns the verdict.
+// Returns nil if the verifier is a no-op or if verification fails.
+func (h *GatewayHandler) runVerification(
+	ctx context.Context,
+	task *store.Task,
+	matchedAction *store.TaskAction,
+	req gateway.Request,
+	serviceType string,
+) *intent.VerificationVerdict {
+	var expectedUse, expansionRationale string
+	if matchedAction != nil {
+		expectedUse = matchedAction.ExpectedUse
+		expansionRationale = matchedAction.ExpansionRationale
+	}
+	var serviceHints string
+	if ada, ok := h.adapterReg.Get(serviceType); ok {
+		if hinter, ok := ada.(adapters.VerificationHinter); ok {
+			serviceHints = hinter.VerificationHints()
+		}
+	}
+	// Chain context: ephemeral tasks use task_id as implicit session;
+	// standing tasks require an explicit session_id to scope facts.
+	chainSessionID := req.SessionID
+	if chainSessionID == "" && task.Lifetime != "standing" {
+		chainSessionID = req.TaskID
+	}
+	var chainFacts []store.ChainFact
+	if chainSessionID != "" {
+		facts, _ := h.store.ListChainFacts(ctx, req.TaskID, chainSessionID, 50)
+		for _, f := range facts {
+			chainFacts = append(chainFacts, *f)
+		}
+	}
+	chainContextOptOut := task.Lifetime == "standing" && req.SessionID == ""
+	verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
+		TaskPurpose:        task.Purpose,
+		ExpectedUse:        expectedUse,
+		ExpansionRationale: expansionRationale,
+		Service:            req.Service,
+		Action:             req.Action,
+		Params:             req.Params,
+		Reason:             req.Reason,
+		TaskID:             req.TaskID,
+		ServiceHints:       serviceHints,
+		ChainFacts:         chainFacts,
+		ChainContextOptOut: chainContextOptOut,
+	})
+	return verdict
+}
+
 // ── Shared execution logic ────────────────────────────────────────────────────
 
 // executeAdapterRequest fetches the credential from vault and calls the adapter.
@@ -630,6 +698,7 @@ func (h *GatewayHandler) routeToApproval(
 	auditID, callbackURL string,
 	expiresAt time.Time,
 	policyReason string,
+	verdict *intent.VerificationVerdict,
 ) error {
 	blobBytes, _ := json.Marshal(blob)
 	pa := &store.PendingApproval{
@@ -655,7 +724,7 @@ func (h *GatewayHandler) routeToApproval(
 	approveURL := fmt.Sprintf("%s/dashboard?action=approve&request_id=%s", h.baseURL, blob.RequestID)
 	denyURL := fmt.Sprintf("%s/dashboard?action=deny&request_id=%s", h.baseURL, blob.RequestID)
 
-	msgID, err := h.notifier.SendApprovalRequest(ctx, notify.ApprovalRequest{
+	approvalReq := notify.ApprovalRequest{
 		PendingID:    pa.ID,
 		RequestID:    blob.RequestID,
 		UserID:       userID,
@@ -668,7 +737,13 @@ func (h *GatewayHandler) routeToApproval(
 		ExpiresIn:    expiresIn,
 		ApproveURL:   approveURL,
 		DenyURL:      denyURL,
-	})
+	}
+	if verdict != nil {
+		approvalReq.VerifyParamScope = verdict.ParamScope
+		approvalReq.VerifyReasonCoherence = verdict.ReasonCoherence
+		approvalReq.VerifyExplanation = verdict.Explanation
+	}
+	msgID, err := h.notifier.SendApprovalRequest(ctx, approvalReq)
 	if err != nil {
 		h.logger.Warn("telegram approval notification failed", "err", err)
 		return nil

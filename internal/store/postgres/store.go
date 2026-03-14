@@ -922,6 +922,51 @@ func (s *Store) GetNotificationMessage(ctx context.Context, targetType, targetID
 	return messageID, nil
 }
 
+// ── Chain Facts ───────────────────────────────────────────────────────────────
+
+func (s *Store) SaveChainFacts(ctx context.Context, facts []*store.ChainFact) error {
+	for _, f := range facts {
+		if f.ID == "" {
+			f.ID = uuid.New().String()
+		}
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO chain_facts (id, task_id, session_id, audit_id, service, action, fact_type, fact_value)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, f.ID, f.TaskID, f.SessionID, f.AuditID, f.Service, f.Action, f.FactType, f.FactValue)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListChainFacts(ctx context.Context, taskID, sessionID string, limit int) ([]*store.ChainFact, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, task_id, session_id, audit_id, service, action, fact_type, fact_value, created_at
+		FROM chain_facts WHERE task_id = $1 AND session_id = $2 ORDER BY created_at ASC LIMIT $3
+	`, taskID, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var facts []*store.ChainFact
+	for rows.Next() {
+		f := &store.ChainFact{}
+		if err := rows.Scan(&f.ID, &f.TaskID, &f.SessionID, &f.AuditID,
+			&f.Service, &f.Action, &f.FactType, &f.FactValue, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		facts = append(facts, f)
+	}
+	return facts, rows.Err()
+}
+
+func (s *Store) DeleteChainFactsByTask(ctx context.Context, taskID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM chain_facts WHERE task_id = $1`, taskID)
+	return err
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func isDuplicate(err error) bool {

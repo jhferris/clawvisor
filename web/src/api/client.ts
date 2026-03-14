@@ -221,6 +221,16 @@ export interface Restriction {
   created_at: string
 }
 
+export interface VerificationVerdict {
+  allow: boolean
+  param_scope: string
+  reason_coherence: string
+  explanation: string
+  model: string
+  latency_ms: number
+  cached: boolean
+}
+
 export interface AuditEntry {
   id: string
   user_id: string
@@ -242,15 +252,7 @@ export interface AuditEntry {
   context_src?: string
   duration_ms: number
   filters_applied?: unknown
-  verification?: {
-    allow: boolean
-    param_scope: string
-    reason_coherence: string
-    explanation: string
-    model: string
-    latency_ms: number
-    cached: boolean
-  }
+  verification?: VerificationVerdict
   error_msg?: string
 }
 
@@ -359,6 +361,7 @@ export interface QueueApproval {
   action: string
   params: Record<string, unknown>
   reason?: string
+  verification?: VerificationVerdict
 }
 
 export interface QueueItem {

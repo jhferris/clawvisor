@@ -32,6 +32,7 @@ func NewGuardHandler(st store.Store, verifier intent.Verifier, adapterReg *adapt
 
 type guardCheckRequest struct {
 	TaskID    string         `json:"task_id"`
+	SessionID string         `json:"session_id"`
 	ToolName  string         `json:"tool_name"`
 	ToolInput map[string]any `json:"tool_input"`
 }
@@ -118,16 +119,32 @@ func (h *GuardHandler) Check(w http.ResponseWriter, r *http.Request) {
 				serviceHints = hinter.VerificationHints()
 			}
 		}
+		// Chain context: ephemeral tasks use task_id as implicit session;
+		// standing tasks require an explicit session_id to scope facts.
+		chainSessionID := req.SessionID
+		if chainSessionID == "" && task.Lifetime != "standing" {
+			chainSessionID = req.TaskID
+		}
+		var chainFacts []store.ChainFact
+		if chainSessionID != "" {
+			facts, _ := h.store.ListChainFacts(ctx, req.TaskID, chainSessionID, 50)
+			for _, f := range facts {
+				chainFacts = append(chainFacts, *f)
+			}
+		}
 
+		chainContextOptOut := task.Lifetime == "standing" && req.SessionID == ""
 		verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
-			TaskPurpose:  task.Purpose,
-			ExpectedUse:  expectedUse,
-			Service:      service,
-			Action:       action,
-			Params:       req.ToolInput,
-			Reason:       reason,
-			TaskID:       req.TaskID,
-			ServiceHints: serviceHints,
+			TaskPurpose:        task.Purpose,
+			ExpectedUse:        expectedUse,
+			Service:            service,
+			Action:             action,
+			Params:             req.ToolInput,
+			Reason:             reason,
+			TaskID:             req.TaskID,
+			ServiceHints:       serviceHints,
+			ChainFacts:         chainFacts,
+			ChainContextOptOut: chainContextOptOut,
 		})
 
 		if verdict != nil && !verdict.Allow {

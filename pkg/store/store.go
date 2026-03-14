@@ -86,6 +86,11 @@ type Store interface {
 	SaveNotificationMessage(ctx context.Context, targetType, targetID, channel, messageID string) error
 	GetNotificationMessage(ctx context.Context, targetType, targetID, channel string) (string, error)
 
+	// Chain facts (intent verification context chaining)
+	SaveChainFacts(ctx context.Context, facts []*ChainFact) error
+	ListChainFacts(ctx context.Context, taskID, sessionID string, limit int) ([]*ChainFact, error)
+	DeleteChainFactsByTask(ctx context.Context, taskID string) error
+
 	// OAuth (MCP client registration + authorization codes)
 	CreateOAuthClient(ctx context.Context, client *OAuthClient) error
 	GetOAuthClient(ctx context.Context, clientID string) (*OAuthClient, error)
@@ -252,6 +257,20 @@ type ActivityBucket struct {
 	Bucket  time.Time `json:"bucket"`
 	Outcome string    `json:"outcome"`
 	Count   int       `json:"count"`
+}
+
+// ChainFact is a structural reference extracted from an adapter result for
+// chain context verification in multi-step tasks.
+type ChainFact struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	SessionID string    `json:"session_id"`
+	AuditID   string    `json:"audit_id"`
+	Service   string    `json:"service"`
+	Action    string    `json:"action"`
+	FactType  string    `json:"fact_type"`
+	FactValue string    `json:"fact_value"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // OAuthClient is a dynamically registered OAuth 2.1 client (RFC 7591).

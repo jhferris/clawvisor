@@ -70,6 +70,35 @@ llm:
     fail_closed: true            # true = block on LLM error (after retry); false = allow on error
     cache_ttl_seconds: 60        # cache identical verdicts for 60s
 
+  # Task risk assessment — evaluates scope breadth and coherence when a task is
+  # created. Produces a risk level (low/medium/high/critical) shown in the dashboard.
+  # Env overrides: CLAWVISOR_LLM_TASK_RISK_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL}
+  task_risk:
+    enabled: false
+    # provider, endpoint, api_key, model, timeout_seconds inherit from top-level llm
+    # if not set here. Uncomment to override:
+    # provider: anthropic
+    # endpoint: https://api.anthropic.com/v1
+    # api_key: ""
+    # model: claude-haiku-4-5-20251001
+    # timeout_seconds: 10
+
+  # Chain context extraction — extracts structural facts (IDs, email addresses,
+  # phone numbers) from adapter results in multi-step tasks. These facts are fed
+  # into subsequent intent verification prompts to detect when an agent targets
+  # entities that didn't appear in prior results. Activated per-request by the
+  # agent passing a session_id in gateway requests.
+  # Env overrides: CLAWVISOR_LLM_CHAIN_CONTEXT_{ENABLED,PROVIDER,ENDPOINT,API_KEY,MODEL}
+  chain_context:
+    enabled: false
+    # provider, endpoint, api_key, model, timeout_seconds inherit from top-level llm
+    # if not set here. Uncomment to override:
+    # provider: anthropic
+    # endpoint: https://api.anthropic.com/v1
+    # api_key: ""
+    # model: claude-haiku-4-5-20251001
+    # timeout_seconds: 10
+
 mcp:
   approval_timeout: 240    # MCP tool calls block this many seconds waiting for approval
 

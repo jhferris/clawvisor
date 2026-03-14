@@ -110,6 +110,18 @@ curl -s -X POST "$CLAWVISOR_URL/api/tasks" \
 
 Standing tasks remain active until the user revokes them from the dashboard.
 
+### Chain context verification
+
+Chain context verification extracts structural facts (IDs, email addresses, phone numbers) from adapter results and feeds them into subsequent verification prompts. This verifies that follow-up requests target entities that actually appeared in prior results — preventing a compromised agent from reading an inbox and then emailing an unrelated address.
+
+**Ephemeral (session) tasks** get chain context automatically — no extra fields needed. The task ID is used to scope facts.
+
+**Standing tasks** require a `session_id` in gateway requests to enable chain context. Use a consistent `session_id` (e.g., a UUID you generate once per workflow) across all related requests in a single invocation. This scopes facts to one invocation and prevents unrelated facts from prior invocations from mixing together.
+
+If you omit `session_id` on a standing task, chain context is disabled and intent verification will apply stricter scrutiny to entity references — any specific targets (email addresses, IDs, etc.) must be justified by the task purpose or expected use alone, not by prior results.
+
+- Chain facts are automatically cleaned up when a task is completed, denied, or revoked
+
 ### Scope expansion
 
 If you need an action not in the original task scope:
@@ -155,6 +167,7 @@ curl -s -X POST "$CLAWVISOR_URL/api/gateway/request" \
     "reason": "One sentence explaining why",
     "request_id": "<unique ID you generate>",
     "task_id": "<task-uuid>",
+    "session_id": "<consistent UUID for multi-step flows>",
     "context": {
       "source": "user_message",
       "data_origin": null
@@ -172,6 +185,7 @@ curl -s -X POST "$CLAWVISOR_URL/api/gateway/request" \
 | `reason` | One sentence explaining why. Shown in approvals and audit log. Be specific. |
 | `request_id` | A unique ID you generate (e.g. UUID). Must be unique across all your requests. |
 | `task_id` | The approved task ID this request belongs to. |
+| `session_id` | *(Standing tasks only)* A consistent UUID across related requests in a single invocation. Required for chain context on standing tasks. Not needed for ephemeral tasks (chain context is automatic). |
 
 ### Context fields
 

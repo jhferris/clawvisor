@@ -262,6 +262,26 @@ func formatApprovalMessage(req notify.ApprovalRequest) string {
 			html.EscapeString(req.Reason)))
 	}
 
+	// Advisory verification warning
+	if hasVerificationWarning(req) {
+		sb.WriteString("\n🔍 <b>Verification Warning</b>\n")
+		if req.VerifyParamScope == "violation" {
+			sb.WriteString("  ❌ <b>param_scope:</b> violation\n")
+		} else if req.VerifyParamScope == "ok" {
+			sb.WriteString("  ✅ param_scope: ok\n")
+		}
+		if req.VerifyReasonCoherence == "incoherent" {
+			sb.WriteString("  ❌ <b>reason:</b> incoherent\n")
+		} else if req.VerifyReasonCoherence == "insufficient" {
+			sb.WriteString("  ⚠️ <b>reason:</b> insufficient\n")
+		} else if req.VerifyReasonCoherence == "ok" {
+			sb.WriteString("  ✅ reason: ok\n")
+		}
+		if req.VerifyExplanation != "" {
+			sb.WriteString(fmt.Sprintf("  💬 %s\n", html.EscapeString(req.VerifyExplanation)))
+		}
+	}
+
 	if req.PolicyReason != "" {
 		sb.WriteString(fmt.Sprintf("\n⚠️ %s\n", html.EscapeString(req.PolicyReason)))
 	} else {
@@ -313,6 +333,14 @@ func formatScopeExpansionMessage(req notify.ScopeExpansionRequest) string {
 	}
 
 	return sb.String()
+}
+
+// hasVerificationWarning returns true if the approval request contains a non-clean verification result.
+func hasVerificationWarning(req notify.ApprovalRequest) bool {
+	if req.VerifyParamScope == "" && req.VerifyReasonCoherence == "" {
+		return false // verification not run
+	}
+	return req.VerifyParamScope != "ok" || req.VerifyReasonCoherence != "ok"
 }
 
 // paramValue converts a param value to a display string, truncated at 100 chars.

@@ -33,6 +33,11 @@ type ApprovalRequest struct {
 	ExpiresIn    string // human-readable (e.g. "5 minutes")
 	ApproveURL   string // deep-link for approve action
 	DenyURL      string // deep-link for deny action (or callback data)
+
+	// Advisory intent verification results (flat to avoid internal/intent dependency).
+	VerifyParamScope      string // "ok" | "violation" | "n/a" | "" (not run)
+	VerifyReasonCoherence string // "ok" | "incoherent" | "insufficient" | ""
+	VerifyExplanation     string
 }
 
 // ActivationRequest is sent when a service is not yet configured.

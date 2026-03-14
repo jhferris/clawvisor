@@ -9,6 +9,7 @@ type Request struct {
 	Context   RequestContext `json:"context"`
 	RequestID string         `json:"request_id"` // optional; generated if empty
 	TaskID    string         `json:"task_id,omitempty"`
+	SessionID string         `json:"session_id,omitempty"`
 }
 
 // RequestContext carries metadata about the agent's session.
