@@ -22,6 +22,7 @@ import (
 	"github.com/clawvisor/clawvisor/internal/adapters/twilio"
 	"github.com/clawvisor/clawvisor/pkg/adapters"
 	"github.com/clawvisor/clawvisor/pkg/config"
+	"github.com/clawvisor/clawvisor/pkg/store"
 )
 
 // evalCase is a labeled test case for intent verification accuracy.
@@ -33,13 +34,22 @@ type evalCase struct {
 }
 
 type evalRequest struct {
-	TaskPurpose        string         `json:"task_purpose"`
-	ExpectedUse        string         `json:"expected_use"`
-	ExpansionRationale string         `json:"expansion_rationale"`
-	Service            string         `json:"service"`
-	Action             string         `json:"action"`
-	Params             map[string]any `json:"params"`
-	Reason             string         `json:"reason"`
+	TaskPurpose        string          `json:"task_purpose"`
+	ExpectedUse        string          `json:"expected_use"`
+	ExpansionRationale string          `json:"expansion_rationale"`
+	Service            string          `json:"service"`
+	Action             string          `json:"action"`
+	Params             map[string]any  `json:"params"`
+	Reason             string          `json:"reason"`
+	ChainFacts         []evalChainFact `json:"chain_facts,omitempty"`
+	ChainContextOptOut bool            `json:"chain_context_opt_out,omitempty"`
+}
+
+type evalChainFact struct {
+	Service   string `json:"service"`
+	Action    string `json:"action"`
+	FactType  string `json:"fact_type"`
+	FactValue string `json:"fact_value"`
 }
 
 type evalExpect struct {
@@ -153,6 +163,15 @@ func TestEvalIntentVerification(t *testing.T) {
 				Reason:             tc.Request.Reason,
 				ServiceHints:       hintsByService[svcBase],
 				TaskID:             "eval-" + tc.Name,
+				ChainContextOptOut: tc.Request.ChainContextOptOut,
+			}
+			for _, f := range tc.Request.ChainFacts {
+				req.ChainFacts = append(req.ChainFacts, store.ChainFact{
+					Service:   f.Service,
+					Action:    f.Action,
+					FactType:  f.FactType,
+					FactValue: f.FactValue,
+				})
 			}
 
 			verdict, err := verifier.Verify(context.Background(), req)
@@ -217,7 +236,7 @@ func printEvalSummary(t *testing.T, results []evalResult) {
 	t.Logf("║ Category                 ║ Pass  ║ Total ║ Accuracy ║")
 	t.Logf("╠══════════════════════════╬═══════╬═══════╬══════════╣")
 
-	categories := []string{"legitimate", "param_violation", "insufficient_reason", "prompt_injection", "edge_case"}
+	categories := []string{"legitimate", "param_violation", "insufficient_reason", "prompt_injection", "edge_case", "chain_context"}
 	for _, cat := range categories {
 		s, ok := categoryStats[cat]
 		if !ok {

@@ -18,7 +18,7 @@ import (
 const maxExtractResultLen = 4096
 
 // maxExtractedFacts caps the number of facts per extraction.
-const maxExtractedFacts = 20
+const maxExtractedFacts = 50
 
 // Extractor extracts structural chain facts from adapter results.
 type Extractor interface {
@@ -76,7 +76,7 @@ NEVER extract:
 Return a JSON array of objects, each with "fact_type" and "fact_value" fields.
 fact_type should be a lowercase identifier like: "email_address", "message_id", "file_id", "phone_number", "person_name", "amount", "date", "url", "domain", "thread_id", "event_id", "channel_name", etc.
 
-Cap at 20 facts maximum. If there are more, keep the most important ones (IDs and addresses over names and dates).
+Cap at 50 facts maximum. If there are more, keep the most important ones (IDs and addresses over names and dates).
 
 Example output:
 [{"fact_type": "email_address", "fact_value": "alice@company.com"}, {"fact_type": "message_id", "fact_value": "msg_abc123"}]

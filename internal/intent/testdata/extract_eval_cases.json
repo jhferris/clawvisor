@@ -1,0 +1,488 @@
+[
+  {
+    "name": "basic_gmail_list",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Triage my inbox and flag urgent emails",
+      "service": "google.gmail",
+      "action": "list_messages",
+      "result": "{\"summary\":\"Found 5 recent messages in INBOX\",\"data\":[{\"id\":\"18de3f7a2b4c6d90\",\"thread_id\":\"18de3f7a2b4c6d8e\",\"from\":\"j.watson@meridian.io\",\"subject\":\"Q3 Budget Review\",\"date\":\"2026-03-12T09:14:00Z\",\"snippet\":\"Please review the attached budget...\"},{\"id\":\"18de2c5b1a3d8e74\",\"thread_id\":\"18de2c5b1a3d8e70\",\"from\":\"priya.nair@luminatech.dev\",\"subject\":\"Deploy pipeline fix\",\"date\":\"2026-03-11T16:42:00Z\",\"snippet\":\"The CI failure on main has been resolved...\"},{\"id\":\"18de1a4e0c2b7f63\",\"thread_id\":\"18de1a4e0c2b7f60\",\"from\":\"carlos.reyes@fieldstone.com\",\"subject\":\"Vendor contract renewal\",\"date\":\"2026-03-11T11:08:00Z\",\"snippet\":\"Attached is the renewal proposal...\"}]}"
+    },
+    "expected": {
+      "min_facts": 5,
+      "must_include_types": ["email_address", "message_id"],
+      "must_include_values": ["j.watson@meridian.io", "18de3f7a2b4c6d90"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "basic_calendar_list",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Check my schedule for today and summarize meetings",
+      "service": "google.calendar",
+      "action": "list_events",
+      "result": "{\"summary\":\"3 events today\",\"data\":[{\"id\":\"7kn2p4m8q1r6s3t9\",\"summary\":\"Sprint Planning\",\"start\":\"2026-03-14T10:00:00Z\",\"end\":\"2026-03-14T11:00:00Z\",\"attendees\":[\"m.torres@fieldstone.com\",\"l.huang@fieldstone.com\"]},{\"id\":\"9bx4v6w2y8z1a5c3\",\"summary\":\"1:1 with Manager\",\"start\":\"2026-03-14T14:00:00Z\",\"end\":\"2026-03-14T14:30:00Z\",\"attendees\":[\"s.patel@fieldstone.com\"]}]}"
+    },
+    "expected": {
+      "min_facts": 4,
+      "must_include_types": ["event_id", "email_address"],
+      "must_include_values": ["7kn2p4m8q1r6s3t9", "m.torres@fieldstone.com"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "basic_drive_search",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Find the Q1 planning document and extract action items",
+      "service": "google.drive",
+      "action": "search_files",
+      "result": "{\"summary\":\"Found 2 matching files\",\"data\":[{\"id\":\"1BxR7a3mNpQ9vK2wL5sYcTfDgHjKlMnO\",\"name\":\"Q1 2026 Planning Doc\",\"mime_type\":\"application/vnd.google-apps.document\",\"modified_time\":\"2026-02-28T14:22:00Z\",\"owners\":[\"j.watson@meridian.io\"]},{\"id\":\"1TjY4c8dFhR2nM6xP3kZbWqEvUsSrAtB\",\"name\":\"Q1 OKR Tracker\",\"mime_type\":\"application/vnd.google-apps.spreadsheet\",\"modified_time\":\"2026-03-01T09:15:00Z\",\"owners\":[\"priya.nair@luminatech.dev\"]}]}"
+    },
+    "expected": {
+      "min_facts": 3,
+      "must_include_types": ["file_id"],
+      "must_include_values": ["1BxR7a3mNpQ9vK2wL5sYcTfDgHjKlMnO"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "basic_github_prs",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Review open pull requests on the main repo",
+      "service": "github",
+      "action": "list_pull_requests",
+      "result": "{\"summary\":\"3 open pull requests\",\"data\":[{\"number\":2847,\"title\":\"feat: add rate limiter middleware\",\"url\":\"https://github.com/meridian-labs/platform/pull/2847\",\"author\":\"jwatson\",\"created_at\":\"2026-03-12T08:30:00Z\",\"labels\":[\"enhancement\"]},{\"number\":2843,\"title\":\"fix: connection pool leak on timeout\",\"url\":\"https://github.com/meridian-labs/platform/pull/2843\",\"author\":\"priya-n\",\"created_at\":\"2026-03-11T14:20:00Z\",\"labels\":[\"bug\"]}]}"
+    },
+    "expected": {
+      "min_facts": 3,
+      "must_include_types": ["url"],
+      "must_include_values": ["https://github.com/meridian-labs/platform/pull/2847"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "basic_contacts_list",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Find contact info for the marketing team",
+      "service": "google.contacts",
+      "action": "list_contacts",
+      "result": "{\"summary\":\"Found 3 contacts matching 'marketing'\",\"data\":[{\"resource_name\":\"people/c8374629105\",\"name\":\"Marissa Delgado\",\"email\":\"m.delgado@vantagepoint.co\",\"phone\":\"+14158827394\"},{\"resource_name\":\"people/c2917483650\",\"name\":\"Kenji Tanaka\",\"email\":\"k.tanaka@vantagepoint.co\",\"phone\":\"+14152039471\"},{\"resource_name\":\"people/c6051839274\",\"name\":\"Simone Achebe\",\"email\":\"s.achebe@vantagepoint.co\"}]}"
+    },
+    "expected": {
+      "min_facts": 5,
+      "must_include_types": ["email_address", "phone_number"],
+      "must_include_values": ["m.delgado@vantagepoint.co", "+14158827394"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "basic_stripe_charges",
+    "category": "basic_extraction",
+    "request": {
+      "task_purpose": "Review recent charges and flag any over $500",
+      "service": "stripe",
+      "action": "list_charges",
+      "result": "{\"summary\":\"5 recent charges\",\"data\":[{\"id\":\"ch_3RfV7nK2mP9xQ4wL\",\"amount\":75000,\"currency\":\"usd\",\"customer\":\"cus_Qk8mN3pR7vW2x\",\"description\":\"Enterprise plan - March 2026\",\"created\":1741910400},{\"id\":\"ch_1YbT4hJ8kN5wR3xM\",\"amount\":24900,\"currency\":\"usd\",\"customer\":\"cus_Lm4pK7nR2vX9y\",\"description\":\"Pro plan - March 2026\",\"created\":1741824000}]}"
+    },
+    "expected": {
+      "min_facts": 3,
+      "must_include_types": ["amount"],
+      "must_include_values": ["ch_3RfV7nK2mP9xQ4wL"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "multi_gmail_thread",
+    "category": "multi_entity",
+    "request": {
+      "task_purpose": "Read the vendor discussion thread and summarize decisions",
+      "service": "google.gmail",
+      "action": "get_message",
+      "result": "{\"summary\":\"Thread with 4 messages\",\"data\":{\"id\":\"18de3f7a2b4c6d90\",\"thread_id\":\"18de3f7a2b4c6d8e\",\"from\":\"carlos.reyes@fieldstone.com\",\"to\":[\"j.watson@meridian.io\",\"l.huang@meridian.io\"],\"cc\":[\"procurement@fieldstone.com\"],\"subject\":\"Re: Vendor contract renewal - Fieldstone Services\",\"date\":\"2026-03-12T09:14:00Z\",\"body\":\"Hi team, after reviewing the proposal I think we should proceed with Option B. The pricing at $42,500/yr fits within our budget. Carlos\"}}"
+    },
+    "expected": {
+      "min_facts": 5,
+      "must_include_types": ["email_address", "message_id", "thread_id"],
+      "must_include_values": ["carlos.reyes@fieldstone.com", "18de3f7a2b4c6d90", "18de3f7a2b4c6d8e"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "multi_stripe_with_customers",
+    "category": "multi_entity",
+    "request": {
+      "task_purpose": "Audit recent high-value transactions and identify customers",
+      "service": "stripe",
+      "action": "list_charges",
+      "result": "{\"summary\":\"3 charges over $500\",\"data\":[{\"id\":\"ch_3RfV7nK2mP9xQ4wL\",\"amount\":75000,\"currency\":\"usd\",\"customer\":\"cus_Qk8mN3pR7vW2x\",\"customer_email\":\"billing@northwind-traders.com\",\"description\":\"Enterprise plan\",\"created\":1741910400},{\"id\":\"ch_2WcS5gH9jM4vP6tK\",\"amount\":120000,\"currency\":\"usd\",\"customer\":\"cus_Tj2nL5rP8wY4z\",\"customer_email\":\"accounts@cerulean-systems.io\",\"description\":\"Platform license\",\"created\":1741824000},{\"id\":\"ch_4XdU8iJ1kO7wQ5sN\",\"amount\":55000,\"currency\":\"usd\",\"customer\":\"cus_Rm6pK4nS9xZ3a\",\"customer_email\":\"finance@driftwood.co\",\"description\":\"Pro plan\",\"created\":1741737600}]}"
+    },
+    "expected": {
+      "min_facts": 6,
+      "must_include_types": ["email_address", "amount"],
+      "must_include_values": ["ch_3RfV7nK2mP9xQ4wL", "billing@northwind-traders.com"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "multi_slack_channels",
+    "category": "multi_entity",
+    "request": {
+      "task_purpose": "Find the right channel to post the weekly update",
+      "service": "slack",
+      "action": "list_channels",
+      "result": "{\"summary\":\"5 channels found\",\"data\":[{\"id\":\"C06P3QR8VNW\",\"name\":\"team-engineering\",\"member_count\":24,\"topic\":\"Engineering discussions\"},{\"id\":\"C06M7KT2XBJ\",\"name\":\"team-standup\",\"member_count\":18,\"topic\":\"Daily standups\"},{\"id\":\"C06N5LS4YDH\",\"name\":\"proj-atlas\",\"member_count\":9,\"topic\":\"Project Atlas coordination\"},{\"id\":\"C06R2JV6WFK\",\"name\":\"general\",\"member_count\":87,\"topic\":\"\"}]}"
+    },
+    "expected": {
+      "min_facts": 4,
+      "must_include_types": ["channel_name"],
+      "must_include_values": ["C06P3QR8VNW", "team-engineering"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "multi_linear_issues",
+    "category": "multi_entity",
+    "request": {
+      "task_purpose": "Check sprint progress and follow up on blockers",
+      "service": "linear",
+      "action": "list_issues",
+      "result": "{\"summary\":\"4 issues in current sprint\",\"data\":[{\"id\":\"LIN-4827\",\"title\":\"Rate limiter returns 429 for authenticated users\",\"state\":\"In Progress\",\"assignee\":\"j.watson@meridian.io\",\"url\":\"https://linear.app/meridian/issue/LIN-4827\",\"priority\":1},{\"id\":\"LIN-4831\",\"title\":\"Add retry logic to webhook delivery\",\"state\":\"Todo\",\"assignee\":\"priya.nair@luminatech.dev\",\"url\":\"https://linear.app/meridian/issue/LIN-4831\",\"priority\":2},{\"id\":\"LIN-4819\",\"title\":\"Migrate session store to Redis\",\"state\":\"In Review\",\"assignee\":\"k.tanaka@vantagepoint.co\",\"url\":\"https://linear.app/meridian/issue/LIN-4819\",\"priority\":2}]}"
+    },
+    "expected": {
+      "min_facts": 6,
+      "must_include_types": ["url", "email_address"],
+      "must_include_values": ["LIN-4827", "j.watson@meridian.io"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "multi_calendar_attendees",
+    "category": "multi_entity",
+    "request": {
+      "task_purpose": "Get details for the quarterly review meeting",
+      "service": "google.calendar",
+      "action": "get_event",
+      "result": "{\"summary\":\"Event details\",\"data\":{\"id\":\"7kn2p4m8q1r6s3t9\",\"summary\":\"Q1 Quarterly Business Review\",\"start\":\"2026-03-14T15:00:00Z\",\"end\":\"2026-03-14T16:30:00Z\",\"location\":\"Conference Room 3B\",\"organizer\":\"s.patel@fieldstone.com\",\"attendees\":[\"m.torres@fieldstone.com\",\"l.huang@fieldstone.com\",\"j.watson@meridian.io\",\"carlos.reyes@fieldstone.com\",\"priya.nair@luminatech.dev\"]}}"
+    },
+    "expected": {
+      "min_facts": 6,
+      "must_include_types": ["event_id", "email_address"],
+      "must_include_values": ["7kn2p4m8q1r6s3t9", "s.patel@fieldstone.com", "m.torres@fieldstone.com"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "empty_no_results",
+    "category": "empty_result",
+    "request": {
+      "task_purpose": "Find emails from the legal team",
+      "service": "google.gmail",
+      "action": "list_messages",
+      "result": "{\"summary\":\"No messages found matching the query\",\"data\":[]}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "max_facts": 0,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "empty_status_only",
+    "category": "empty_result",
+    "request": {
+      "task_purpose": "Send a message to the team channel",
+      "service": "slack",
+      "action": "send_message",
+      "result": "{\"summary\":\"Message sent successfully\",\"data\":{\"ok\":true,\"ts\":\"1741910400.001234\"}}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "max_facts": 2,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "empty_boolean_result",
+    "category": "empty_result",
+    "request": {
+      "task_purpose": "Check if the calendar event was deleted",
+      "service": "google.calendar",
+      "action": "delete_event",
+      "result": "{\"summary\":\"Event deleted successfully\",\"data\":{\"deleted\":true}}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "max_facts": 0,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "empty_prose_summary",
+    "category": "empty_result",
+    "request": {
+      "task_purpose": "Summarize recent team activity",
+      "service": "slack",
+      "action": "list_messages",
+      "result": "{\"summary\":\"The channel has been quiet this week with no new messages since the last check. The team appears to be focused on heads-down work. No action items or mentions were found in the recent history.\"}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "max_facts": 0,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "sensitive_oauth_token",
+    "category": "sensitive_filtering",
+    "request": {
+      "task_purpose": "Debug authentication flow for the calendar integration",
+      "service": "google.calendar",
+      "action": "list_events",
+      "result": "{\"summary\":\"Error: token refresh failed\",\"data\":{\"error\":\"invalid_grant\",\"error_description\":\"Token has been expired or revoked\",\"debug_info\":{\"access_token\":\"ya29.a0AcM612xKp7R9nVqL3mW8tF5jH2dE4gBiCkNlOqPrSsUuVwXyZ1234567890\",\"refresh_token\":\"1//0eT7vK2rN8mPqW3xY5zB6cD9fGhJkLaS\",\"expiry\":\"2026-03-14T08:00:00Z\",\"user_email\":\"j.watson@meridian.io\"}}}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": ["ya29.a0AcM612xKp7R9nVqL3mW8tF5jH2dE4gBiCkNlOqPrSsUuVwXyZ1234567890", "1//0eT7vK2rN8mPqW3xY5zB6cD9fGhJkLaS"]
+    }
+  },
+  {
+    "name": "sensitive_api_key",
+    "category": "sensitive_filtering",
+    "request": {
+      "task_purpose": "Check Stripe account configuration",
+      "service": "stripe",
+      "action": "get_account",
+      "result": "{\"summary\":\"Account details retrieved\",\"data\":{\"id\":\"acct_1N2mK4pR7vW9xQ3\",\"business_name\":\"Meridian Labs Inc\",\"email\":\"billing@meridian.io\",\"api_keys\":{\"publishable\":\"pk_live_51N2mK4pR7vW9xQ3LaBcDeFgHiJkLmNoPqRsTuVwXyZ\",\"secret\":\"sk_live_51N2mK4pR7vW9xQ3AbCdEfGhIjKlMnOpQrStUvWxYz\"},\"country\":\"US\"}}"
+    },
+    "expected": {
+      "min_facts": 2,
+      "must_include_types": ["email_address"],
+      "must_include_values": ["billing@meridian.io"],
+      "must_exclude_values": ["pk_live_51N2mK4pR7vW9xQ3LaBcDeFgHiJkLmNoPqRsTuVwXyZ", "sk_live_51N2mK4pR7vW9xQ3AbCdEfGhIjKlMnOpQrStUvWxYz"]
+    }
+  },
+  {
+    "name": "sensitive_jwt_token",
+    "category": "sensitive_filtering",
+    "request": {
+      "task_purpose": "Check GitHub repo settings",
+      "service": "github",
+      "action": "get_repo",
+      "result": "{\"summary\":\"Repository info\",\"data\":{\"full_name\":\"meridian-labs/platform\",\"url\":\"https://github.com/meridian-labs/platform\",\"default_branch\":\"main\",\"private\":true,\"webhook_config\":{\"url\":\"https://hooks.meridian.io/gh\",\"secret\":\"whsec_Kp7R9nVqL3mW8tF5jH2dE4gBiCk\",\"token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\"}}}"
+    },
+    "expected": {
+      "min_facts": 1,
+      "must_include_types": ["url"],
+      "must_include_values": ["https://github.com/meridian-labs/platform"],
+      "must_exclude_values": ["whsec_Kp7R9nVqL3mW8tF5jH2dE4gBiCk", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"]
+    }
+  },
+  {
+    "name": "sensitive_password_field",
+    "category": "sensitive_filtering",
+    "request": {
+      "task_purpose": "Review Notion workspace settings",
+      "service": "notion",
+      "action": "get_page",
+      "result": "{\"summary\":\"Page content retrieved\",\"data\":{\"id\":\"a1c7b94e-2d8f-4b31-90a6-12ef34cd56ab\",\"title\":\"Service Credentials\",\"properties\":{\"Database Host\":\"db.meridian-prod.us-east-1.rds.amazonaws.com\",\"Database User\":\"app_service\",\"Database Password\":\"Kp7$R9nVq!L3mW8t#F5j\",\"API Endpoint\":\"https://api.meridian.io/v2\",\"Updated By\":\"j.watson@meridian.io\"}}}"
+    },
+    "expected": {
+      "min_facts": 2,
+      "must_include_types": ["email_address"],
+      "must_include_values": ["j.watson@meridian.io"],
+      "must_exclude_values": ["Kp7$R9nVq!L3mW8t#F5j"]
+    }
+  },
+  {
+    "name": "sensitive_webhook_secret",
+    "category": "sensitive_filtering",
+    "request": {
+      "task_purpose": "List Slack integrations for audit",
+      "service": "slack",
+      "action": "list_channels",
+      "result": "{\"summary\":\"Integration channel details\",\"data\":[{\"id\":\"C06P3QR8VNW\",\"name\":\"alerts-prod\",\"topic\":\"Production alerts\",\"integrations\":[{\"name\":\"PagerDuty\",\"webhook_url\":\"https://events.pagerduty.com/integration/Rk4mP7nQ2vW9x/enqueue\",\"signing_secret\":\"v0=Kp7R9nVqL3mW8tF5jH2dE4gBiCkNlOqPrSsUu\"}]},{\"id\":\"C06M7KT2XBJ\",\"name\":\"deploy-notifications\",\"topic\":\"Deploy status\"}]}"
+    },
+    "expected": {
+      "min_facts": 2,
+      "must_include_types": ["channel_name"],
+      "must_include_values": ["C06P3QR8VNW", "alerts-prod"],
+      "must_exclude_values": ["v0=Kp7R9nVqL3mW8tF5jH2dE4gBiCkNlOqPrSsUu"]
+    }
+  },
+  {
+    "name": "hallucination_name_no_email",
+    "category": "hallucination_resistance",
+    "request": {
+      "task_purpose": "Summarize recent Slack messages",
+      "service": "slack",
+      "action": "list_messages",
+      "result": "{\"summary\":\"Recent messages in #team-engineering\",\"data\":[{\"ts\":\"1741910400.001234\",\"user\":\"U06P3QR8VNW\",\"text\":\"Alice from marketing mentioned that the launch timeline has shifted to April. We should coordinate with her team before finalizing the sprint.\"},{\"ts\":\"1741910100.001230\",\"user\":\"U06M7KT2XBJ\",\"text\":\"Got it, I will check with the product team tomorrow.\"}]}"
+    },
+    "expected": {
+      "min_facts": 0,
+      "must_include_types": [],
+      "must_include_values": [],
+      "must_exclude_values": ["alice@marketing.com", "alice@meridian.io"]
+    }
+  },
+  {
+    "name": "hallucination_partial_ids",
+    "category": "hallucination_resistance",
+    "request": {
+      "task_purpose": "Review issue backlog",
+      "service": "linear",
+      "action": "list_issues",
+      "result": "{\"summary\":\"Found 1 issue\",\"data\":[{\"id\":\"LIN-4827\",\"title\":\"Users see a generic failure page when the backend is under heavy load\",\"state\":\"In Progress\",\"priority\":1}]}"
+    },
+    "expected": {
+      "min_facts": 1,
+      "max_facts": 4,
+      "must_include_types": [],
+      "must_include_values": ["LIN-4827"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "hallucination_counts_not_ids",
+    "category": "hallucination_resistance",
+    "request": {
+      "task_purpose": "Check Slack channel activity",
+      "service": "slack",
+      "action": "list_channels",
+      "result": "{\"summary\":\"Channel statistics\",\"data\":[{\"id\":\"C06P3QR8VNW\",\"name\":\"team-engineering\",\"member_count\":24,\"messages_today\":47,\"unread_count\":12}]}"
+    },
+    "expected": {
+      "min_facts": 1,
+      "must_include_types": [],
+      "must_include_values": ["C06P3QR8VNW"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "hallucination_domain_in_prose",
+    "category": "hallucination_resistance",
+    "request": {
+      "task_purpose": "Read the partnership proposal",
+      "service": "notion",
+      "action": "get_page",
+      "result": "{\"summary\":\"Partnership proposal page\",\"data\":{\"id\":\"b2d8c95f-3e9a-4c42-b1a7-23fg45hi67jk\",\"title\":\"Strategic Partnership Proposal\",\"content\":\"We are excited about the potential collaboration with Northwind Traders. Their platform handles a large volume of transactions daily. The integration could reduce our processing costs significantly.\"}}"
+    },
+    "expected": {
+      "min_facts": 1,
+      "must_include_types": [],
+      "must_include_values": ["b2d8c95f-3e9a-4c42-b1a7-23fg45hi67jk"],
+      "must_exclude_values": ["northwind-traders@example.com"]
+    }
+  },
+  {
+    "name": "hallucination_company_no_url",
+    "category": "hallucination_resistance",
+    "request": {
+      "task_purpose": "Review customer support tickets",
+      "service": "linear",
+      "action": "list_issues",
+      "result": "{\"summary\":\"3 support tickets this week\",\"data\":[{\"id\":\"LIN-5102\",\"title\":\"Cerulean Systems reporting intermittent timeouts on their webhook endpoint\",\"state\":\"In Progress\",\"priority\":1},{\"id\":\"LIN-5098\",\"title\":\"Driftwood Corp needs help with SSO configuration\",\"state\":\"Todo\",\"priority\":2}]}"
+    },
+    "expected": {
+      "min_facts": 2,
+      "must_include_types": [],
+      "must_include_values": ["LIN-5102", "LIN-5098"],
+      "must_exclude_values": ["cerulean-systems.com", "driftwood.com", "cerulean-systems.io"]
+    }
+  },
+  {
+    "name": "edge_single_entity",
+    "category": "edge_cases",
+    "request": {
+      "task_purpose": "Get a specific file from Drive",
+      "service": "google.drive",
+      "action": "get_file",
+      "result": "{\"summary\":\"File retrieved\",\"data\":{\"id\":\"1VnW8kR3pL5mQ2xJ9bY4cT7fDgHjKlMn\",\"name\":\"March Expense Report.xlsx\",\"mime_type\":\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\"size\":48256}}"
+    },
+    "expected": {
+      "min_facts": 1,
+      "max_facts": 3,
+      "must_include_types": ["file_id"],
+      "must_include_values": ["1VnW8kR3pL5mQ2xJ9bY4cT7fDgHjKlMn"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "edge_unicode_names",
+    "category": "edge_cases",
+    "request": {
+      "task_purpose": "Find contacts in the Tokyo office",
+      "service": "google.contacts",
+      "action": "list_contacts",
+      "result": "{\"summary\":\"Found 2 contacts\",\"data\":[{\"resource_name\":\"people/c4183729056\",\"name\":\"Yuki Tanaka\",\"email\":\"y.tanaka@meridian.io\",\"phone\":\"+81312345678\"},{\"resource_name\":\"people/c7294618305\",\"name\":\"Ren\u00e9e Dub\u00e9\",\"email\":\"r.dube@meridian.io\",\"phone\":\"+33142567890\"}]}"
+    },
+    "expected": {
+      "min_facts": 4,
+      "must_include_types": ["email_address", "phone_number"],
+      "must_include_values": ["y.tanaka@meridian.io", "+81312345678"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "edge_nested_json",
+    "category": "edge_cases",
+    "request": {
+      "task_purpose": "Review GitHub workflow runs",
+      "service": "github",
+      "action": "list_pull_requests",
+      "result": "{\"summary\":\"PR with checks\",\"data\":[{\"number\":2847,\"title\":\"feat: add rate limiter\",\"url\":\"https://github.com/meridian-labs/platform/pull/2847\",\"author\":\"jwatson\",\"head\":{\"ref\":\"feat/rate-limiter\",\"sha\":\"a3b7c9d2e4f6\"},\"checks\":{\"status\":\"completed\",\"conclusion\":\"success\",\"runs\":[{\"id\":28471001,\"name\":\"lint\"},{\"id\":28471002,\"name\":\"test\"},{\"id\":28471003,\"name\":\"build\"}]}}]}"
+    },
+    "expected": {
+      "min_facts": 2,
+      "must_include_types": ["url"],
+      "must_include_values": ["https://github.com/meridian-labs/platform/pull/2847"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "edge_numeric_identifiers",
+    "category": "edge_cases",
+    "request": {
+      "task_purpose": "Review Stripe payment intents",
+      "service": "stripe",
+      "action": "list_charges",
+      "result": "{\"summary\":\"Recent payment intents\",\"data\":[{\"id\":\"pi_3RfV7nK2mP9xQ4wL\",\"amount\":99900,\"currency\":\"usd\",\"customer\":\"cus_Qk8mN3pR7vW2x\",\"created\":1741910400,\"payment_method\":\"pm_1N2mK4pR7vW9xQ3\",\"invoice\":\"in_1N2mK4pR7vW9xQ3Y\"}]}"
+    },
+    "expected": {
+      "min_facts": 3,
+      "must_include_types": [],
+      "must_include_values": ["pi_3RfV7nK2mP9xQ4wL"],
+      "must_exclude_values": []
+    }
+  },
+  {
+    "name": "edge_large_result",
+    "category": "edge_cases",
+    "request": {
+      "task_purpose": "List all contacts in the company directory",
+      "service": "google.contacts",
+      "action": "list_contacts",
+      "result": "{\"summary\":\"Found 8 contacts\",\"data\":[{\"resource_name\":\"people/c1029384756\",\"name\":\"Ada Okonkwo\",\"email\":\"a.okonkwo@meridian.io\"},{\"resource_name\":\"people/c2038475610\",\"name\":\"Ben Cartwright\",\"email\":\"b.cartwright@meridian.io\"},{\"resource_name\":\"people/c3047566120\",\"name\":\"Clara Johansson\",\"email\":\"c.johansson@meridian.io\"},{\"resource_name\":\"people/c4056647230\",\"name\":\"Diego Morales\",\"email\":\"d.morales@meridian.io\"},{\"resource_name\":\"people/c5065738340\",\"name\":\"Elena Vasquez\",\"email\":\"e.vasquez@meridian.io\"},{\"resource_name\":\"people/c6074829450\",\"name\":\"Farid Hosseini\",\"email\":\"f.hosseini@meridian.io\"},{\"resource_name\":\"people/c7083910560\",\"name\":\"Grace Nakamura\",\"email\":\"g.nakamura@meridian.io\"},{\"resource_name\":\"people/c8092001670\",\"name\":\"Henrik Lindqvist\",\"email\":\"h.lindqvist@meridian.io\"}]}"
+    },
+    "expected": {
+      "min_facts": 8,
+      "must_include_types": ["email_address"],
+      "must_include_values": ["a.okonkwo@meridian.io", "h.lindqvist@meridian.io"],
+      "must_exclude_values": []
+    }
+  }
+]
