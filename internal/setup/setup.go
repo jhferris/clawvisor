@@ -49,7 +49,8 @@ type config struct {
 	llmModel    string
 	llmAPIKey   string
 
-	taskRiskEnabled bool
+	taskRiskEnabled    bool
+	chainContextEnabled bool
 }
 
 // Run executes the setup wizard.
@@ -331,9 +332,10 @@ func stepIMessage(cfg *config) error {
 func stepLLM(cfg *config) error {
 	fmt.Println(section.Render("── LLM Configuration ──────────────────────"))
 	fmt.Println()
-	fmt.Println(dim.Padding(0, 2).Render("Clawvisor uses an LLM for intent verification"))
-	fmt.Println(dim.Padding(0, 2).Render("and task risk assessment. Both features share"))
-	fmt.Println(dim.Padding(0, 2).Render("the same provider. A fast model is recommended."))
+	fmt.Println(dim.Padding(0, 2).Render("Clawvisor uses an LLM for intent verification,"))
+	fmt.Println(dim.Padding(0, 2).Render("task risk assessment, and chain context tracking."))
+	fmt.Println(dim.Padding(0, 2).Render("All features share the same provider. A fast"))
+	fmt.Println(dim.Padding(0, 2).Render("model is recommended."))
 	fmt.Println()
 
 	var model string
@@ -421,6 +423,7 @@ func stepLLM(cfg *config) error {
 	}
 
 	cfg.taskRiskEnabled = true
+	cfg.chainContextEnabled = true
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
@@ -429,6 +432,12 @@ func stepLLM(cfg *config) error {
 				Affirmative("Yes").
 				Negative("No").
 				Value(&cfg.taskRiskEnabled),
+			huh.NewConfirm().
+				Title("Enable chain context tracking?").
+				Description("Extracts entity references from results so multi-step tasks stay on-target.").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&cfg.chainContextEnabled),
 		),
 	).Run()
 }
@@ -469,6 +478,11 @@ func stepConfirm(cfg *config) error {
 		lines = append(lines, fmt.Sprintf("  Task Risk      %s", bold.Render("Enabled")))
 	} else {
 		lines = append(lines, fmt.Sprintf("  Task Risk      %s", dim.Render("Disabled")))
+	}
+	if cfg.chainContextEnabled {
+		lines = append(lines, fmt.Sprintf("  Chain Context  %s", bold.Render("Enabled")))
+	} else {
+		lines = append(lines, fmt.Sprintf("  Chain Context  %s", dim.Render("Disabled")))
 	}
 
 	fmt.Println(strings.Join(lines, "\n"))
@@ -564,6 +578,8 @@ func writeConfig(cfg *config) error {
 	fmt.Fprintf(&b, "    cache_ttl_seconds: 60\n")
 	fmt.Fprintf(&b, "  task_risk:\n")
 	fmt.Fprintf(&b, "    enabled: %t\n", cfg.taskRiskEnabled)
+	fmt.Fprintf(&b, "  chain_context:\n")
+	fmt.Fprintf(&b, "    enabled: %t\n", cfg.chainContextEnabled)
 
 	return os.WriteFile("config.yaml", []byte(b.String()), 0644)
 }
