@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -283,14 +284,27 @@ func (p *Provider) Token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// validateRedirectURI rejects redirect URIs that aren't http or https.
+// dangerousSchemes are URI schemes that can execute code in a browser context
+// when assigned to window.location.href. Custom app schemes (e.g. claude://)
+// are safe — they trigger OS protocol handlers per RFC 8252.
+var dangerousSchemes = map[string]bool{
+	"javascript": true,
+	"data":       true,
+	"vbscript":   true,
+	"blob":       true,
+}
+
+// validateRedirectURI rejects redirect URIs with dangerous schemes.
 func validateRedirectURI(uri string) error {
 	u, err := url.Parse(uri)
 	if err != nil {
 		return fmt.Errorf("invalid redirect URI: %w", err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("redirect URI scheme must be http or https")
+	if u.Scheme == "" {
+		return fmt.Errorf("redirect URI must include a scheme")
+	}
+	if dangerousSchemes[strings.ToLower(u.Scheme)] {
+		return fmt.Errorf("redirect URI scheme %q is not allowed", u.Scheme)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("redirect URI must include a host")
