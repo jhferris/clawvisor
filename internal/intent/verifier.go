@@ -36,8 +36,9 @@ type VerifyRequest struct {
 	Reason             string
 	TaskID             string // cache key component
 	ServiceHints       string // adapter-provided verification guidance; empty for most adapters
-	ChainFacts         []store.ChainFact
-	ChainContextOptOut bool // standing task without session_id — agent bypassed chain context
+	ChainFacts           []store.ChainFact
+	ChainContextOptOut   bool // standing task without session_id — agent bypassed chain context
+	ChainContextEnabled  bool // chain context tracking is enabled in config
 }
 
 // Verifier checks whether a gateway request is consistent with the approved task.

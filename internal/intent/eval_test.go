@@ -154,16 +154,17 @@ func TestEvalIntentVerification(t *testing.T) {
 			}
 
 			req := VerifyRequest{
-				TaskPurpose:        tc.Request.TaskPurpose,
-				ExpectedUse:        tc.Request.ExpectedUse,
-				ExpansionRationale: tc.Request.ExpansionRationale,
-				Service:            tc.Request.Service,
-				Action:             tc.Request.Action,
-				Params:             expandDatePlaceholders(tc.Request.Params),
-				Reason:             tc.Request.Reason,
-				ServiceHints:       hintsByService[svcBase],
-				TaskID:             "eval-" + tc.Name,
-				ChainContextOptOut: tc.Request.ChainContextOptOut,
+				TaskPurpose:         tc.Request.TaskPurpose,
+				ExpectedUse:         tc.Request.ExpectedUse,
+				ExpansionRationale:  tc.Request.ExpansionRationale,
+				Service:             tc.Request.Service,
+				Action:              tc.Request.Action,
+				Params:              expandDatePlaceholders(tc.Request.Params),
+				Reason:              tc.Request.Reason,
+				ServiceHints:        hintsByService[svcBase],
+				TaskID:              "eval-" + tc.Name,
+				ChainContextOptOut:  tc.Request.ChainContextOptOut,
+				ChainContextEnabled: len(tc.Request.ChainFacts) > 0 || tc.Request.ChainContextOptOut,
 			}
 			for _, f := range tc.Request.ChainFacts {
 				req.ChainFacts = append(req.ChainFacts, store.ChainFact{

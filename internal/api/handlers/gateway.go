@@ -630,17 +630,18 @@ func (h *GatewayHandler) runVerification(
 	}
 	chainContextOptOut := task.Lifetime == "standing" && req.SessionID == ""
 	verdict, _ := h.verifier.Verify(ctx, intent.VerifyRequest{
-		TaskPurpose:        task.Purpose,
-		ExpectedUse:        expectedUse,
-		ExpansionRationale: expansionRationale,
-		Service:            req.Service,
-		Action:             req.Action,
-		Params:             req.Params,
-		Reason:             req.Reason,
-		TaskID:             req.TaskID,
-		ServiceHints:       serviceHints,
-		ChainFacts:         chainFacts,
-		ChainContextOptOut: chainContextOptOut,
+		TaskPurpose:         task.Purpose,
+		ExpectedUse:         expectedUse,
+		ExpansionRationale:  expansionRationale,
+		Service:             req.Service,
+		Action:              req.Action,
+		Params:              req.Params,
+		Reason:              req.Reason,
+		TaskID:              req.TaskID,
+		ServiceHints:        serviceHints,
+		ChainFacts:          chainFacts,
+		ChainContextOptOut:  chainContextOptOut,
+		ChainContextEnabled: h.cfg.LLM.ChainContext.Enabled,
 	})
 	return verdict
 }
