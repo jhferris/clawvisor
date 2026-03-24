@@ -11,14 +11,16 @@ import (
 	"time"
 
 	"github.com/clawvisor/clawvisor/internal/browser"
+	"github.com/clawvisor/clawvisor/pkg/version"
 )
 
 // Status holds the daemon's current state.
 type Status struct {
-	Running   bool   `json:"running"`
-	PID       int    `json:"pid,omitempty"`
-	ServerURL string `json:"server_url,omitempty"`
-	DaemonID  string `json:"daemon_id,omitempty"`
+	Running       bool   `json:"running"`
+	PID           int    `json:"pid,omitempty"`
+	ServerURL     string `json:"server_url,omitempty"`
+	DaemonID      string `json:"daemon_id,omitempty"`
+	DaemonVersion string `json:"daemon_version,omitempty"`
 }
 
 // CheckStatus reads the local session file and pings the server.
@@ -52,7 +54,8 @@ func CheckStatus() (*Status, error) {
 	if resp.StatusCode == http.StatusOK {
 		pid := readPIDFile(filepath.Join(dataDir, ".daemon.pid"))
 		daemonID, _ := readDaemonID(filepath.Join(dataDir, "config.yaml"))
-		return &Status{Running: true, ServerURL: session.ServerURL, PID: pid, DaemonID: daemonID}, nil
+		daemonVer := fetchDaemonVersion(client, session.ServerURL)
+		return &Status{Running: true, ServerURL: session.ServerURL, PID: pid, DaemonID: daemonID, DaemonVersion: daemonVer}, nil
 	}
 	return &Status{ServerURL: session.ServerURL}, nil
 }
@@ -134,6 +137,28 @@ func requestMagicToken(serverURL string) (string, error) {
 	return result.Token, nil
 }
 
+// fetchDaemonVersion queries the running daemon's /api/version endpoint and
+// returns its current version string, or empty on failure.
+func fetchDaemonVersion(client *http.Client, serverURL string) string {
+	resp, err := client.Get(serverURL + "/api/version")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	var info struct {
+		Current string `json:"current"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return ""
+	}
+	return info.Current
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -151,6 +176,10 @@ func PrintStatus(s *Status) {
 		}
 		if s.DaemonID != "" {
 			fmt.Printf("  Daemon ID: %s\n", s.DaemonID)
+		}
+		cliVersion := version.GetCurrent()
+		if s.DaemonVersion != "" && cliVersion != "" && s.DaemonVersion != cliVersion {
+			fmt.Printf("  Warning: daemon is running %s but this CLI is %s — consider running 'clawvisor restart'\n", s.DaemonVersion, cliVersion)
 		}
 	} else {
 		fmt.Println("  Daemon is not running.")
