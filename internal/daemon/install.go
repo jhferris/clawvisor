@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,8 +81,24 @@ func Install() error {
 	if err != nil {
 		return err
 	}
-	if _, err := ensureSetup(dataDir); err != nil {
+	firstRun, err := ensureSetup(dataDir)
+	if err != nil {
 		return fmt.Errorf("setup: %w", err)
+	}
+
+	if firstRun {
+		// Stop any running daemon so the setup-phase server can bind the
+		// port and the magic token matches the new in-memory store.
+		_ = Stop()
+
+		cfgPath := filepath.Join(dataDir, "config.yaml")
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if err := runWithServiceSetup(dataDir, cfgPath, logger, 1); err != nil {
+			return fmt.Errorf("service setup: %w", err)
+		}
+		fmt.Println()
+		fmt.Println(green.Padding(0, 2).Render("✓ Setup complete"))
+		fmt.Println()
 	}
 
 	binary, err := os.Executable()
@@ -113,12 +130,23 @@ func Install() error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		return installLaunchd(home, data)
+		if err := installLaunchd(home, data); err != nil {
+			return err
+		}
 	case "linux":
-		return installSystemd(home, data)
+		if err := installSystemd(home, data); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("auto-install is supported on macOS and Linux; start the daemon manually with `clawvisor start`")
 	}
+
+	// Start the daemon and print the agent setup URL.
+	if err := Start(); err != nil {
+		return err
+	}
+	printAgentSetupInstructions(dataDir)
+	return nil
 }
 
 func installLaunchd(home string, data installData) error {
@@ -325,4 +353,24 @@ func Stop() error {
 
 	fmt.Println("  Daemon stopped.")
 	return nil
+}
+
+// printAgentSetupInstructions prints the URL that users should give to their
+// AI agent to begin the Clawvisor setup flow.
+func printAgentSetupInstructions(dataDir string) {
+	daemonID, relayHost, err := readRelayConfig(dataDir)
+	if err != nil || daemonID == "" || relayHost == "" {
+		return
+	}
+
+	setupURL := fmt.Sprintf("https://%s/d/%s/skill/setup", relayHost, daemonID)
+
+	fmt.Println()
+	fmt.Println(green.Padding(0, 2).Render("✓ Installation complete"))
+	fmt.Println()
+	fmt.Println("  To get started, copy the following message to your AI agent:")
+	fmt.Println()
+	fmt.Println(dim.Padding(0, 4).Render("I'd like to set up Clawvisor. Please navigate to the following URL and follow the setup instructions:"))
+	fmt.Println(green.Padding(0, 4).Render(setupURL))
+	fmt.Println()
 }
