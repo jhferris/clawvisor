@@ -39,6 +39,9 @@ TODO.md
 *.db-shm
 *.db-wal
 
+# Security scan reports
+security/zap/reports/
+
 # OS
 .DS_Store
 Thumbs.db

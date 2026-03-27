@@ -1,0 +1,161 @@
+---
+# OWASP ZAP Automation Framework — Clawvisor Staging Scan
+#
+# Usage:
+#   /Applications/ZAP.app/Contents/Java/zap.sh -cmd -autorun security/zap/automation.yaml
+#
+# Prerequisites:
+#   1. Set environment variables:
+#      export ZAP_AUTH_EMAIL="your-email@example.com"
+#      export ZAP_AUTH_PASSWORD="your-password"
+#
+#   2. Or edit the credentials in the users section below.
+
+env:
+  contexts:
+    - name: "Clawvisor Staging"
+      urls:
+        - "https://app.staging.clawvisor.com"
+      includePaths:
+        - "https://app.staging.clawvisor.com.*"
+      excludePaths:
+        # Agent-only endpoints (require agent token + E2E encryption)
+        - "https://app.staging.clawvisor.com/api/gateway/.*"
+        - "https://app.staging.clawvisor.com/api/guard/.*"
+        - "https://app.staging.clawvisor.com/api/callbacks/.*"
+        - "https://app.staging.clawvisor.com/api/skill/catalog"
+        - "https://app.staging.clawvisor.com/mcp.*"
+        # Device HMAC endpoints
+        - "https://app.staging.clawvisor.com/api/devices/.*/action"
+        - "https://app.staging.clawvisor.com/api/devices/.*/token"
+        - "https://app.staging.clawvisor.com/api/devices/.*/push-to-start-token"
+        # OAuth callbacks (external redirects)
+        - "https://app.staging.clawvisor.com/api/oauth/callback"
+        # SSE stream (long-lived connection, not useful for scanning)
+        - "https://app.staging.clawvisor.com/api/events$"
+      authentication:
+        method: "json"
+        parameters:
+          loginPageUrl: "https://app.staging.clawvisor.com"
+          loginRequestUrl: "https://app.staging.clawvisor.com/api/auth/login"
+          loginRequestBody: '{"email":"{%username%}","password":"{%password%}"}'
+        verification:
+          method: "response"
+          loggedInRegex: "access_token"
+          loggedOutRegex: "INVALID_CREDENTIALS|UNAUTHORIZED"
+      sessionManagement:
+        method: "headers"
+        parameters: {}
+      users:
+        - name: "test-user"
+          credentials:
+            username: "${ZAP_AUTH_EMAIL}"
+            password: "${ZAP_AUTH_PASSWORD}"
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  # 1. Send initial requests to seed the site tree
+  - type: requestor
+    parameters:
+      user: "test-user"
+    requests:
+      # Unauthenticated endpoints
+      - url: "https://app.staging.clawvisor.com/health"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/ready"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/version"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/features"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/config/public"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/.well-known/clawvisor-keys"
+        method: "GET"
+      # Authenticated endpoints
+      - url: "https://app.staging.clawvisor.com/api/me"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/agents"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/services"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/approvals"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/queue"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/overview"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/audit"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/tasks"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/restrictions"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/notifications"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/devices"
+        method: "GET"
+
+  # 2. Spider the SPA frontend
+  - type: spider
+    parameters:
+      user: "test-user"
+      maxDuration: 5         # minutes
+      maxDepth: 5
+      maxChildren: 10
+
+  # 3. Ajax spider for JS-rendered content
+  - type: spiderAjax
+    parameters:
+      user: "test-user"
+      maxDuration: 5         # minutes
+      maxCrawlDepth: 5
+      numberOfBrowsers: 2
+
+  # 4. Passive scan (runs on all traffic already collected)
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+      scanOnlyInScope: true
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 10        # minutes
+
+  # 5. Active scan — the real vulnerability testing
+  - type: activeScan
+    parameters:
+      user: "test-user"
+      maxRuleDurationInMins: 5
+      maxScanDurationInMins: 30
+      # Skip scanner rules that are noisy or irrelevant for an API
+      disableRules:
+        - 40025  # Proxy Disclosure (not applicable to Cloud Run)
+        - 10048  # Remote Code Execution - Shell Shock (not relevant)
+
+  # 6. Generate reports
+  - type: report
+    parameters:
+      template: "traditional-html-plus"
+      reportDir: "/Users/ericlevine/code/clawvisor/clawvisor-public/security/zap/reports"
+      reportFile: "clawvisor-staging-scan"
+      reportTitle: "Clawvisor Staging - ZAP Security Scan"
+    risks:
+      - high
+      - medium
+      - low
+      - info
+
+  - type: report
+    parameters:
+      template: "traditional-json-plus"
+      reportDir: "/Users/ericlevine/code/clawvisor/clawvisor-public/security/zap/reports"
+      reportFile: "clawvisor-staging-scan"
+      reportTitle: "Clawvisor Staging - ZAP Security Scan"
+    risks:
+      - high
+      - medium
+      - low

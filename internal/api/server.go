@@ -286,7 +286,7 @@ func (s *Server) routes() http.Handler {
 	requireUser := middleware.RequireUser(s.jwtSvc, s.store)
 	requireAgent := middleware.RequireAgent(s.store)
 	logMiddleware := middleware.Logging(s.logger)
-	securityMiddleware := middleware.Security(s.cfg.Server.IsLocal())
+	securityMiddleware := middleware.Security(s.cfg.Server.IsLocal() && s.cfg.Server.PublicURL == "")
 
 	// Rate limiters (skip when config is zero-valued, e.g. in tests)
 	rlCfg := s.cfg.RateLimit

@@ -1,0 +1,103 @@
+---
+# OWASP ZAP Baseline Scan — passive only, fast (~2-3 minutes)
+#
+# Usage:
+#   ZAP_MODE=baseline ./security/zap/run-scan.sh
+#
+# This skips active scanning and only checks for issues in responses
+# to known endpoints. Good for quick CI checks.
+
+env:
+  contexts:
+    - name: "Clawvisor Staging Baseline"
+      urls:
+        - "https://app.staging.clawvisor.com"
+      includePaths:
+        - "https://app.staging.clawvisor.com.*"
+      excludePaths:
+        - "https://app.staging.clawvisor.com/api/gateway/.*"
+        - "https://app.staging.clawvisor.com/api/guard/.*"
+        - "https://app.staging.clawvisor.com/api/callbacks/.*"
+        - "https://app.staging.clawvisor.com/mcp.*"
+      authentication:
+        method: "json"
+        parameters:
+          loginPageUrl: "https://app.staging.clawvisor.com"
+          loginRequestUrl: "https://app.staging.clawvisor.com/api/auth/login"
+          loginRequestBody: '{"email":"{%username%}","password":"{%password%}"}'
+        verification:
+          method: "response"
+          loggedInRegex: "access_token"
+          loggedOutRegex: "INVALID_CREDENTIALS|UNAUTHORIZED"
+      sessionManagement:
+        method: "headers"
+        parameters: {}
+      users:
+        - name: "test-user"
+          credentials:
+            username: "${ZAP_AUTH_EMAIL}"
+            password: "${ZAP_AUTH_PASSWORD}"
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  # Hit known endpoints to collect responses
+  - type: requestor
+    parameters:
+      user: "test-user"
+    requests:
+      - url: "https://app.staging.clawvisor.com/health"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/ready"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/version"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/features"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/config/public"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/me"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/agents"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/services"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/approvals"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/queue"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/overview"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/audit"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/tasks"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/restrictions"
+        method: "GET"
+      - url: "https://app.staging.clawvisor.com/api/notifications"
+        method: "GET"
+
+  # Passive scan only
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 10
+      scanOnlyInScope: true
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Report
+  - type: report
+    parameters:
+      template: "traditional-html-plus"
+      reportDir: "/Users/ericlevine/code/clawvisor/clawvisor-public/security/zap/reports"
+      reportFile: "clawvisor-staging-baseline"
+      reportTitle: "Clawvisor Staging - Baseline Scan"
+    risks:
+      - high
+      - medium
+      - low
+      - info
