@@ -93,6 +93,12 @@ func (s *Store) UpdateUserPassword(ctx context.Context, userID, newPasswordHash 
 	return nil
 }
 
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE id != '__system__' AND email != 'admin@local'`).Scan(&n)
+	return n, err
+}
+
 func (s *Store) DeleteUser(ctx context.Context, userID string) error {
 	res, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	if err != nil {
