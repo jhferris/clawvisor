@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/clawvisor/clawvisor/internal/groupchat"
 	"github.com/clawvisor/clawvisor/pkg/notify"
 )
 
@@ -21,6 +24,10 @@ type pollingSession struct {
 	chatID   string
 	cancel   context.CancelFunc
 	pending  int32 // number of pending callback tokens
+
+	mu          sync.Mutex // protects groupChatID and persistent
+	groupChatID string     // group chat ID for observation; empty if not configured
+	persistent  bool       // true when group observation is active (don't stop on pending=0)
 }
 
 // ensurePolling starts a polling goroutine for the user if one isn't running,
@@ -47,20 +54,94 @@ func (n *Notifier) ensurePolling(userID, botToken, chatID string) {
 	go n.pollForCallbacks(ctx, ps)
 }
 
-// DecrementPolling decrements the pending count and stops polling if ≤0.
+// EnsureGroupObservation starts or upgrades a polling session to persistent
+// mode for group chat observation. If a session already exists, it updates the
+// groupChatID and sets persistent=true. If none exists, it creates a new
+// persistent session and starts polling.
+func (n *Notifier) EnsureGroupObservation(userID, botToken, chatID, groupChatID string) {
+	key := userID
+	if val, loaded := n.pollers.LoadOrStore(key, &pollingSession{
+		userID:      userID,
+		botToken:    botToken,
+		chatID:      chatID,
+		groupChatID: groupChatID,
+		persistent:  true,
+	}); loaded {
+		// Already running — upgrade to persistent and set group chat ID.
+		ps := val.(*pollingSession)
+		ps.mu.Lock()
+		ps.groupChatID = groupChatID
+		ps.persistent = true
+		ps.mu.Unlock()
+		return
+	}
+
+	// New session — fill in cancel and start goroutine.
+	val, _ := n.pollers.Load(key)
+	ps := val.(*pollingSession)
+	ctx, cancel := context.WithCancel(n.serverCtx)
+	ps.cancel = cancel
+	go n.pollForCallbacks(ctx, ps)
+}
+
+// StopGroupObservation clears the persistent flag and group chat ID.
+// If there are no pending callback tokens, the polling loop is stopped.
+func (n *Notifier) StopGroupObservation(userID string) {
+	val, ok := n.pollers.Load(userID)
+	if !ok {
+		return
+	}
+	ps := val.(*pollingSession)
+	ps.mu.Lock()
+	ps.persistent = false
+	ps.groupChatID = ""
+	ps.mu.Unlock()
+	if atomic.LoadInt32(&ps.pending) <= 0 {
+		ps.cancel()
+		n.pollers.Delete(userID)
+	}
+}
+
+// DecrementPolling decrements the pending count and stops polling if ≤0
+// and the session is not persistent (group observation active).
 func (n *Notifier) DecrementPolling(userID string) {
 	val, ok := n.pollers.Load(userID)
 	if !ok {
 		return
 	}
 	ps := val.(*pollingSession)
-	if atomic.AddInt32(&ps.pending, -1) <= 0 {
+	ps.mu.Lock()
+	persistent := ps.persistent
+	ps.mu.Unlock()
+	if atomic.AddInt32(&ps.pending, -1) <= 0 && !persistent {
 		ps.cancel()
 		n.pollers.Delete(userID)
 	}
 }
 
-// pollForCallbacks long-polls getUpdates for callback_query updates.
+// BootstrapGroupObservation reads all Telegram notification configs from the
+// store and starts persistent polling for any that have a group_chat_id
+// configured. Called once at server startup.
+func (n *Notifier) BootstrapGroupObservation(ctx context.Context) {
+	configs, err := n.store.ListNotificationConfigsByChannel(ctx, "telegram")
+	if err != nil {
+		slog.Default().Warn("bootstrap group observation: list configs failed", "err", err)
+		return
+	}
+	for _, nc := range configs {
+		var cfg telegramCfg
+		if err := json.Unmarshal(nc.Config, &cfg); err != nil {
+			continue
+		}
+		if cfg.GroupChatID == "" || cfg.BotToken == "" || cfg.ChatID == "" {
+			continue
+		}
+		n.EnsureGroupObservation(nc.UserID, cfg.BotToken, cfg.ChatID, cfg.GroupChatID)
+		slog.Default().Info("group observation bootstrapped", "user_id", nc.UserID)
+	}
+}
+
+// pollForCallbacks long-polls getUpdates for callback_query and group message updates.
 func (n *Notifier) pollForCallbacks(ctx context.Context, ps *pollingSession) {
 	defer func() {
 		n.pollers.Delete(ps.userID)
@@ -95,6 +176,10 @@ func (n *Notifier) pollForCallbacks(ctx context.Context, ps *pollingSession) {
 			continue
 		}
 
+		ps.mu.Lock()
+		gcid := ps.groupChatID
+		ps.mu.Unlock()
+
 		for _, u := range updates {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
@@ -102,8 +187,77 @@ func (n *Notifier) pollForCallbacks(ctx context.Context, ps *pollingSession) {
 			if u.CallbackQuery != nil {
 				n.handleCallbackQuery(ctx, ps, u.CallbackQuery)
 			}
+			if u.Message != nil && gcid != "" {
+				n.handleGroupMessage(ctx, ps, u.Message, gcid)
+			}
+			if u.MyChatMember != nil {
+				n.handleChatMemberUpdate(ctx, ps, u.MyChatMember)
+			}
 		}
 	}
+}
+
+// handleChatMemberUpdate processes a my_chat_member update, detecting when the
+// bot has been added to a group or supergroup and storing it as a pending group.
+func (n *Notifier) handleChatMemberUpdate(ctx context.Context, ps *pollingSession, cm *chatMemberUpdate) {
+	// Only care about the bot being added (member or administrator).
+	if cm.NewMember.Status != "member" && cm.NewMember.Status != "administrator" {
+		return
+	}
+	// Only track groups and supergroups.
+	if cm.Chat.Type != "group" && cm.Chat.Type != "supergroup" {
+		return
+	}
+
+	chatID := fmt.Sprintf("%d", cm.Chat.ID)
+	n.AddPendingGroup(ps.userID, notify.PendingGroup{
+		ChatID:     chatID,
+		Title:      cm.Chat.Title,
+		Type:       cm.Chat.Type,
+		DetectedAt: time.Now(),
+	})
+
+	slog.Default().Info("telegram bot added to group",
+		"user_id", ps.userID, "chat_id", chatID, "title", cm.Chat.Title)
+
+	// Send a DM to the user's private chat.
+	text := fmt.Sprintf("🤖 I was added to <b>%s</b>. Enable group observation from Settings.",
+		html.EscapeString(cm.Chat.Title))
+	n.sendMessage(ctx, ps.botToken, ps.chatID, text, nil)
+}
+
+// handleGroupMessage buffers a message from a monitored group chat.
+// All messages are stored (including from agents/bots) so the LLM has
+// full conversational context for approval detection.
+func (n *Notifier) handleGroupMessage(_ context.Context, ps *pollingSession, msg *telegramMsg, groupChatID string) {
+	// Only process messages from the configured group chat.
+	if fmt.Sprintf("%d", msg.Chat.ID) != groupChatID {
+		return
+	}
+	if msg.Text == "" {
+		return
+	}
+	if n.msgBuffer != nil {
+		n.msgBuffer.Append(groupChatID, groupchat.BufferedMessage{
+			Text:       msg.Text,
+			SenderID:   fmt.Sprintf("%d", msg.From.ID),
+			SenderName: senderDisplayName(msg.From),
+			Timestamp:  time.Unix(msg.Date, 0),
+		})
+		slog.Default().Debug("telegram group message buffered",
+			"user_id", ps.userID, "group_chat_id", groupChatID)
+	}
+}
+
+// senderDisplayName builds a display name from a Telegram user.
+func senderDisplayName(u telegramUser) string {
+	if u.FirstName != "" {
+		return u.FirstName
+	}
+	if u.Username != "" {
+		return u.Username
+	}
+	return fmt.Sprintf("user:%d", u.ID)
 }
 
 // handleCallbackQuery processes a single callback query from a button tap.
