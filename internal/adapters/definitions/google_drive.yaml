@@ -55,6 +55,13 @@ actions:
     params:
       file_id: { type: string, required: true }
 
+  download_file:
+    display_name: "Download file"
+    risk: { category: read, sensitivity: low, description: "Download a non-Google-Workspace file (PDFs, images, etc.) as base64-encoded content" }
+    override: go
+    params:
+      file_id: { type: string, required: true }
+
   create_file:
     display_name: "Create file"
     risk: { category: write, sensitivity: medium, description: "Create a file in Google Drive" }
@@ -72,6 +79,17 @@ actions:
     params:
       file_id: { type: string, required: true }
       content: { type: string, required: true }
+
+  export_file:
+    display_name: "Export file"
+    risk: { category: read, sensitivity: low, description: "Export a Google Workspace file (Docs, Sheets, Slides) to a downloadable format" }
+    override: go
+    params:
+      file_id: { type: string, required: true }
+      mime_type:
+        type: string
+        required: true
+        description: "Target MIME type (e.g. application/pdf, text/plain, text/csv, application/vnd.openxmlformats-officedocument.wordprocessingml.document)"
 
   search_files:
     display_name: "Search files"
