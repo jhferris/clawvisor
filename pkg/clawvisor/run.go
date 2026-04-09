@@ -71,6 +71,10 @@ func RunWithContext(ctx context.Context, opts *ServerOptions) error {
 		apiOpts = append(apiOpts, api.WithGroupChatBuffer(opts.MessageBuffer))
 	}
 
+	if opts.AdapterGenFactory != nil {
+		apiOpts = append(apiOpts, api.WithAdapterGenFactory(opts.AdapterGenFactory))
+	}
+
 	if opts.GatewayHooks != nil {
 		apiOpts = append(apiOpts, api.WithGatewayHooks(&api.GatewayHooks{
 			BeforeAuthorize: opts.GatewayHooks.BeforeAuthorize,
