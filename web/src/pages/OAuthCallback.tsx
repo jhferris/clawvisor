@@ -48,7 +48,9 @@ export default function OAuthCallback() {
       })
       .catch((err) => {
         if (err instanceof APIError && err.waitlistAvailable) {
-          navigate('/register?waitlist=1', { replace: true })
+          const email = err.extra?.email as string | undefined
+          const params = email ? `?email=${encodeURIComponent(email)}` : ''
+          navigate(`/waitlist${params}`, { replace: true })
           return
         }
         setError(err instanceof APIError ? err.message : 'Failed to sign in')
