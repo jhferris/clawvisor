@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/clawvisor/clawvisor/internal/adapters/google/credential"
 	"github.com/clawvisor/clawvisor/internal/api/middleware"
 	"github.com/clawvisor/clawvisor/internal/callback"
 	"github.com/clawvisor/clawvisor/internal/events"
@@ -199,6 +200,13 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 			if !h.serviceActivated(ctx, agent.UserID, serviceType, serviceAlias, adapter) {
 				code, userErr, _ := serviceNotActivatedResponse(ctx, h.vault, h.st, h.adapterReg, agent.UserID, serviceType, serviceAlias, a.Service, adapter)
 				writeError(w, http.StatusBadRequest, code, userErr)
+				return
+			}
+			if missing := h.missingCredentialScopes(ctx, agent.UserID, serviceType, serviceAlias, a.Action, adapter); len(missing) > 0 {
+				writeError(w, http.StatusBadRequest, "MISSING_SCOPES",
+					fmt.Sprintf("service %q is connected but missing required OAuth scopes: %s — "+
+						"the user needs to reconnect the service to grant these permissions",
+						a.Service, strings.Join(missing, ", ")))
 				return
 			}
 		}
@@ -1327,6 +1335,50 @@ func (h *TasksHandler) serviceActivated(ctx context.Context, userID, serviceType
 	vKey := h.adapterReg.VaultKeyWithAlias(serviceType, alias)
 	_, err := h.vault.Get(ctx, userID, vKey)
 	return err == nil
+}
+
+// missingCredentialScopes loads the vault credential for a service and returns
+// any required OAuth scopes that are not present for the given action. When
+// the adapter implements ActionScoper, only the scopes needed by the specific
+// action are checked. Otherwise falls back to all adapter RequiredScopes.
+// Returns nil when the credential is missing (already caught by serviceActivated)
+// or when scope data is not trustworthy (legacy credentials).
+func (h *TasksHandler) missingCredentialScopes(ctx context.Context, userID, serviceType, alias, action string, adapter adapters.Adapter) []string {
+	// Determine which scopes to check: per-action if available, else all.
+	var required []string
+	if scoper, ok := adapter.(adapters.ActionScoper); ok && action != "*" {
+		required = scoper.ScopesForAction(action)
+	}
+	if len(required) == 0 {
+		// Wildcard action or adapter doesn't implement ActionScoper —
+		// skip the check rather than requiring all scopes, which would
+		// over-reject tasks that only use a subset of actions.
+		if action == "*" {
+			return nil
+		}
+		required = adapter.RequiredScopes()
+	}
+	if len(required) == 0 {
+		return nil
+	}
+	vKey := h.adapterReg.VaultKeyWithAlias(serviceType, alias)
+	credBytes, err := h.vault.Get(ctx, userID, vKey)
+	if err != nil || len(credBytes) == 0 {
+		return nil
+	}
+	cred, err := credential.Parse(credBytes)
+	if err != nil {
+		return nil
+	}
+	// Only check scopes when we know they reflect what the user actually
+	// granted (set by the new OAuthCallback path that reads token.Extra("scope")).
+	// Legacy credentials stored the *requested* scopes which may not match
+	// current RequiredScopes if new scopes were added after the credential
+	// was stored.
+	if !cred.ScopesGranted {
+		return nil
+	}
+	return credential.MissingScopes(cred.Scopes, required)
 }
 
 // ── Task scope check helper ───────────────────────────────────────────────────

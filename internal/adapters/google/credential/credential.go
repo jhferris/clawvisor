@@ -17,11 +17,12 @@ import (
 
 // Stored is the JSON structure saved (encrypted) in the vault under key "google".
 type Stored struct {
-	Type         string    `json:"type"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	Scopes       []string  `json:"scopes"`
+	Type          string    `json:"type"`
+	AccessToken   string    `json:"access_token"`
+	RefreshToken  string    `json:"refresh_token"`
+	Expiry        time.Time `json:"expiry"`
+	Scopes        []string  `json:"scopes"`
+	ScopesGranted bool      `json:"scopes_granted,omitempty"`
 }
 
 // Parse unmarshals vault credential bytes into a Stored credential.
@@ -47,13 +48,17 @@ func Validate(data []byte) error {
 }
 
 // FromToken builds storable vault bytes from an OAuth2 token and scope list.
-func FromToken(token *oauth2.Token, scopes []string) ([]byte, error) {
+// When scopesGranted is true, the scopes are known to reflect what the user
+// actually granted (read from the token exchange response). When false, scopes
+// are what we requested — we can't verify the user granted all of them.
+func FromToken(token *oauth2.Token, scopes []string, scopesGranted bool) ([]byte, error) {
 	c := Stored{
-		Type:         "oauth2",
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		Scopes:       scopes,
+		Type:          "oauth2",
+		AccessToken:   token.AccessToken,
+		RefreshToken:  token.RefreshToken,
+		Expiry:        token.Expiry,
+		Scopes:        scopes,
+		ScopesGranted: scopesGranted,
 	}
 	return json.Marshal(c)
 }
@@ -111,6 +116,21 @@ func FetchGoogleEmail(ctx context.Context, client *http.Client) (string, error) 
 		return "", fmt.Errorf("google userinfo: parse: %w", err)
 	}
 	return info.Email, nil
+}
+
+// MissingScopes returns the subset of required scopes not present in existing.
+func MissingScopes(existing, required []string) []string {
+	set := make(map[string]bool, len(existing))
+	for _, s := range existing {
+		set[s] = true
+	}
+	var missing []string
+	for _, s := range required {
+		if !set[s] {
+			missing = append(missing, s)
+		}
+	}
+	return missing
 }
 
 // HasAllScopes returns true if existing contains all of the required scopes.
