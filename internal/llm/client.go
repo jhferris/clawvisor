@@ -52,20 +52,35 @@ type ChatMessage struct {
 
 // Client calls either an OpenAI-compatible, Anthropic, or Vertex AI chat endpoint.
 type Client struct {
-	provider    string
-	endpoint    string
-	apiKey      string
-	model       string
-	timeout     time.Duration
-	http        *http.Client
-	tokenSource oauth2.TokenSource // for Vertex AI (ADC)
-	maxTokens   int                // 0 → use default (maxTokens const)
+	provider          string
+	endpoint          string
+	apiKey            string
+	model             string
+	timeout           time.Duration
+	http              *http.Client
+	tokenSource       oauth2.TokenSource // for Vertex AI (ADC)
+	maxTokens         int                // 0 → use default (maxTokens const)
+	fallbackEndpoints []string           // Vertex AI: additional region endpoints to try on failure
 }
 
 // WithMaxTokens returns a shallow copy of the client with a custom max_tokens limit.
 func (c *Client) WithMaxTokens(n int) *Client {
 	c2 := *c
 	c2.maxTokens = n
+	return &c2
+}
+
+// WithFallbackEndpoints returns a shallow copy of the client with fallback endpoints.
+func (c *Client) WithFallbackEndpoints(endpoints []string) *Client {
+	c2 := *c
+	c2.fallbackEndpoints = endpoints
+	return &c2
+}
+
+// WithTokenSource returns a shallow copy with the given token source (for testing).
+func (c *Client) WithTokenSource(ts oauth2.TokenSource) *Client {
+	c2 := *c
+	c2.tokenSource = ts
 	return &c2
 }
 
@@ -105,6 +120,18 @@ func NewClient(cfg config.LLMProviderConfig) *Client {
 			}
 			c.endpoint = fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models",
 				region, projectID, region)
+
+			// Build fallback endpoints from VERTEX_FALLBACK_REGIONS (comma-separated).
+			if fallback := os.Getenv("VERTEX_FALLBACK_REGIONS"); fallback != "" {
+				for _, r := range strings.Split(fallback, ",") {
+					r = strings.TrimSpace(r)
+					if r != "" && r != region {
+						c.fallbackEndpoints = append(c.fallbackEndpoints,
+							fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models",
+								r, projectID, r))
+					}
+				}
+			}
 		}
 	}
 
@@ -271,6 +298,11 @@ func (c *Client) completeVertex(ctx context.Context, messages []ChatMessage) (st
 		return "", fmt.Errorf("llm: vertex provider requires application default credentials")
 	}
 
+	// Build the list of endpoints to try: primary first, then fallbacks.
+	endpoints := make([]string, 0, 1+len(c.fallbackEndpoints))
+	endpoints = append(endpoints, c.endpoint)
+	endpoints = append(endpoints, c.fallbackEndpoints...)
+
 	// Same request body as Anthropic Messages API.
 	var system string
 	var convo []ChatMessage
@@ -299,11 +331,64 @@ func (c *Client) completeVertex(ctx context.Context, messages []ChatMessage) (st
 		return "", err
 	}
 
+	var lastErr error
+	for _, ep := range endpoints {
+		// Try each region up to 2 times before moving to the next.
+		for attempt := range 2 {
+			result, err := c.doVertexRequest(ctx, ep, body)
+			if err == nil {
+				return result, nil
+			}
+			lastErr = err
+			// Don't retry spend-cap errors at all.
+			if errors.Is(err, ErrSpendCapExhausted) {
+				return "", err
+			}
+			if !isVertexRetriableErr(err) {
+				return "", err
+			}
+			// First attempt failed with retriable error — retry same region.
+			// Second attempt failed — move to next region.
+			_ = attempt
+		}
+	}
+	return "", lastErr
+}
+
+// isVertexRetriableErr checks whether the error is worth retrying on a
+// different region: overloaded (529/503), retriable HTTP status, or network failure.
+func isVertexRetriableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// ErrOverloaded is wrapped by statusError for 529 and 503.
+	if errors.Is(err, ErrOverloaded) {
+		return true
+	}
+	// Network-level failures (timeout, connection refused, DNS).
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "no such host") {
+		return true
+	}
+	// Remaining retriable HTTP statuses (429, 500, 502, 504) not covered by ErrOverloaded.
+	for _, code := range []string{"status 429", "status 500", "status 502", "status 504"} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return false
+}
+
+// doVertexRequest performs a single Vertex AI rawPredict call against the given endpoint.
+func (c *Client) doVertexRequest(ctx context.Context, endpoint string, body []byte) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	// Endpoint: .../models/{MODEL}:rawPredict
-	url := fmt.Sprintf("%s/%s:rawPredict", c.endpoint, c.model)
+	url := fmt.Sprintf("%s/%s:rawPredict", endpoint, c.model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", err
