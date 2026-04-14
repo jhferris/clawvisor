@@ -41,19 +41,26 @@ func RequiresHardcodedApproval(service, action string) bool {
 
 // TasksHandler manages task-scoped authorization.
 type TasksHandler struct {
-	st           store.Store
-	vault        vault.Vault
-	adapterReg   *adapters.Registry
-	notifier     notify.Notifier
-	cfg          config.Config
-	logger       *slog.Logger
-	baseURL      string
-	eventHub     events.EventHub
-	assessor     taskrisk.Assessor
-	contentDedup DedupCache
-	msgBuffer    groupchat.Buffer // may be nil; set via SetGroupApproval
-	llmHealth    *llm.Health              // may be nil; needed for approval check LLM calls
-	agentPairer  notify.AgentGroupPairer  // may be nil; set via SetGroupApproval
+	st               store.Store
+	vault            vault.Vault
+	adapterReg       *adapters.Registry
+	notifier         notify.Notifier
+	cfg              config.Config
+	logger           *slog.Logger
+	baseURL          string
+	eventHub         events.EventHub
+	assessor         taskrisk.Assessor
+	contentDedup     DedupCache
+	msgBuffer        groupchat.Buffer         // may be nil; set via SetGroupApproval
+	llmHealth        *llm.Health              // may be nil; needed for approval check LLM calls
+	agentPairer      notify.AgentGroupPairer  // may be nil; set via SetGroupApproval
+	localSvcProvider LocalServiceProvider     // may be nil; set via SetLocalServiceProvider
+}
+
+// SetLocalServiceProvider configures the local daemon service provider for
+// validating local service names during task creation and expansion.
+func (h *TasksHandler) SetLocalServiceProvider(p LocalServiceProvider) {
+	h.localSvcProvider = p
 }
 
 func NewTasksHandler(
@@ -169,10 +176,17 @@ func (h *TasksHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		serviceType, serviceAlias := parseServiceAlias(a.Service)
 
-		// Guard virtual services (file, bash, search, web, agent, unknown) are
-		// scope-only markers used by permission hooks — they never execute
-		// through adapters, so skip adapter/activation validation.
-		if !isGuardVirtualService(serviceType) {
+		// Validate local daemon services against the active service list.
+		if isLocalService(serviceType) {
+			if err := h.validateLocalService(ctx, agent.UserID, serviceType, a.Action); err != nil {
+				writeError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+				return
+			}
+		}
+
+		// Guard virtual services and local daemon services skip adapter/activation
+		// validation — they don't have adapters in the registry.
+		if !isGuardVirtualService(serviceType) && !isLocalService(serviceType) {
 			adapter, ok := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID)
 			if !ok {
 				available := h.adapterReg.SupportedServices()
@@ -853,9 +867,15 @@ func (h *TasksHandler) Expand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate service and action exist (skip for guard virtual services).
+	// Validate service and action exist.
 	serviceType, serviceAlias := parseServiceAlias(req.Service)
-	if !isGuardVirtualService(serviceType) {
+	if isLocalService(serviceType) {
+		if err := h.validateLocalService(ctx, agent.UserID, serviceType, req.Action); err != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+	}
+	if !isGuardVirtualService(serviceType) && !isLocalService(serviceType) {
 		adapter, ok := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "INVALID_REQUEST",
@@ -1327,6 +1347,42 @@ func (h *TasksHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 // Credential-free services check service_meta; credential-backed services check the vault.
 // It requires an exact alias match — callers should use serviceNotActivatedResponse
 // to produce a helpful error listing available connections when this returns false.
+// validateLocalService checks that a local.* service is real, enabled for the
+// user, and (when action is not "*") that the requested action exists.
+// Returns nil if the provider is not configured (self-hosted mode where all local
+// services are allowed) or if the service and action are found in the active list.
+func (h *TasksHandler) validateLocalService(ctx context.Context, userID, serviceType, action string) error {
+	if h.localSvcProvider == nil {
+		return nil // no provider — skip validation (self-hosted)
+	}
+	active, err := h.localSvcProvider.ActiveLocalServices(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("unable to verify local service availability")
+	}
+	// serviceType is "local.<service_id>"; strip the prefix.
+	svcID := strings.TrimPrefix(serviceType, "local.")
+	for _, svc := range active {
+		if svc.ServiceID == svcID {
+			// Service found — validate action if not wildcard.
+			if action == "*" || action == "" {
+				return nil
+			}
+			for _, a := range svc.Actions {
+				if a.ID == action {
+					return nil
+				}
+			}
+			available := make([]string, len(svc.Actions))
+			for i, a := range svc.Actions {
+				available[i] = a.ID
+			}
+			return fmt.Errorf("local service %q does not support action %q — available actions: %s",
+				serviceType, action, strings.Join(available, ", "))
+		}
+	}
+	return fmt.Errorf("local service %q is not enabled or does not exist — enable it from the Services page", serviceType)
+}
+
 func (h *TasksHandler) serviceActivated(ctx context.Context, userID, serviceType, alias string, adapter adapters.Adapter) bool {
 	if adapter.ValidateCredential(nil) == nil {
 		_, err := h.st.GetServiceMeta(ctx, userID, serviceType, alias)

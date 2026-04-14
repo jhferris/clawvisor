@@ -52,6 +52,20 @@ type GatewayHooks struct {
 	BeforeAuthorize func(ctx context.Context, agentID, userID, service, action string) error
 }
 
+// LocalServiceExecutor handles execution of local daemon service requests.
+// Implemented by the cloud layer; nil in self-hosted mode.
+type LocalServiceExecutor interface {
+	// Execute forwards a request to the appropriate local daemon.
+	// The service should include the "local." prefix (e.g. "local.my_service").
+	// The caller has already enforced restrictions and task scope.
+	Execute(ctx context.Context, userID, service, action string, params map[string]any) (*adapters.Result, error)
+}
+
+// isLocalService returns true for services provided by local daemons.
+func isLocalService(serviceType string) bool {
+	return strings.HasPrefix(serviceType, "local.")
+}
+
 // GatewayHandler handles POST /api/gateway/request.
 type GatewayHandler struct {
 	store        store.Store
@@ -64,7 +78,9 @@ type GatewayHandler struct {
 	logger       *slog.Logger
 	baseURL      string
 	eventHub     events.EventHub
-	gatewayHooks *GatewayHooks // cloud-injected authorization hooks; may be nil
+	gatewayHooks     *GatewayHooks        // cloud-injected authorization hooks; may be nil
+	localExec        LocalServiceExecutor  // cloud-injected local service executor; may be nil
+	localSvcProvider LocalServiceProvider  // cloud-injected local service catalog; may be nil
 }
 
 func NewGatewayHandler(
@@ -91,6 +107,17 @@ func NewGatewayHandler(
 // Must be called before any requests are handled.
 func (h *GatewayHandler) SetGatewayHooks(hooks *GatewayHooks) {
 	h.gatewayHooks = hooks
+}
+
+// SetLocalServiceExecutor configures the local daemon service executor.
+func (h *GatewayHandler) SetLocalServiceExecutor(e LocalServiceExecutor) {
+	h.localExec = e
+}
+
+// SetLocalServiceProvider configures the local service catalog provider for
+// request-time action validation.
+func (h *GatewayHandler) SetLocalServiceProvider(p LocalServiceProvider) {
+	h.localSvcProvider = p
 }
 
 // HandleRequest is the main gateway entry point.
@@ -407,6 +434,26 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
+		} else if isLocalService(serviceType) && h.localSvcProvider != nil {
+			// Validate action exists on the local service (mirrors cloud adapter check above).
+			if localErr := h.validateLocalAction(ctx, agent.UserID, serviceType, req.Action); localErr != nil {
+				_ = h.store.IncrementTaskRequestCount(ctx, req.TaskID)
+				msg := localErr.Error()
+				taskIDPtr := &req.TaskID
+				e := baseEntry("unknown_action", "blocked", taskIDPtr)
+				e.DurationMS = int(time.Since(start).Milliseconds())
+				e.ErrorMsg = &msg
+				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+					h.logger.Warn("audit log failed", "err", logErr)
+				}
+				h.publishAuditAndQueue(agent.UserID, req.TaskID)
+				writeDetailedError(w, http.StatusBadRequest, apiErrorDetail{
+					Error: msg,
+					Code:  "UNKNOWN_ACTION",
+					Hint:  fmt.Sprintf("This local service does not have a %q action. Check the available actions listed above and use the correct one.", req.Action),
+				})
+				return
+			}
 		}
 
 		match := CheckTaskScope(task, serviceType, serviceAlias, req.Action)
@@ -445,127 +492,212 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		if match.AutoExecute && !hardcoded {
 			taskIDPtr := &req.TaskID
 
-			// ── Intent verification ──────────────────────────────────────
-			// Load chain facts (needed for both planned call matching and verification).
-			chainFacts := h.loadChainFacts(ctx, task, req)
-
-			// Check if the request matches a pre-registered planned call.
-			// If so, skip LLM-based intent verification entirely — the call
-			// was evaluated during task risk assessment and approved by the user.
-			matchedPlannedCall := matchPlannedCall(task.PlannedCalls, req.Service, req.Action, req.Params, chainFacts)
-
+			var result *adapters.Result
+			var execErr error
 			var verdict *intent.VerificationVerdict
-			if matchedPlannedCall != nil {
-				h.logger.Info("request matches planned call — skipping intent verification",
-					"task_id", req.TaskID,
-					"service", req.Service,
-					"action", req.Action,
-					"planned_reason", matchedPlannedCall.Reason,
-				)
-				verdict = &intent.VerificationVerdict{
-					Allow:           true,
-					ParamScope:      "ok",
-					ReasonCoherence: "ok",
-					ExtractContext:  true,
-					Explanation:     "Matched pre-registered planned call: " + matchedPlannedCall.Reason,
-				}
-			} else {
-				verdict = h.runVerification(ctx, task, match.MatchedAction, req, serviceType, agent.UserID, chainFacts)
-			}
-			// Chain context fallback: if the LLM flagged a missing entity,
-			// check programmatically — the LLM may have missed it in a long
-			// table, or it may exist beyond the loaded fact limit.
-			if verdict != nil && !verdict.Allow && verdict.ParamScope == "violation" && len(verdict.MissingChainValues) > 0 {
-				verdict = chainContextFallback(ctx, h.store, h.logger, verdict, chainFacts, req.TaskID, task, req.SessionID)
-			}
-			if verdict != nil && !verdict.Allow {
-				dur := int(time.Since(start).Milliseconds())
-				e := baseEntry("verify", "restricted", taskIDPtr)
-				e.DurationMS = dur
-				e.Verification = intent.MarshalVerdict(verdict)
-				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-					h.logger.Warn("audit log failed", "err", logErr)
-				}
-				h.publishAuditAndQueue(agent.UserID, req.TaskID)
-				// Alert on incoherent reason
-				if verdict.ReasonCoherence == "incoherent" && h.notifier != nil {
-					alertText := fmt.Sprintf(
-						"⚠️ <b>Clawvisor — Intent Alert</b>\n\n"+
-							"<b>Task:</b> %s\n"+
-							"<b>Agent reason:</b> %s\n"+
-							"<b>Verdict:</b> %s",
-						task.Purpose, req.Reason, verdict.Explanation)
-					if alertErr := h.notifier.SendAlert(ctx, agent.UserID, alertText); alertErr != nil {
-						h.logger.Warn("intent alert failed", "err", alertErr)
-					}
-				}
-				resp := map[string]any{
-					"status":       "restricted",
-					"request_id":   req.RequestID,
-					"audit_id":     auditID,
-					"reason":       verdict.Explanation,
-					"verification": verdict,
-				}
-				if len(warnings) > 0 {
-					resp["warnings"] = warnings
-				}
-				h.maybeInjectNPS(ctx, resp, agent.ID)
-				writeJSON(w, http.StatusOK, resp)
-				return
-			}
-			// ── End intent verification ──────────────────────────────────
 
-			// Check activation for credential-free services before executing.
-			if taskAdapter, taskAdapterOK := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID); taskAdapterOK && taskAdapter.ValidateCredential(nil) == nil {
-				if _, metaErr := h.store.GetServiceMeta(ctx, agent.UserID, serviceType, serviceAlias); metaErr != nil {
+			if isLocalService(serviceType) {
+				// ── Local service execution ──────────────────────────────
+				if h.localExec == nil {
 					dur := int(time.Since(start).Milliseconds())
-					e := baseEntry("block", "error", taskIDPtr)
+					e := baseEntry("execute", "error", taskIDPtr)
 					e.DurationMS = dur
-					code, userErr, auditMsg := serviceNotActivatedResponse(ctx, h.vault, h.store, h.adapterReg, agent.UserID, serviceType, serviceAlias, req.Service, taskAdapter)
-					e.ErrorMsg = &auditMsg
-					if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-						h.logger.Warn("audit log failed", "err", logErr)
-					}
-					h.publishAuditAndQueue(agent.UserID, req.TaskID)
-					writeJSON(w, http.StatusBadRequest, map[string]any{
-						"status":     "error",
-						"request_id": req.RequestID,
-						"audit_id":   auditID,
-						"error":      userErr,
-						"code":       code,
-					})
-					return
-				}
-			}
-
-			// Validate required params before execution.
-			if execAdapter, adOK := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID); adOK {
-				paramErr, paramWarnings := validateRequestParams(execAdapter, req.Action, req.Params)
-				warnings = append(warnings, paramWarnings...)
-				if paramErr != nil {
-					errMsg := paramErr.Error
-					e := baseEntry("reject", "validation_error", taskIDPtr)
-					e.DurationMS = int(time.Since(start).Milliseconds())
+					errMsg := "local services are not available in this deployment"
 					e.ErrorMsg = &errMsg
 					if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 						h.logger.Warn("audit log failed", "err", logErr)
 					}
 					h.publishAuditAndQueue(agent.UserID, req.TaskID)
-					writeDetailedError(w, http.StatusBadRequest, *paramErr)
+					writeJSON(w, http.StatusOK, map[string]any{
+						"status":     "error",
+						"request_id": req.RequestID,
+						"audit_id":   auditID,
+						"error":      errMsg,
+						"code":       "LOCAL_SERVICE_UNAVAILABLE",
+					})
 					return
 				}
-			}
 
-			vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, serviceAlias, agent.UserID)
-			result, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg, h.store,
-				agent.UserID, serviceType, req.Action, req.Params, vKey)
-			dur := int(time.Since(start).Milliseconds())
+				// ── Intent verification (same pipeline as cloud services) ──
+				chainFacts := h.loadChainFacts(ctx, task, req)
 
-			if execErr != nil {
-				if errors.Is(execErr, vault.ErrNotFound) {
-					// Vault credential missing — fail immediately.
+				matchedPlannedCall := matchPlannedCall(task.PlannedCalls, req.Service, req.Action, req.Params, chainFacts)
+				if matchedPlannedCall != nil {
+					h.logger.Info("request matches planned call — skipping intent verification",
+						"task_id", req.TaskID,
+						"service", req.Service,
+						"action", req.Action,
+						"planned_reason", matchedPlannedCall.Reason,
+					)
+					verdict = &intent.VerificationVerdict{
+						Allow:           true,
+						ParamScope:      "ok",
+						ReasonCoherence: "ok",
+						ExtractContext:  true,
+						Explanation:     "Matched pre-registered planned call: " + matchedPlannedCall.Reason,
+					}
+				} else {
+					verdict = h.runVerification(ctx, task, match.MatchedAction, req, serviceType, agent.UserID, chainFacts)
+				}
+				if verdict != nil && !verdict.Allow && verdict.ParamScope == "violation" && len(verdict.MissingChainValues) > 0 {
+					verdict = chainContextFallback(ctx, h.store, h.logger, verdict, chainFacts, req.TaskID, task, req.SessionID)
+				}
+				if verdict != nil && !verdict.Allow {
+					dur := int(time.Since(start).Milliseconds())
+					e := baseEntry("verify", "restricted", taskIDPtr)
+					e.DurationMS = dur
+					e.Verification = intent.MarshalVerdict(verdict)
+					if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+						h.logger.Warn("audit log failed", "err", logErr)
+					}
+					h.publishAuditAndQueue(agent.UserID, req.TaskID)
+					if verdict.ReasonCoherence == "incoherent" && h.notifier != nil {
+						alertText := fmt.Sprintf(
+							"⚠️ <b>Clawvisor — Intent Alert</b>\n\n"+
+								"<b>Task:</b> %s\n"+
+								"<b>Agent reason:</b> %s\n"+
+								"<b>Verdict:</b> %s",
+							task.Purpose, req.Reason, verdict.Explanation)
+						if alertErr := h.notifier.SendAlert(ctx, agent.UserID, alertText); alertErr != nil {
+							h.logger.Warn("intent alert failed", "err", alertErr)
+						}
+					}
+					resp := map[string]any{
+						"status":       "restricted",
+						"request_id":   req.RequestID,
+						"audit_id":     auditID,
+						"reason":       verdict.Explanation,
+						"verification": verdict,
+					}
+					if len(warnings) > 0 {
+						resp["warnings"] = warnings
+					}
+					h.maybeInjectNPS(ctx, resp, agent.ID)
+					writeJSON(w, http.StatusOK, resp)
+					return
+				}
+
+				result, execErr = h.localExec.Execute(ctx, agent.UserID, serviceType, req.Action, req.Params)
+			} else {
+				// ── Intent verification ──────────────────────────────────
+				// Load chain facts (needed for both planned call matching and verification).
+				chainFacts := h.loadChainFacts(ctx, task, req)
+
+				// Check if the request matches a pre-registered planned call.
+				// If so, skip LLM-based intent verification entirely — the call
+				// was evaluated during task risk assessment and approved by the user.
+				matchedPlannedCall := matchPlannedCall(task.PlannedCalls, req.Service, req.Action, req.Params, chainFacts)
+
+				if matchedPlannedCall != nil {
+					h.logger.Info("request matches planned call — skipping intent verification",
+						"task_id", req.TaskID,
+						"service", req.Service,
+						"action", req.Action,
+						"planned_reason", matchedPlannedCall.Reason,
+					)
+					verdict = &intent.VerificationVerdict{
+						Allow:           true,
+						ParamScope:      "ok",
+						ReasonCoherence: "ok",
+						ExtractContext:  true,
+						Explanation:     "Matched pre-registered planned call: " + matchedPlannedCall.Reason,
+					}
+				} else {
+					verdict = h.runVerification(ctx, task, match.MatchedAction, req, serviceType, agent.UserID, chainFacts)
+				}
+				// Chain context fallback: if the LLM flagged a missing entity,
+				// check programmatically — the LLM may have missed it in a long
+				// table, or it may exist beyond the loaded fact limit.
+				if verdict != nil && !verdict.Allow && verdict.ParamScope == "violation" && len(verdict.MissingChainValues) > 0 {
+					verdict = chainContextFallback(ctx, h.store, h.logger, verdict, chainFacts, req.TaskID, task, req.SessionID)
+				}
+				if verdict != nil && !verdict.Allow {
+					dur := int(time.Since(start).Milliseconds())
+					e := baseEntry("verify", "restricted", taskIDPtr)
+					e.DurationMS = dur
+					e.Verification = intent.MarshalVerdict(verdict)
+					if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+						h.logger.Warn("audit log failed", "err", logErr)
+					}
+					h.publishAuditAndQueue(agent.UserID, req.TaskID)
+					// Alert on incoherent reason
+					if verdict.ReasonCoherence == "incoherent" && h.notifier != nil {
+						alertText := fmt.Sprintf(
+							"⚠️ <b>Clawvisor — Intent Alert</b>\n\n"+
+								"<b>Task:</b> %s\n"+
+								"<b>Agent reason:</b> %s\n"+
+								"<b>Verdict:</b> %s",
+							task.Purpose, req.Reason, verdict.Explanation)
+						if alertErr := h.notifier.SendAlert(ctx, agent.UserID, alertText); alertErr != nil {
+							h.logger.Warn("intent alert failed", "err", alertErr)
+						}
+					}
+					resp := map[string]any{
+						"status":       "restricted",
+						"request_id":   req.RequestID,
+						"audit_id":     auditID,
+						"reason":       verdict.Explanation,
+						"verification": verdict,
+					}
+					if len(warnings) > 0 {
+						resp["warnings"] = warnings
+					}
+					h.maybeInjectNPS(ctx, resp, agent.ID)
+					writeJSON(w, http.StatusOK, resp)
+					return
+				}
+				// ── End intent verification ──────────────────────────────
+
+				// Check activation for credential-free services before executing.
+				if taskAdapter, taskAdapterOK := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID); taskAdapterOK && taskAdapter.ValidateCredential(nil) == nil {
+					if _, metaErr := h.store.GetServiceMeta(ctx, agent.UserID, serviceType, serviceAlias); metaErr != nil {
+						dur := int(time.Since(start).Milliseconds())
+						e := baseEntry("block", "error", taskIDPtr)
+						e.DurationMS = dur
+						code, userErr, auditMsg := serviceNotActivatedResponse(ctx, h.vault, h.store, h.adapterReg, agent.UserID, serviceType, serviceAlias, req.Service, taskAdapter)
+						e.ErrorMsg = &auditMsg
+						if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+							h.logger.Warn("audit log failed", "err", logErr)
+						}
+						h.publishAuditAndQueue(agent.UserID, req.TaskID)
+						writeJSON(w, http.StatusBadRequest, map[string]any{
+							"status":     "error",
+							"request_id": req.RequestID,
+							"audit_id":   auditID,
+							"error":      userErr,
+							"code":       code,
+						})
+						return
+					}
+				}
+
+				// Validate required params before execution.
+				if execAdapter, adOK := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID); adOK {
+					paramErr, paramWarnings := validateRequestParams(execAdapter, req.Action, req.Params)
+					warnings = append(warnings, paramWarnings...)
+					if paramErr != nil {
+						errMsg := paramErr.Error
+						e := baseEntry("reject", "validation_error", taskIDPtr)
+						e.DurationMS = int(time.Since(start).Milliseconds())
+						e.ErrorMsg = &errMsg
+						if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+							h.logger.Warn("audit log failed", "err", logErr)
+						}
+						h.publishAuditAndQueue(agent.UserID, req.TaskID)
+						writeDetailedError(w, http.StatusBadRequest, *paramErr)
+						return
+					}
+				}
+
+				vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, serviceAlias, agent.UserID)
+				result, execErr = executeAdapterRequest(ctx, h.vault, h.adapterReg, h.store,
+					agent.UserID, serviceType, req.Action, req.Params, vKey)
+
+				// Vault credential missing — return activation error.
+				if execErr != nil && errors.Is(execErr, vault.ErrNotFound) {
 					adapter, adapterOK := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID)
 					if adapterOK && adapter.ValidateCredential(nil) != nil {
+						dur := int(time.Since(start).Milliseconds())
 						e := baseEntry("block", "error", taskIDPtr)
 						e.DurationMS = dur
 						code, userErr, auditMsg := serviceNotActivatedResponse(ctx, h.vault, h.store, h.adapterReg, agent.UserID, serviceType, serviceAlias, req.Service, adapter)
@@ -584,6 +716,13 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
+			}
+
+			// ── Shared execution result handling (local + cloud) ────────
+
+			dur := int(time.Since(start).Milliseconds())
+
+			if execErr != nil {
 				errMsg := execErr.Error()
 				e := baseEntry("execute", "error", taskIDPtr)
 				e.DurationMS = dur
@@ -627,7 +766,7 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			h.publishAuditAndQueue(agent.UserID, req.TaskID)
 
-			// Chain context extraction (async — after response is written)
+			// Chain context extraction (async — cloud services only, guarded by verdict != nil)
 			chainSessionID := req.SessionID
 			if chainSessionID == "" && task.Lifetime != "standing" {
 				chainSessionID = req.TaskID
@@ -694,45 +833,15 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// ── Step 5: Per-request approval ─────────────────────────────────────────
 	// Task in-scope but not auto-execute, or hardcoded approval.
 
-	// Reject unknown services immediately.
-	approveAdapter, ok := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID)
-	if !ok {
-		e := baseEntry("approve", "error", nil)
-		e.DurationMS = int(time.Since(start).Milliseconds())
-		errMsg := fmt.Sprintf("unknown service %q", serviceType)
-		e.ErrorMsg = &errMsg
-		if logErr := h.store.LogAudit(ctx, e); logErr != nil {
-			h.logger.Warn("audit log failed", "err", logErr)
-		}
-		h.publishAuditAndQueue(agent.UserID, "")
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"status":     "error",
-			"request_id": req.RequestID,
-			"audit_id":   auditID,
-			"error":      fmt.Sprintf("unknown service %q: not a supported service", serviceType),
-			"code":       "UNKNOWN_SERVICE",
-		})
-		return
-	}
-
-	// Check if service needs activation.
-	{
-		notActivated := false
-		if approveAdapter.ValidateCredential(nil) == nil {
-			if _, metaErr := h.store.GetServiceMeta(ctx, agent.UserID, serviceType, serviceAlias); metaErr != nil {
-				notActivated = true
-			}
-		} else {
-			vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, serviceAlias, agent.UserID)
-			if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) {
-				notActivated = true
-			}
-		}
-		if notActivated {
-			e := baseEntry("block", "error", nil)
+	// Local services skip adapter/activation checks — the daemon validates.
+	if !isLocalService(serviceType) {
+		// Reject unknown services immediately.
+		approveAdapter, ok := h.adapterReg.GetForUser(ctx, serviceType, agent.UserID)
+		if !ok {
+			e := baseEntry("approve", "error", nil)
 			e.DurationMS = int(time.Since(start).Milliseconds())
-			code, userErr, auditMsg := serviceNotActivatedResponse(ctx, h.vault, h.store, h.adapterReg, agent.UserID, serviceType, serviceAlias, req.Service, approveAdapter)
-			e.ErrorMsg = &auditMsg
+			errMsg := fmt.Sprintf("unknown service %q", serviceType)
+			e.ErrorMsg = &errMsg
 			if logErr := h.store.LogAudit(ctx, e); logErr != nil {
 				h.logger.Warn("audit log failed", "err", logErr)
 			}
@@ -741,10 +850,43 @@ func (h *GatewayHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				"status":     "error",
 				"request_id": req.RequestID,
 				"audit_id":   auditID,
-				"error":      userErr,
-				"code":       code,
+				"error":      fmt.Sprintf("unknown service %q: not a supported service", serviceType),
+				"code":       "UNKNOWN_SERVICE",
 			})
 			return
+		}
+
+		// Check if service needs activation.
+		{
+			notActivated := false
+			if approveAdapter.ValidateCredential(nil) == nil {
+				if _, metaErr := h.store.GetServiceMeta(ctx, agent.UserID, serviceType, serviceAlias); metaErr != nil {
+					notActivated = true
+				}
+			} else {
+				vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, serviceAlias, agent.UserID)
+				if _, vaultErr := h.vault.Get(ctx, agent.UserID, vKey); errors.Is(vaultErr, vault.ErrNotFound) {
+					notActivated = true
+				}
+			}
+			if notActivated {
+				e := baseEntry("block", "error", nil)
+				e.DurationMS = int(time.Since(start).Milliseconds())
+				code, userErr, auditMsg := serviceNotActivatedResponse(ctx, h.vault, h.store, h.adapterReg, agent.UserID, serviceType, serviceAlias, req.Service, approveAdapter)
+				e.ErrorMsg = &auditMsg
+				if logErr := h.store.LogAudit(ctx, e); logErr != nil {
+					h.logger.Warn("audit log failed", "err", logErr)
+				}
+				h.publishAuditAndQueue(agent.UserID, "")
+				writeJSON(w, http.StatusBadRequest, map[string]any{
+					"status":     "error",
+					"request_id": req.RequestID,
+					"audit_id":   auditID,
+					"error":      userErr,
+					"code":       code,
+				})
+				return
+			}
 		}
 	}
 
@@ -907,13 +1049,24 @@ func (h *GatewayHandler) executeAndRespond(w http.ResponseWriter, ctx context.Co
 	}
 
 	serviceType, alias := parseServiceAlias(blob.Service)
-	// Resolve (and cache) the adapter before VaultKeyWithAliasForUser and executeAdapterRequest.
-	h.adapterReg.GetForUser(ctx, serviceType, pa.UserID)
-	vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, alias, pa.UserID)
 
+	var result *adapters.Result
+	var execErr error
 	start := time.Now()
-	result, execErr := executeAdapterRequest(ctx, h.vault, h.adapterReg, h.store,
-		pa.UserID, blob.Service, blob.Action, blob.Params, vKey)
+
+	if isLocalService(serviceType) {
+		if h.localExec == nil {
+			execErr = fmt.Errorf("local services are not available in this deployment")
+		} else {
+			result, execErr = h.localExec.Execute(ctx, pa.UserID, serviceType, blob.Action, blob.Params)
+		}
+	} else {
+		// Resolve (and cache) the adapter before VaultKeyWithAliasForUser and executeAdapterRequest.
+		h.adapterReg.GetForUser(ctx, serviceType, pa.UserID)
+		vKey := h.adapterReg.VaultKeyWithAliasForUser(serviceType, alias, pa.UserID)
+		result, execErr = executeAdapterRequest(ctx, h.vault, h.adapterReg, h.store,
+			pa.UserID, blob.Service, blob.Action, blob.Params, vKey)
+	}
 	dur := int(time.Since(start).Milliseconds())
 
 	outcome := "executed"
@@ -1111,6 +1264,35 @@ func (h *GatewayHandler) loadChainFacts(ctx context.Context, task *store.Task, r
 		}
 	}
 	return chainFacts
+}
+
+// validateLocalAction checks that a local service action exists at request time.
+// Returns nil if the action is valid or the service is not found (let execution
+// handle that). Returns an error with available actions if the action is unknown.
+func (h *GatewayHandler) validateLocalAction(ctx context.Context, userID, serviceType, action string) error {
+	active, err := h.localSvcProvider.ActiveLocalServices(ctx, userID)
+	if err != nil {
+		return nil // can't validate — let execution handle it
+	}
+	svcID := strings.TrimPrefix(serviceType, "local.")
+	for _, svc := range active {
+		if svc.ServiceID == svcID {
+			for _, a := range svc.Actions {
+				if a.ID == action {
+					return nil
+				}
+			}
+			available := make([]string, len(svc.Actions))
+			for i, a := range svc.Actions {
+				available[i] = a.ID
+			}
+			return fmt.Errorf(
+				"Action %q does not exist on service %s. Available actions: %s",
+				action, serviceType, strings.Join(available, ", "),
+			)
+		}
+	}
+	return nil // service not found — let execution handle it
 }
 
 // Returns nil if the verifier is a no-op or if verification fails.

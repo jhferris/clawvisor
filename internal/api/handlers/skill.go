@@ -14,12 +14,49 @@ import (
 	"github.com/clawvisor/clawvisor/pkg/vault"
 )
 
+// LocalServiceProvider supplies local daemon services for the agent catalog.
+// Implemented by the cloud layer; nil in self-hosted mode.
+type LocalServiceProvider interface {
+	ActiveLocalServices(ctx context.Context, userID string) ([]LocalCatalogService, error)
+}
+
+// LocalCatalogService describes a local daemon service for the agent catalog.
+type LocalCatalogService struct {
+	ServiceID   string
+	DaemonName  string
+	Name        string
+	Description string
+	Actions     []LocalCatalogAction
+}
+
+// LocalCatalogAction describes an action within a local service.
+type LocalCatalogAction struct {
+	ID          string
+	Name        string
+	Description string
+	Params      []LocalCatalogParam
+}
+
+// LocalCatalogParam describes a parameter for a local action.
+type LocalCatalogParam struct {
+	Name        string
+	Type        string
+	Required    bool
+	Description string
+}
+
 // SkillHandler serves the dynamic skill catalog endpoint.
 type SkillHandler struct {
-	st         store.Store
-	vault      vault.Vault
-	adapterReg *adapters.Registry
-	logger     *slog.Logger
+	st               store.Store
+	vault            vault.Vault
+	adapterReg       *adapters.Registry
+	logger           *slog.Logger
+	localSvcProvider LocalServiceProvider
+}
+
+// SetLocalServiceProvider configures the local daemon service provider.
+func (h *SkillHandler) SetLocalServiceProvider(p LocalServiceProvider) {
+	h.localSvcProvider = p
 }
 
 func NewSkillHandler(
@@ -160,13 +197,12 @@ func (h *SkillHandler) writeCatalogOverview(buf *strings.Builder, ctx context.Co
 	buf.WriteString("# Your Clawvisor Service Catalog\n\n")
 
 	if len(entries) == 0 {
-		buf.WriteString("No services are currently activated.\n\n")
-		buf.WriteString("To activate a service, direct the user to the Clawvisor dashboard.\n")
-		return
+		buf.WriteString("No cloud services are currently activated.\n\n")
+		buf.WriteString("To activate a service, direct the user to the Clawvisor dashboard.\n\n")
+	} else {
+		buf.WriteString("_For detailed parameter docs, fetch `?service=<service_id>`._\n\n")
+		buf.WriteString("**Important:** When invoking any service, use the full `service:account` identifier (e.g. `google.gmail:personal`) as the `service` value in requests. Using just the service name (e.g. `google.gmail`) will fail if every entry has an account suffix.\n\n")
 	}
-
-	buf.WriteString("_For detailed parameter docs, fetch `?service=<service_id>`._\n\n")
-	buf.WriteString("**Important:** When invoking any service, use the full `service:account` identifier (e.g. `google.gmail:personal`) as the `service` value in requests. Using just the service name (e.g. `google.gmail`) will fail if every entry has an account suffix.\n\n")
 
 	for _, entry := range entries {
 		buf.WriteString(fmt.Sprintf("## %s\n", entry.baseID))
@@ -201,10 +237,102 @@ func (h *SkillHandler) writeCatalogOverview(buf *strings.Builder, ctx context.Co
 		}
 		buf.WriteString("\n")
 	}
+
+	// Append local daemon services if provider is configured.
+	if h.localSvcProvider != nil {
+		localServices, err := h.localSvcProvider.ActiveLocalServices(ctx, userID)
+		if err != nil {
+			h.logger.Warn("failed to fetch local services for catalog", "err", err)
+		} else if len(localServices) > 0 {
+			buf.WriteString("---\n\n")
+			buf.WriteString("# Local Services\n\n")
+			buf.WriteString("_These services run on your locally paired daemon(s). Each service can only be enabled on one daemon at a time._\n\n")
+
+			for _, svc := range localServices {
+				buf.WriteString(fmt.Sprintf("## %s\n", svc.Name))
+				if svc.Description != "" {
+					buf.WriteString(fmt.Sprintf("_%s_\n", svc.Description))
+				}
+				buf.WriteString(fmt.Sprintf("Service: `local.%s` (via %s)\n\n", svc.ServiceID, svc.DaemonName))
+
+				for _, action := range svc.Actions {
+					paramSig := compactLocalParamSig(action.Params)
+					desc := action.Description
+					if desc == "" {
+						desc = action.Name
+					}
+					buf.WriteString(fmt.Sprintf("- **%s**%s \u2014 %s\n", action.ID, paramSig, desc))
+				}
+				buf.WriteString("\n")
+			}
+		}
+	}
+}
+
+// writeLocalServiceDetail renders the detailed view for a single local service.
+func (h *SkillHandler) writeLocalServiceDetail(buf *strings.Builder, ctx context.Context, serviceID, userID string) {
+	if h.localSvcProvider == nil {
+		buf.WriteString(fmt.Sprintf("Service %q is not available in this deployment.\n", serviceID))
+		return
+	}
+	localServices, err := h.localSvcProvider.ActiveLocalServices(ctx, userID)
+	if err != nil {
+		buf.WriteString(fmt.Sprintf("Unable to load local service %q.\n", serviceID))
+		return
+	}
+	svcID := strings.TrimPrefix(serviceID, "local.")
+	var found *LocalCatalogService
+	for i := range localServices {
+		if localServices[i].ServiceID == svcID {
+			found = &localServices[i]
+			break
+		}
+	}
+	if found == nil {
+		buf.WriteString(fmt.Sprintf("Local service %q is not enabled or does not exist.\n", serviceID))
+		return
+	}
+
+	buf.WriteString(fmt.Sprintf("# %s\n", found.Name))
+	if found.Description != "" {
+		buf.WriteString(fmt.Sprintf("_%s_\n", found.Description))
+	}
+	buf.WriteString(fmt.Sprintf("Service: `local.%s` (via %s)\n\n", found.ServiceID, found.DaemonName))
+	buf.WriteString("_This service runs on a locally paired daemon._\n\n")
+
+	for _, action := range found.Actions {
+		desc := action.Description
+		if desc == "" {
+			desc = action.Name
+		}
+		buf.WriteString(fmt.Sprintf("## %s\n", action.ID))
+		buf.WriteString(fmt.Sprintf("%s\n", desc))
+		if len(action.Params) > 0 {
+			buf.WriteString("Parameters:\n")
+			for _, p := range action.Params {
+				reqTag := "optional"
+				if p.Required {
+					reqTag = "**required**"
+				}
+				extras := []string{p.Type, reqTag}
+				buf.WriteString(fmt.Sprintf("- `%s` (%s)\n", p.Name, strings.Join(extras, ", ")))
+				if p.Description != "" {
+					buf.WriteString(fmt.Sprintf("  %s\n", p.Description))
+				}
+			}
+		}
+		buf.WriteString("\n")
+	}
 }
 
 // writeServiceDetail renders the detailed view for a single service.
 func (h *SkillHandler) writeServiceDetail(buf *strings.Builder, ctx context.Context, serviceID string, entries []*catalogEntry, adapterMeta map[string]adapters.ServiceMetadata, userID string) {
+	// Check if this is a local service request.
+	if strings.HasPrefix(serviceID, "local.") {
+		h.writeLocalServiceDetail(buf, ctx, serviceID, userID)
+		return
+	}
+
 	// Find the matching entry.
 	var entry *catalogEntry
 	for _, e := range entries {
@@ -285,6 +413,22 @@ func (h *SkillHandler) isRestricted(ctx context.Context, userID string, entry *c
 
 // compactParamSig builds a compact inline parameter signature like "(to, subject, body?, in_reply_to?)".
 func compactParamSig(params []adapters.ParamMeta) string {
+	if len(params) == 0 {
+		return ""
+	}
+	parts := make([]string, len(params))
+	for i, p := range params {
+		if p.Required {
+			parts[i] = p.Name
+		} else {
+			parts[i] = p.Name + "?"
+		}
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// compactLocalParamSig builds a compact inline parameter signature for local service actions.
+func compactLocalParamSig(params []LocalCatalogParam) string {
 	if len(params) == 0 {
 		return ""
 	}
